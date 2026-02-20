@@ -8,6 +8,7 @@
 #include "core/digraph.h"
 #include "core/gomory_hu.h"
 #include "mip/HighsUserSeparator.h"
+#include "preprocess/reachability.h"
 #include "sep/sec_separator.h"
 #include "sep/separation_context.h"
 
@@ -21,9 +22,10 @@ HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, double frac_tol)
       num_edges_(prob.num_edges()),
       num_nodes_(prob.num_nodes()),
       frac_tol_(frac_tol),
-      int_tol_(0.0) {
-    // Read HiGHS's integrality tolerance for use in integral feasibility checks
-    highs_.getOptionValue("mip_feasibility_tolerance", int_tol_);
+      int_tol_(1e-6) {
+    // Integral feasibility: tight but not zero to avoid rejecting
+    // valid solutions due to floating-point noise in LP values.
+    // Fractional separation uses a looser tolerance (default 1e-2).
 }
 
 HiGHSBridge::~HiGHSBridge() {
@@ -46,6 +48,18 @@ void HiGHSBridge::build_formulation() {
 
     // Fix depot y variable to 1 via bounds (no extra row needed)
     col_lower[m + prob_.depot()] = 1.0;
+
+    // Fix unreachable nodes: demand-reachability preprocessing
+    if (prob_.capacity() > 0 && prob_.capacity() < 1e17) {
+        auto reachable = preprocess::demand_reachability(prob_);
+        for (int32_t i = 0; i < n; ++i) {
+            if (!reachable[i] && i != prob_.depot()) {
+                col_upper[m + i] = 0.0;
+                for (auto e : graph.incident_edges(i))
+                    col_upper[e] = 0.0;
+            }
+        }
+    }
 
     // Objective: max sum(profit_i * y_i) - sum(cost_e * x_e)
     // HiGHS minimizes: min sum(cost_e * x_e) - sum(profit_i * y_i)
@@ -111,6 +125,11 @@ void HiGHSBridge::install_separators() {
                const HighsMipSolver& mipsolver) {
             // Skip sub-MIPs: they have a different column space
             if (mipsolver.submip) return;
+
+            // Amortized separation: skip rounds to reduce overhead
+            int64_t call = separation_calls_++;
+            if (separation_interval_ > 1 && (call % separation_interval_) != 0)
+                return;
 
             const auto& sol = lpRelaxation.getSolution();
             const int32_t m = num_edges_;

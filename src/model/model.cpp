@@ -84,8 +84,13 @@ SolveResult Model::solve(const SolverOptions& options) {
     highs.setOptionValue("threads",
         static_cast<int>(std::thread::hardware_concurrency()));
 
-    // Forward all user options to HiGHS
+    // Intercept our custom options, forward the rest to HiGHS
+    int32_t separation_interval = 1;
     for (const auto& [key, value] : options) {
+        if (key == "separation_interval") {
+            separation_interval = std::stoi(value);
+            continue;
+        }
         auto status = highs.setOptionValue(key, value);
         if (status != HighsStatus::kOk) {
             std::cerr << "Warning: HiGHS rejected option " << key
@@ -94,6 +99,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     HiGHSBridge bridge(problem_, highs);
+    bridge.set_separation_interval(separation_interval);
 
     // Add separators
     bridge.add_separator(std::make_unique<sep::SECSeparator>());

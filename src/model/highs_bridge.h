@@ -37,6 +37,10 @@ class HiGHSBridge {
     int32_t x_offset() const { return 0; }
     int32_t y_offset() const { return num_edges_; }
 
+    /// Set separation skip interval: separate every N-th callback invocation.
+    /// 1 = every round (default), 2 = every other round, etc.
+    void set_separation_interval(int32_t interval) { separation_interval_ = interval; }
+
  private:
     /// Order the tour nodes by following edges from depot.
     std::vector<int32_t> order_tour(const std::vector<int32_t>& visited_nodes,
@@ -50,10 +54,14 @@ class HiGHSBridge {
     double int_tol_;    // violation tolerance for integral feasibility check
     std::vector<std::unique_ptr<sep::Separator>> separators_;
 
+    // Amortized separation: skip rounds to reduce overhead
+    int32_t separation_interval_ = 1;  // 1 = every round (no skipping)
+
     // Cut statistics (updated from callback)
     mutable std::map<std::string, SeparatorStats> separator_stats_;
     mutable int64_t total_cuts_ = 0;
     mutable int64_t separation_rounds_ = 0;
+    mutable int64_t separation_calls_ = 0;  // total callback invocations
 };
 
 }  // namespace cptp
