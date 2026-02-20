@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "core/digraph.h"
+#include "core/gomory_hu.h"
 #include "core/problem.h"
 #include "sep/sec_separator.h"
 #include "sep/rci_separator.h"
@@ -31,6 +33,33 @@ cptp::Problem make_small_problem() {
 
     prob.build(4, edges, costs, profits, demands, capacity, 0);
     return prob;
+}
+
+/// Build support graph and Gomory-Hu tree from LP solution.
+struct SupportData {
+    cptp::digraph graph;
+    std::vector<double> capacity;
+    std::unique_ptr<cptp::gomory_hu_tree> tree;
+};
+
+SupportData build_support(const cptp::Problem& prob,
+                          std::span<const double> x_values,
+                          double tol = 1e-6) {
+    const auto& g = prob.graph();
+    int32_t n = prob.num_nodes();
+    cptp::digraph_builder builder(n);
+    for (auto e : g.edges()) {
+        double xval = x_values[e];
+        if (xval > tol) {
+            int32_t u = g.edge_source(e);
+            int32_t v = g.edge_target(e);
+            builder.add_arc(u, v, xval);
+            builder.add_arc(v, u, xval);
+        }
+    }
+    auto [sg, cap] = builder.build();
+    auto tree = std::make_unique<cptp::gomory_hu_tree>(sg, cap, prob.depot());
+    return {std::move(sg), std::move(cap), std::move(tree)};
 }
 
 }  // namespace
@@ -65,6 +94,8 @@ TEST_CASE("SEC separator finds violated cuts on fractional solution", "[sec]") {
         }
     }
 
+    auto support = build_support(prob, x_values);
+
     cptp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
@@ -72,6 +103,7 @@ TEST_CASE("SEC separator finds violated cuts on fractional solution", "[sec]") {
         .x_offset = 0,
         .y_offset = m,
         .tol = 1e-6,
+        .flow_tree = support.tree.get(),
     };
 
     cptp::sep::SECSeparator sec;
@@ -105,6 +137,8 @@ TEST_CASE("SEC separator finds no cuts on integer feasible solution", "[sec]") {
         }
     }
 
+    auto support = build_support(prob, x_values);
+
     cptp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
@@ -112,6 +146,7 @@ TEST_CASE("SEC separator finds no cuts on integer feasible solution", "[sec]") {
         .x_offset = 0,
         .y_offset = m,
         .tol = 1e-6,
+        .flow_tree = support.tree.get(),
     };
 
     cptp::sep::SECSeparator sec;
@@ -143,6 +178,8 @@ TEST_CASE("RCI separator basic test", "[rci]") {
         }
     }
 
+    auto support = build_support(prob, x_values);
+
     cptp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
@@ -150,6 +187,7 @@ TEST_CASE("RCI separator basic test", "[rci]") {
         .x_offset = 0,
         .y_offset = m,
         .tol = 1e-6,
+        .flow_tree = support.tree.get(),
     };
 
     cptp::sep::RCISeparator rci;

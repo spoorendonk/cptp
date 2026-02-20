@@ -229,12 +229,11 @@ Problem load_tsplib(const std::filesystem::path& path) {
         demands.assign(dimension, 0.0);
     }
     // If profits were read from NODE_WEIGHT_SECTION, convert:
-    // node weights are costs (positive for depot, negative for customers).
-    // profit = -node_weight for customers, 0 for depot.
+    // node weights are costs (positive = cost, negative = profit).
+    // profit = -node_weight for all nodes, including depot.
+    // Depot's y variable is fixed to 1, so its profit acts as a constant offset.
     if (!profits.empty()) {
-        profits[depot] = 0.0;
         for (int i = 0; i < dimension; ++i) {
-            if (i == depot) continue;
             profits[i] = -profits[i];  // negate: negative weight → positive profit
         }
     }

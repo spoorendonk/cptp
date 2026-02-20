@@ -252,14 +252,12 @@ def main():
 
         # Compare objectives:
         # PathWyse obj = sum(arc_costs) + sum(node_weights) for visited nodes (including depot)
-        # Our obj      = sum(edge_costs) - sum(profits) where profit[depot] = 0
-        #              = sum(edge_costs) + sum(node_weights) for non-depot visited nodes
-        # So: our_obj = pw_obj - depot_weight
-        depot_weight = data["node_weights"][0]
+        # Our obj      = sum(edge_costs) - sum(profits) including depot profit
+        # Both now include depot weight, so objectives should match directly.
         match_str = "?"
         our_gap = cptp_result.get("gap", 100.0)
         if pw_result["obj"] is not None and cptp_result["obj"] is not None:
-            expected_our = pw_result["obj"] - depot_weight
+            expected_our = pw_result["obj"]
             if pw_result["status"] == "Optimal" and our_gap is not None and our_gap < 0.01:
                 # Both claim optimal — check match
                 if abs(cptp_result["obj"] - expected_our) < 1.0:

@@ -8,6 +8,7 @@
 #include "Highs.h"
 #include "core/problem.h"
 #include "core/solution.h"
+#include "sep/separation_context.h"
 #include "sep/separator.h"
 
 namespace cptp {
@@ -18,7 +19,8 @@ using SolverOptions = std::vector<std::pair<std::string, std::string>>;
 /// Wires the CPTP formulation and custom separators into HiGHS.
 class HiGHSBridge {
  public:
-    HiGHSBridge(const Problem& prob, Highs& highs);
+    HiGHSBridge(const Problem& prob, Highs& highs,
+                 double frac_tol = sep::kDefaultFracTol);
     ~HiGHSBridge();
 
     void add_separator(std::unique_ptr<sep::Separator> sep);
@@ -44,6 +46,8 @@ class HiGHSBridge {
     Highs& highs_;
     int32_t num_edges_;
     int32_t num_nodes_;
+    double frac_tol_;   // violation tolerance for fractional separation
+    double int_tol_;    // violation tolerance for integral feasibility check
     std::vector<std::unique_ptr<sep::Separator>> separators_;
 
     // Cut statistics (updated from callback)

@@ -2,7 +2,9 @@
 #include "model/highs_bridge.h"
 
 #include <iostream>
+#include <thread>
 
+#include "heuristic/warm_start.h"
 #include "sep/sec_separator.h"
 #include "sep/rci_separator.h"
 #include "sep/multistar_separator.h"
@@ -79,6 +81,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     Highs highs;
     // Our defaults (user options can override)
     highs.setOptionValue("presolve", "off");
+    highs.setOptionValue("threads",
+        static_cast<int>(std::thread::hardware_concurrency()));
 
     // Forward all user options to HiGHS
     for (const auto& [key, value] : options) {
@@ -99,6 +103,20 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     bridge.build_formulation();
     bridge.install_separators();
+
+    // Warm-start with greedy insertion heuristic
+    // Scale budget: ~1s for 50+ nodes, less for tiny instances
+    {
+        Timer ws_timer;
+        double budget_ms = std::min(500.0, std::max(10.0,
+            static_cast<double>(problem_.num_nodes()) * 10.0));
+        auto warm = heuristic::build_warm_start(problem_, budget_ms);
+        HighsSolution start;
+        start.value_valid = true;
+        start.col_value = std::move(warm);
+        highs.setSolution(start);
+        std::cerr << "Warm-start heuristic: " << ws_timer.elapsed_seconds() << "s\n";
+    }
 
     highs.run();
 

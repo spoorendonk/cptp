@@ -5,6 +5,8 @@
 #include <cmath>
 #include <mutex>
 
+#include "core/digraph.h"
+#include "core/gomory_hu.h"
 #include "mip/HighsUserSeparator.h"
 #include "sep/sec_separator.h"
 #include "sep/separation_context.h"
@@ -13,11 +15,16 @@
 
 namespace cptp {
 
-HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs)
+HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, double frac_tol)
     : prob_(prob),
       highs_(highs),
       num_edges_(prob.num_edges()),
-      num_nodes_(prob.num_nodes()) {}
+      num_nodes_(prob.num_nodes()),
+      frac_tol_(frac_tol),
+      int_tol_(0.0) {
+    // Read HiGHS's integrality tolerance for use in integral feasibility checks
+    highs_.getOptionValue("mip_feasibility_tolerance", int_tol_);
+}
 
 HiGHSBridge::~HiGHSBridge() {
     HighsUserSeparator::clearCallback();
@@ -36,6 +43,9 @@ void HiGHSBridge::build_formulation() {
     std::vector<double> col_cost(total_vars, 0.0);
     std::vector<double> col_lower(total_vars, 0.0);
     std::vector<double> col_upper(total_vars, 1.0);
+
+    // Fix depot y variable to 1 via bounds (no extra row needed)
+    col_lower[m + prob_.depot()] = 1.0;
 
     // Objective: max sum(profit_i * y_i) - sum(cost_e * x_e)
     // HiGHS minimizes: min sum(cost_e * x_e) - sum(profit_i * y_i)
@@ -73,14 +83,7 @@ void HiGHSBridge::build_formulation() {
                        indices.data(), values.data());
     }
 
-    // 2. Depot must be visited: y_depot = 1
-    {
-        int idx = m + prob_.depot();
-        double val = 1.0;
-        highs_.addRow(1.0, 1.0, 1, &idx, &val);
-    }
-
-    // 3. Capacity constraint: sum(demand_i * y_i) <= Q
+    // 2. Capacity constraint: sum(demand_i * y_i) <= Q
     if (prob_.capacity() > 0 && prob_.capacity() < 1e17) {
         std::vector<int> indices;
         std::vector<double> values;
@@ -118,13 +121,32 @@ void HiGHSBridge::install_separators() {
             std::vector<double> y_vals(sol.col_value.begin() + m,
                                         sol.col_value.begin() + m + n);
 
+            // Build support graph once for all separators
+            const auto& graph = prob_.graph();
+            const double graph_tol = 1e-6;  // for edge inclusion in support graph
+            digraph_builder builder(n);
+            for (auto e : graph.edges()) {
+                double xval = x_vals[e];
+                if (xval > graph_tol) {
+                    int32_t u = graph.edge_source(e);
+                    int32_t v = graph.edge_target(e);
+                    builder.add_arc(u, v, xval);
+                    builder.add_arc(v, u, xval);
+                }
+            }
+            auto [support_graph, capacity] = builder.build();
+
+            // Build Gomory-Hu tree: n-1 max-flows instead of 3*n
+            gomory_hu_tree flow_tree(support_graph, capacity, prob_.depot());
+
             sep::SeparationContext ctx{
                 .problem = prob_,
                 .x_values = std::span(x_vals.data(), static_cast<size_t>(m)),
                 .y_values = std::span(y_vals.data(), static_cast<size_t>(n)),
                 .x_offset = x_offset(),
                 .y_offset = y_offset(),
-                .tol = 1e-6,
+                .tol = frac_tol_,
+                .flow_tree = &flow_tree,
             };
 
             // Run all separators in parallel, timing each one
@@ -170,13 +192,31 @@ void HiGHSBridge::install_separators() {
             const int32_t n = num_nodes_;
             if (static_cast<int32_t>(sol.size()) < m + n) return true;
 
+            const auto& graph = prob_.graph();
+            const double graph_tol = 1e-6;  // for edge inclusion in support graph
+
+            // Build support graph and Gomory-Hu tree for feasibility check
+            digraph_builder builder(n);
+            for (auto e : graph.edges()) {
+                double xval = sol[e];
+                if (xval > graph_tol) {
+                    int32_t u = graph.edge_source(e);
+                    int32_t v = graph.edge_target(e);
+                    builder.add_arc(u, v, xval);
+                    builder.add_arc(v, u, xval);
+                }
+            }
+            auto [support_graph, capacity] = builder.build();
+            gomory_hu_tree flow_tree(support_graph, capacity, prob_.depot());
+
             sep::SeparationContext ctx{
                 .problem = prob_,
                 .x_values = std::span(sol.data(), static_cast<size_t>(m)),
                 .y_values = std::span(sol.data() + m, static_cast<size_t>(n)),
                 .x_offset = x_offset(),
                 .y_offset = y_offset(),
-                .tol = 1e-6,
+                .tol = int_tol_,
+                .flow_tree = &flow_tree,
             };
 
             // Only check SEC — these are the lazy constraints
