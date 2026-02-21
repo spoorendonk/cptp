@@ -1,4 +1,4 @@
-# Patch script for HiGHS: add HighsUserSeparator
+# Patch script for HiGHS: add HighsUserSeparator + HighsUserPropagator
 # Called by FetchContent PATCH_COMMAND
 # Idempotent: safe to run multiple times.
 
@@ -17,6 +17,12 @@ file(COPY "${PATCH_DIR}/HighsUserSeparator.h"
 file(COPY "${PATCH_DIR}/HighsUserSeparator.cpp"
      DESTINATION "${MIP_DIR}/")
 
+# Copy HighsUserPropagator.h and .cpp
+file(COPY "${PATCH_DIR}/HighsUserPropagator.h"
+     DESTINATION "${MIP_DIR}/")
+file(COPY "${PATCH_DIR}/HighsUserPropagator.cpp"
+     DESTINATION "${MIP_DIR}/")
+
 # ── 1. Patch cmake/sources.cmake: add HighsUserSeparator to source lists ──
 file(READ "${SOURCE_DIR}/cmake/sources.cmake" SOURCES_CONTENT)
 
@@ -25,19 +31,34 @@ if(_src_found EQUAL -1)
     # Add .cpp after HighsModkSeparator.cpp
     string(REPLACE
       "${SRC_PREFIX}/HighsModkSeparator.cpp"
-      "${SRC_PREFIX}/HighsModkSeparator.cpp\n    ${SRC_PREFIX}/HighsUserSeparator.cpp"
+      "${SRC_PREFIX}/HighsModkSeparator.cpp\n    ${SRC_PREFIX}/HighsUserSeparator.cpp\n    ${SRC_PREFIX}/HighsUserPropagator.cpp"
       SOURCES_CONTENT "${SOURCES_CONTENT}")
 
     # Add .h after HighsModkSeparator.h
     string(REPLACE
       "${SRC_PREFIX}/HighsModkSeparator.h"
-      "${SRC_PREFIX}/HighsModkSeparator.h\n    ${SRC_PREFIX}/HighsUserSeparator.h"
+      "${SRC_PREFIX}/HighsModkSeparator.h\n    ${SRC_PREFIX}/HighsUserSeparator.h\n    ${SRC_PREFIX}/HighsUserPropagator.h"
       SOURCES_CONTENT "${SOURCES_CONTENT}")
 
     file(WRITE "${SOURCE_DIR}/cmake/sources.cmake" "${SOURCES_CONTENT}")
-    message(STATUS "Added HighsUserSeparator to cmake/sources.cmake")
+    message(STATUS "Added HighsUserSeparator + HighsUserPropagator to cmake/sources.cmake")
 else()
-    message(STATUS "HighsUserSeparator already in cmake/sources.cmake, skipping")
+    # HighsUserSeparator present; check if HighsUserPropagator also present
+    string(FIND "${SOURCES_CONTENT}" "HighsUserPropagator" _prop_found)
+    if(_prop_found EQUAL -1)
+        string(REPLACE
+          "${SRC_PREFIX}/HighsUserSeparator.cpp"
+          "${SRC_PREFIX}/HighsUserSeparator.cpp\n    ${SRC_PREFIX}/HighsUserPropagator.cpp"
+          SOURCES_CONTENT "${SOURCES_CONTENT}")
+        string(REPLACE
+          "${SRC_PREFIX}/HighsUserSeparator.h"
+          "${SRC_PREFIX}/HighsUserSeparator.h\n    ${SRC_PREFIX}/HighsUserPropagator.h"
+          SOURCES_CONTENT "${SOURCES_CONTENT}")
+        file(WRITE "${SOURCE_DIR}/cmake/sources.cmake" "${SOURCES_CONTENT}")
+        message(STATUS "Added HighsUserPropagator to cmake/sources.cmake")
+    else()
+        message(STATUS "HighsUserSeparator + HighsUserPropagator already in cmake/sources.cmake, skipping")
+    endif()
 endif()
 
 # ── 2. Patch HighsSeparation.cpp: include + instantiate + lazy constraint at non-root ──
@@ -125,4 +146,28 @@ if(_found2 EQUAL -1)
     message(STATUS "Applied lazy constraint + incumbent feasibility patch to HighsMipSolverData.cpp")
 else()
     message(STATUS "HighsMipSolverData.cpp patch already applied, skipping")
+endif()
+
+# ── 4. Patch HighsSearch.cpp: add HighsUserPropagator call after reduced-cost fixing ──
+file(READ "${MIP_DIR}/HighsSearch.cpp" CONTENT3)
+
+string(FIND "${CONTENT3}" "HighsUserPropagator" _found3)
+if(_found3 EQUAL -1)
+    # Add include for HighsUserPropagator.h
+    string(REPLACE
+      "#include \"mip/HighsSearch.h\""
+      "#include \"mip/HighsSearch.h\"\n#include \"mip/HighsUserPropagator.h\""
+      CONTENT3 "${CONTENT3}")
+
+    # Insert propagator call after HighsRedcostFixing::propagateRedCost
+    # and before localdom.propagate()
+    string(REPLACE
+      "HighsRedcostFixing::propagateRedCost(mipsolver, localdom, *lp);\n            localdom.propagate();"
+      "HighsRedcostFixing::propagateRedCost(mipsolver, localdom, *lp);\n            HighsUserPropagator::propagate(localdom, mipsolver, *lp);\n            localdom.propagate();"
+      CONTENT3 "${CONTENT3}")
+
+    file(WRITE "${MIP_DIR}/HighsSearch.cpp" "${CONTENT3}")
+    message(STATUS "Applied HighsUserPropagator patch to HighsSearch.cpp")
+else()
+    message(STATUS "HighsSearch.cpp propagator patch already applied, skipping")
 endif()

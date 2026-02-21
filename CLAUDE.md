@@ -31,7 +31,6 @@ cmake --build build -j$(nproc)
 - GCC 14, C++23
 - CMake 3.25+
 - `apt install libtbb-dev` (TBB 2021.11)
-- melon: git submodule in `third_party/melon`
 - HiGHS: fetched via CMake FetchContent (v1.10.0)
 - Catch2: fetched via CMake FetchContent (v3.7.1)
 
@@ -39,10 +38,10 @@ cmake --build build -j$(nproc)
 
 ```
 src/core/        — Problem definition, IO parsers (TSPLIB, PathWyse), Dinitz max-flow, Gomory-Hu tree
+src/preprocess/  — Demand-reachability and edge elimination via capacity-aware labeling
 src/sep/         — Solver-independent separators (SEC, RCI, Multistar, RGLM, Comb)
-src/model/       — HiGHS integration (Model, HiGHSBridge)
+src/model/       — HiGHS integration (Model, HiGHSBridge, propagator)
 src/heuristic/   — Warm-start construction + local search
-src/preprocess/  — Demand-reachability and edge elimination
 src/cli/         — CLI tool (cptp-solve)
 src/util/        — Utilities (Timer)
 python/          — nanobind Python bindings
@@ -52,9 +51,9 @@ docs/            — Algorithm documentation
 
 ## Key types
 
-- `cptp::Problem` — CPTP instance using `melon::static_digraph`; has `source()`, `target()`, `is_tour()`
+- `cptp::Problem` — CPTP instance using `static_graph` (own CSR graph); has `source()`, `target()`, `is_tour()`
 - `cptp::Model` — User-facing solver interface; `set_source()`/`set_target()` for paths, `set_depot()` for tours
-- `cptp::HiGHSBridge` — Wires separators into HiGHS MIP
+- `cptp::HiGHSBridge` — Wires separators + domain propagator into HiGHS MIP
 - `cptp::sep::Separator` — Base class for cut separators
 - `cptp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow (path-aware)
 - `cptp::gomory_hu_tree` — Gusfield's algorithm, shared across separators

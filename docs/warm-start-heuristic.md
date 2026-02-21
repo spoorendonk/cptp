@@ -57,10 +57,13 @@ Time budget: `min(500ms, num_nodes * 10ms)`
 In `Model::solve()` (model.cpp):
 
 ```cpp
-auto warm = heuristic::build_warm_start(problem_, budget_ms);
+auto warm_start = heuristic::build_warm_start(problem_, budget_ms);
+// warm_start.objective = travel_cost - collected_profit
+// warm_start.col_values = solution vector (edges + nodes)
+
 HighsSolution start;
 start.value_valid = true;
-start.col_value = std::move(warm);
+start.col_value = std::move(warm_start.col_values);
 highs.setSolution(start);
 ```
 

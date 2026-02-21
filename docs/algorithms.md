@@ -33,47 +33,54 @@ Undirected edge formulation following Jepsen et al. (2014):
 4. Subtour elimination (separated dynamically)
 5. Capacity inequalities (separated dynamically)
 
-## Separation (Cut Generation)
-
-Three families of cuts are separated dynamically via HiGHS MIP callbacks. All separators share a **Gomory-Hu tree** built once per separation round, avoiding redundant max-flow computations.
-
-### Subtour Elimination Constraints (SEC)
-
-For each customer t, check if the min-cut between source and t in the fractional support graph violates the SEC. The Gomory-Hu tree (rooted at source) provides all pairwise min-cuts efficiently.
-
-- **Tour**: `x(delta(S)) >= 2 * y_t` for any S not containing the depot
-- **Path**: `x(delta(S)) >= 2 * y_t` if S does not contain the path target (path must enter and leave S); `x(delta(S)) >= y_t` if S contains the path target (path enters S and terminates)
-
-Uses Dinitz max-flow to find violated cuts. When the sparser inside form has fewer nonzeros, a degree-substituted variant is used instead of the cut form.
-
-### Rounded Capacity Inequalities (RCI)
-
-For a set S of customers:
+## Solver Pipeline
 
 ```
-x(delta(S)) >= 2 * ceil(d(S) / Q)
+Load instance
+    |
+    v
+Preprocessing (parallel via TBB)
+    |-- Forward labeling (ESPPRC bounds from source)
+    |-- Backward labeling (bounds from target; same as forward for tour)
+    '-- Warm-start heuristic (greedy + local search)
+    |
+    v
+Build MIP formulation
+    |-- Edge variables x_e, node variables y_i
+    |-- Degree constraints, capacity constraint
+    '-- Fix eliminated edges to zero (using labeling bounds + warm-start UB)
+    |
+    v
+Install HiGHS callbacks
+    |-- User separator   --> separation.md
+    |-- Feasibility check (SEC on incumbents)
+    '-- Domain propagator --> domain-propagator.md
+    |
+    v
+HiGHS MIP solve
+    |
+    v
+Extract result (tour/path, objective, bound, gap)
 ```
 
-where `d(S)` is the total demand of S. Strengthens the LP relaxation by accounting for the number of vehicle trips needed to serve S.
+Orchestrated by `Model::solve()` in `src/model/model.cpp`.
 
-### Multistar Inequalities
+## Cut Separation
 
-Strengthens capacity cuts using knapsack-like reasoning on individual edge contributions. Uses demand-weighted coefficients to tighten the bound.
+Five families of cutting planes are separated dynamically: SEC, RCI, Multistar/GLM,
+RGLM, and Comb. All cuts use CPTP-valid formulations (Jepsen et al. 2014) that
+account for optional nodes. A shared Gomory-Hu tree avoids redundant max-flow
+computation.
 
-### Cut Management
+See [separation.md](separation.md) for full details.
 
-- Cuts are sorted by violation magnitude; only the top-k (default 3) per separator per round are added (Jepsen et al. recommend keeping only the most-violated cuts)
-- Default fractional separation tolerance is 0.1 (Jepsen et al. (2008) found 0.4 optimal with CPLEX's built-in cuts; HiGHS needs a lower threshold since it has fewer built-in cutting planes)
+## Domain Propagator
 
-## Gomory-Hu Tree
+A custom propagator injected into HiGHS via `HighsUserPropagator`. Uses ESPPRC
+labeling bounds to fix edge variables to zero when the upper bound tightens or
+edges are fixed by branching.
 
-Implements **Gusfield's simplified algorithm** to compute all pairwise min-cuts with only n-1 max-flow calls (instead of O(n^2)). The tree is built once per separation round and shared across all three separators.
-
-Each max-flow call uses the **Dinitz algorithm** (O(V^2 E)) on the fractional support graph.
-
-**References**:
-- Gusfield, D. (1990). Very simple methods for all pairs network flow analysis. *SIAM Journal on Computing*, 19(1), 143-155.
-- Dinitz, Y. (1970). Algorithm for solution of a problem of maximum flow in a network with power estimation. *Soviet Mathematics Doklady*, 11, 1277-1280.
+See [domain-propagator.md](domain-propagator.md) for full details.
 
 ## Preprocessing
 

@@ -49,6 +49,18 @@ class HiGHSBridge {
     /// Set upper bound for edge elimination preprocessing.
     void set_upper_bound(double ub) { upper_bound_ = ub; }
 
+    /// Set pre-computed labeling bounds for edge elimination and propagation.
+    /// f = forward bounds (source → v), b = backward bounds (v → target).
+    /// correction = profit(source) if source==target (tour), 0 if source!=target (path).
+    void set_labeling_bounds(std::vector<double> f, std::vector<double> b, double correction);
+
+    /// Set all-pairs labeling bounds for stronger domain propagation (Trigger B).
+    /// dist is a flat n×n matrix: d(s,v) = dist[s*n + v].
+    void set_all_pairs_bounds(std::vector<double> dist);
+
+    /// Install domain propagator that fixes edges during B&C based on labeling bounds.
+    void install_propagator();
+
  private:
     /// Order the visited nodes by following edges from source.
     std::vector<int32_t> order_path(const std::vector<int32_t>& visited_nodes,
@@ -66,6 +78,21 @@ class HiGHSBridge {
     int32_t separation_interval_ = 1;  // 1 = every round (no skipping)
     int32_t max_cuts_per_sep_ = 3;     // max cuts per separator per round (0 = unlimited)
     double upper_bound_ = std::numeric_limits<double>::infinity();
+
+    // Labeling bounds for edge elimination and propagation
+    std::vector<double> fwd_bounds_;   // f[v]: forward bounds (source → v)
+    std::vector<double> bwd_bounds_;   // b[v]: backward bounds (v → target)
+    double correction_ = 0.0;         // profit(source) if tour, 0 if path
+
+    // All-pairs labeling bounds for stronger Trigger B propagation
+    std::vector<double> all_pairs_;    // flat n×n: d(s,v) = all_pairs_[s*n+v]
+
+    // Propagator statistics (shared with callback lambda)
+    std::shared_ptr<int64_t> propagator_fixings_;
+    std::shared_ptr<int64_t> sweep_fixings_;
+    std::shared_ptr<int64_t> chain_fixings_;
+    std::shared_ptr<int64_t> ub_improvements_;
+    std::shared_ptr<int64_t> propagator_calls_;
 
     // Cut statistics (updated from callback)
     mutable std::map<std::string, SeparatorStats> separator_stats_;
