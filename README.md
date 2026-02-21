@@ -42,13 +42,13 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release -DCPTP_BUILD_PYTHON=ON
 cmake --build build -j$(nproc)
 ```
 
-## Usage
+## CLI Usage
 
 ```bash
-./build/cptp-solve <instance> [--source <node>] [--target <node>] [--time_limit <sec>] [--threads <n>]
+./build/cptp-solve <instance> [--source <node>] [--target <node>] [--<highs_option> <value> ...]
 ```
 
-Accepts TSPLIB (`.vrp`, `.sppcc`) and PathWyse (`.txt`) instance formats. All additional options are forwarded to HiGHS.
+Accepts TSPLIB (`.vrp`, `.sppcc`) and PathWyse (`.txt`) instance formats. All options beyond `--source`/`--target` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
 
 When `source != target`, the solver uses an open s-t path formulation (degree 1 at source/target, degree 2 at intermediates). When `source == target` (default), the standard tour formulation is used.
 
@@ -58,12 +58,120 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 # Tour (closed loop from depot)
 ./build/cptp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
 
-# s-t path (open path from node 0 to node 3)
+# s-t path (source/target read from file)
 ./build/cptp-solve tests/data/tiny4_path.txt
 
-# Override source/target via CLI
+# Override source/target via CLI (turns a tour instance into a path)
 ./build/cptp-solve tests/data/tiny4.txt --source 0 --target 3
+
+# Suppress HiGHS log output
+./build/cptp-solve tests/data/tiny4.txt --output_flag false
 ```
+
+### Instance formats
+
+**PathWyse `.txt`** (used by tests):
+
+```
+4 6               # num_nodes num_edges
+0 1 10            # u v cost  (repeated for each edge)
+0 2 8
+0 3 12
+1 2 6
+1 3 7
+2 3 5
+7                 # capacity Q
+0 3               # source target (optional; omit or use "0 0" for tour)
+```
+
+Node profits and demands are read from the same format (see `src/core/io.cpp` for full spec). **TSPLIB `.sppcc`/`.vrp`** files are also supported with the standard `DEPOT_SECTION` (always treated as tour).
+
+## C++ API
+
+Link against `cptp_model` (which pulls in `cptp_core` and `cptp_sep` transitively):
+
+```cmake
+# In your CMakeLists.txt
+add_subdirectory(path/to/rcspp-bac)
+target_link_libraries(my_app PRIVATE cptp_model)
+```
+
+### Solving a tour (closed loop)
+
+```cpp
+#include "model/model.h"
+
+cptp::Model model;
+
+// Undirected graph: 4 nodes, 6 edges
+std::vector<cptp::Edge> edges = {
+    {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+};
+std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+model.set_graph(4, edges, costs);
+
+model.set_depot(0);  // closed tour from node 0
+model.set_profits({0.0, 20.0, 15.0, 10.0});
+model.add_capacity_resource({0.0, 3.0, 4.0, 2.0}, /*capacity=*/7.0);
+
+auto result = model.solve({{"time_limit", "60"}});
+if (result.has_solution()) {
+    // result.tour = ordered node sequence, e.g. [0, 1, 3, 0]
+    // result.objective = travel_cost - collected_profit
+}
+```
+
+### Solving an s-t path (open)
+
+```cpp
+#include "model/model.h"
+
+cptp::Model model;
+
+std::vector<cptp::Edge> edges = {
+    {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+};
+std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+model.set_graph(4, edges, costs);
+
+// source != target → path mode (degree 1 at endpoints, degree 2 at intermediates)
+model.set_source(0);
+model.set_target(3);
+
+model.set_profits({0.0, 20.0, 15.0, 10.0});
+model.add_capacity_resource({0.0, 3.0, 4.0, 2.0}, /*capacity=*/7.0);
+
+auto result = model.solve({{"time_limit", "60"}, {"output_flag", "false"}});
+if (result.has_solution()) {
+    // result.tour = [source, ..., target], e.g. [0, 1, 3]
+    // result.tour.front() == 0, result.tour.back() == 3
+}
+```
+
+### Loading from file
+
+```cpp
+#include "core/io.h"
+#include "model/model.h"
+
+auto prob = cptp::io::load("instance.txt");  // reads source/target from file
+
+cptp::Model model;
+model.set_problem(std::move(prob));
+auto result = model.solve({{"time_limit", "120"}});
+```
+
+### SolveResult fields
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | `Status` | `Optimal`, `Feasible`, `TimeLimit`, `Infeasible`, `Error` |
+| `objective` | `double` | `travel_cost - collected_profit` |
+| `bound` | `double` | Best dual bound |
+| `gap` | `double` | Relative MIP gap (0.0 = proven optimal) |
+| `tour` | `vector<int32_t>` | Ordered node sequence (path or tour) |
+| `time_seconds` | `double` | Wall-clock solve time |
+| `nodes` | `int64_t` | Branch-and-bound nodes explored |
 
 ## Tests
 
