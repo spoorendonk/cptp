@@ -21,7 +21,7 @@ def test_model_basic():
     result = model.solve([("time_limit", "30")])
 
     assert result.has_solution()
-    assert result.objective >= 0.0
+    assert result.objective <= 0.0  # objective = travel_cost - profit, negative is good
     assert len(result.tour) > 0
 
 
@@ -42,4 +42,4 @@ def test_model_negative_costs():
     result = model.solve([("time_limit", "30")])
 
     assert result.has_solution()
-    assert result.objective > 0.0
+    assert result.objective < 0.0  # negative costs make the objective more negative

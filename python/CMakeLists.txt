@@ -1,6 +1,5 @@
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
-
 if(NOT SKBUILD)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
     include(FetchContent)
     FetchContent_Declare(nanobind
         GIT_REPOSITORY https://github.com/wjakob/nanobind.git
@@ -8,6 +7,7 @@ if(NOT SKBUILD)
     )
     FetchContent_MakeAvailable(nanobind)
 else()
+    find_package(Python REQUIRED COMPONENTS Interpreter Development.Module)
     find_package(nanobind CONFIG REQUIRED)
 endif()
 

@@ -91,8 +91,8 @@ NB_MODULE(_rcspp_bac, m) {
         .def("set_problem", &rcspp::Model::set_problem, "problem"_a)
         .def("problem", &rcspp::Model::problem, nb::rv_policy::reference_internal)
         .def("set_graph", [](rcspp::Model& self, int32_t n,
-                              nb::ndarray<int32_t, nb::shape<nb::any, 2>> edges,
-                              nb::ndarray<double, nb::shape<nb::any>> costs) {
+                              nb::ndarray<int32_t, nb::shape<-1, 2>> edges,
+                              nb::ndarray<double, nb::shape<-1>> costs) {
             auto e_view = edges.view();
             auto c_view = costs.view();
             int32_t num_edges = static_cast<int32_t>(edges.shape(0));
@@ -109,13 +109,13 @@ NB_MODULE(_rcspp_bac, m) {
         .def("set_target", &rcspp::Model::set_target)
         .def("set_depot", &rcspp::Model::set_depot)
         .def("set_profits", [](rcspp::Model& self,
-                                nb::ndarray<double, nb::shape<nb::any>> profits) {
+                                nb::ndarray<double, nb::shape<-1>> profits) {
             auto view = profits.view();
             std::vector<double> vec(view.data(), view.data() + profits.shape(0));
             self.set_profits(vec);
         }, "profits"_a)
         .def("add_capacity_resource", [](rcspp::Model& self,
-                                          nb::ndarray<double, nb::shape<nb::any>> demands,
+                                          nb::ndarray<double, nb::shape<-1>> demands,
                                           double limit) {
             auto view = demands.view();
             std::vector<double> vec(view.data(), view.data() + demands.shape(0));
