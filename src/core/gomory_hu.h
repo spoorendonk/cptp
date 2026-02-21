@@ -52,6 +52,12 @@ class gomory_hu_tree {
         std::vector<bool> on_source_side;  // true = depot/root side
     };
 
+    /// Lightweight reference to a stored cut (no copy of cut_side).
+    struct CutRef {
+        int32_t node;   // GH tree node whose edge defines this cut
+        double weight;  // cut value
+    };
+
     /// Return the min-cut separating target from root.
     /// Walks the tree path from target to root, finds the bottleneck.
     CutInfo min_cut(int32_t target) const {
@@ -81,6 +87,29 @@ class gomory_hu_tree {
 
         return {min_weight, std::move(root_side)};
     }
+
+    /// Return all cuts along the path from target to root.
+    /// Each CutRef identifies a GH tree node whose stored cut_side
+    /// defines the partition. Returns O(depth) candidates with zero
+    /// additional max-flow cost.
+    std::vector<CutRef> all_cuts_on_path(int32_t target) const {
+        std::vector<CutRef> cuts;
+        int32_t v = target;
+        while (v != root_) {
+            cuts.push_back({v, weight_[v]});
+            v = parent_[v];
+        }
+        return cuts;
+    }
+
+    /// Get the cut partition for a given GH tree node.
+    /// Returns true for nodes on the root/depot side (i.e., NOT on
+    /// the node's source side in the original max-flow).
+    bool on_root_side(int32_t cut_node, int32_t query_node) const {
+        return !cut_side_[cut_node][query_node];
+    }
+
+    int32_t num_nodes() const { return n_; }
 
  private:
     int32_t root_;
