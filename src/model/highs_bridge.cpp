@@ -436,7 +436,7 @@ void HiGHSBridge::install_propagator() {
             // ── Trigger B: Fixed edge x_(a,i) = 1 → chained bounds ──
             const auto& apd = *ap;
             const bool have_all_pairs = !apd.empty();
-            const int32_t depot = prob.depot();
+            const int32_t depot = prob.source();
 
             for (int32_t e = 0; e < m; ++e) {
                 if (proc[e]) continue;
