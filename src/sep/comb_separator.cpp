@@ -1,7 +1,6 @@
 #include "sep/comb_separator.h"
 
 #include <algorithm>
-#include <cmath>
 #include <vector>
 
 #include "core/problem.h"
@@ -9,7 +8,6 @@
 namespace cptp::sep {
 
 std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
-    return {};  // DISABLED: comb cuts need validation for CPTP
     const auto& prob = ctx.problem;
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
@@ -18,117 +16,148 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
 
     std::vector<Cut> cuts;
 
-    // BFS from depot in the support graph to find the "handle" set
-    std::vector<bool> in_handle(n, false);
-    std::vector<int32_t> queue;
-    queue.push_back(depot);
-    in_handle[depot] = true;
+    // Try two BFS thresholds for handle construction.
+    for (double threshold : {0.5, 0.3}) {
+        // BFS from depot to find handle set H.
+        std::vector<bool> in_handle(n, false);
+        std::vector<int32_t> queue;
+        queue.push_back(depot);
+        in_handle[depot] = true;
 
-    for (size_t qi = 0; qi < queue.size(); ++qi) {
-        int32_t u = queue[qi];
-        for (auto e : graph.incident_edges(u)) {
-            int32_t v = graph.other_endpoint(e, u);
-            if (!in_handle[v] && ctx.x_values[e] > 0.5 + tol) {
-                in_handle[v] = true;
-                queue.push_back(v);
+        for (size_t qi = 0; qi < queue.size(); ++qi) {
+            int32_t u = queue[qi];
+            for (auto e : graph.incident_edges(u)) {
+                int32_t v = graph.other_endpoint(e, u);
+                if (!in_handle[v] && ctx.x_values[e] > threshold) {
+                    in_handle[v] = true;
+                    queue.push_back(v);
+                }
             }
         }
-    }
 
-    // Find teeth: edges with fractional x crossing the handle boundary
-    struct Tooth {
-        int32_t inside;
-        int32_t outside;
-        int32_t edge;
-        double x_val;
-    };
-    std::vector<Tooth> teeth;
+        int32_t handle_size = static_cast<int32_t>(queue.size());
+        if (handle_size < 2 || handle_size >= n) continue;
 
-    for (auto e : graph.edges()) {
-        double xval = ctx.x_values[e];
-        if (xval < tol || xval > 1.0 - tol) continue;
+        // Find candidate teeth: edges crossing the handle boundary.
+        // Each tooth T_i = {u_i, v_i} with u_i in H, v_i not in H.
+        // Contribution to violation: x_e - y_{v_i}.
+        struct Tooth {
+            int32_t inside;
+            int32_t outside;
+            int32_t edge;
+            double contrib;
+        };
+        std::vector<Tooth> teeth;
 
-        int32_t u = graph.edge_source(e);
-        int32_t v = graph.edge_target(e);
+        for (auto e : graph.edges()) {
+            double xval = ctx.x_values[e];
+            if (xval < tol) continue;
 
-        if (in_handle[u] && !in_handle[v]) {
-            teeth.push_back({u, v, e, xval});
-        } else if (in_handle[v] && !in_handle[u]) {
-            teeth.push_back({v, u, e, xval});
+            int32_t u = graph.edge_source(e);
+            int32_t v = graph.edge_target(e);
+
+            int32_t ins = -1, out = -1;
+            if (in_handle[u] && !in_handle[v]) {
+                ins = u;
+                out = v;
+            } else if (in_handle[v] && !in_handle[u]) {
+                ins = v;
+                out = u;
+            } else {
+                continue;
+            }
+
+            teeth.push_back({ins, out, e, xval - ctx.y_values[out]});
         }
-    }
 
-    // Sort teeth by violation potential (lowest x-value = most violated)
-    std::sort(teeth.begin(), teeth.end(),
-              [](const Tooth& a, const Tooth& b) { return a.x_val < b.x_val; });
+        // Sort by contribution descending (most violating first).
+        std::sort(teeth.begin(), teeth.end(),
+                  [](const Tooth& a, const Tooth& b) {
+                      return a.contrib > b.contrib;
+                  });
 
-    if (teeth.size() < 3) return cuts;
+        // Greedy selection: no shared inside or outside nodes.
+        std::vector<bool> used_inside(n, false);
+        std::vector<bool> used_outside(n, false);
+        std::vector<Tooth> selected;
 
-    // Select non-overlapping teeth
-    std::vector<bool> used_outside(n, false);
-    std::vector<Tooth> selected;
+        for (const auto& tooth : teeth) {
+            if (used_inside[tooth.inside] || used_outside[tooth.outside])
+                continue;
+            selected.push_back(tooth);
+            used_inside[tooth.inside] = true;
+            used_outside[tooth.outside] = true;
+        }
 
-    for (const auto& tooth : teeth) {
-        if (used_outside[tooth.outside]) continue;
-        selected.push_back(tooth);
-        used_outside[tooth.outside] = true;
-    }
+        // Need >= 3 teeth, odd count.
+        if (selected.size() < 3) continue;
+        size_t t = selected.size();
+        if (t % 2 == 0) t--;
+        selected.resize(t);
 
-    if (selected.size() >= 3) {
-        size_t k = selected.size();
-        if (k % 2 == 0) k--;
-        selected.resize(k);
-
+        // Evaluate: x(E(H)) + Σ x_{tooth_i} - Σ_{j∈H} y_j - Σ y_{outside_i}
         double lhs = 0.0;
 
-        // x(delta(H)): edges crossing handle boundary
         for (auto e : graph.edges()) {
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);
-            if (in_handle[u] != in_handle[v]) {
+            if (in_handle[u] && in_handle[v]) {
                 lhs += ctx.x_values[e];
             }
         }
 
-        // x(delta(T_i)): tooth edges
         for (const auto& tooth : selected) {
             lhs += ctx.x_values[tooth.edge];
         }
 
-        double rhs = std::ceil(3.0 * static_cast<double>(k) / 2.0);
-
-        if (lhs < rhs - tol) {
-            Cut cut;
-
-            // Mark tooth edges to avoid duplicates
-            std::vector<bool> is_tooth(graph.num_edges(), false);
-            for (const auto& tooth : selected) {
-                is_tooth[tooth.edge] = true;
-            }
-
-            // Handle boundary edges: coefficient -1, or -2 if also a tooth
-            for (auto e : graph.edges()) {
-                int32_t u = graph.edge_source(e);
-                int32_t v = graph.edge_target(e);
-                if (in_handle[u] != in_handle[v]) {
-                    double coeff = is_tooth[e] ? -2.0 : -1.0;
-                    cut.indices.push_back(ctx.x_offset + e);
-                    cut.values.push_back(coeff);
-                    is_tooth[e] = false;  // handled
-                }
-            }
-
-            // Remaining tooth edges (both endpoints inside or outside handle)
-            for (const auto& tooth : selected) {
-                if (is_tooth[tooth.edge]) {
-                    cut.indices.push_back(ctx.x_offset + tooth.edge);
-                    cut.values.push_back(-1.0);
-                }
-            }
-
-            cut.rhs = -rhs;
-            cuts.push_back(std::move(cut));
+        for (int32_t i = 0; i < n; ++i) {
+            if (in_handle[i]) lhs -= ctx.y_values[i];
         }
+
+        for (const auto& tooth : selected) {
+            lhs -= ctx.y_values[tooth.outside];
+        }
+
+        double rhs = static_cast<double>(t - 1) / 2.0;
+
+        if (lhs - rhs <= tol) continue;
+
+        // Emit cut: a^T x <= rhs.
+        Cut cut;
+        cut.violation = lhs - rhs;
+
+        // E(H) edges: coeff +1.
+        for (auto e : graph.edges()) {
+            int32_t u = graph.edge_source(e);
+            int32_t v = graph.edge_target(e);
+            if (in_handle[u] && in_handle[v]) {
+                cut.indices.push_back(ctx.x_offset + e);
+                cut.values.push_back(1.0);
+            }
+        }
+
+        // Tooth edges: coeff +1.
+        for (const auto& tooth : selected) {
+            cut.indices.push_back(ctx.x_offset + tooth.edge);
+            cut.values.push_back(1.0);
+        }
+
+        // y_j for j in H: coeff -1.
+        for (int32_t i = 0; i < n; ++i) {
+            if (in_handle[i]) {
+                cut.indices.push_back(ctx.y_offset + i);
+                cut.values.push_back(-1.0);
+            }
+        }
+
+        // y_{outside_i} for each tooth: coeff -1.
+        for (const auto& tooth : selected) {
+            cut.indices.push_back(ctx.y_offset + tooth.outside);
+            cut.values.push_back(-1.0);
+        }
+
+        cut.rhs = rhs;
+        cuts.push_back(std::move(cut));
     }
 
     return cuts;
