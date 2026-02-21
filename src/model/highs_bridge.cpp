@@ -9,6 +9,8 @@
 
 #include "core/digraph.h"
 #include "core/gomory_hu.h"
+#include "mip/HighsMipSolverData.h"
+#include "mip/HighsUserPropagator.h"
 #include "mip/HighsUserSeparator.h"
 #include "preprocess/edge_elimination.h"
 #include "preprocess/reachability.h"
@@ -33,6 +35,7 @@ HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, double frac_tol)
 
 HiGHSBridge::~HiGHSBridge() {
     HighsUserSeparator::clearCallback();
+    HighsUserPropagator::clearCallback();
 }
 
 void HiGHSBridge::add_separator(std::unique_ptr<sep::Separator> sep) {
@@ -66,8 +69,10 @@ void HiGHSBridge::build_formulation() {
     }
 
     // Edge elimination: capacity-aware 2-cycle labeling bounds
-    if (upper_bound_ < std::numeric_limits<double>::infinity()) {
-        auto eliminated = preprocess::edge_elimination(prob_, upper_bound_);
+    if (upper_bound_ < std::numeric_limits<double>::infinity()
+        && !fwd_bounds_.empty() && !bwd_bounds_.empty()) {
+        auto eliminated = preprocess::edge_elimination(
+            prob_, fwd_bounds_, bwd_bounds_, upper_bound_, correction_);
         int32_t edge_elim_count = 0;
         for (auto e : graph.edges()) {
             if (eliminated[e] && col_upper[e] > 0.0) {
@@ -296,6 +301,181 @@ void HiGHSBridge::install_separators() {
         });
 }
 
+void HiGHSBridge::set_labeling_bounds(std::vector<double> f,
+                                      std::vector<double> b,
+                                      double correction) {
+    fwd_bounds_ = std::move(f);
+    bwd_bounds_ = std::move(b);
+    correction_ = correction;
+}
+
+void HiGHSBridge::install_propagator() {
+    if (fwd_bounds_.empty() || bwd_bounds_.empty()) return;
+
+    const auto& graph = prob_.graph();
+    const int32_t m = num_edges_;
+    const int32_t n = num_nodes_;
+    constexpr double inf = std::numeric_limits<double>::infinity();
+
+    // Shared state for the propagator callback (captured by the lambda).
+    // These are mutable across callback invocations.
+    auto last_ub = std::make_shared<double>(inf);
+    auto processed_edge = std::make_shared<std::vector<bool>>(m, false);
+    propagator_fixings_ = std::make_shared<int64_t>(0);
+    sweep_fixings_ = std::make_shared<int64_t>(0);
+    chain_fixings_ = std::make_shared<int64_t>(0);
+    ub_improvements_ = std::make_shared<int64_t>(0);
+    propagator_calls_ = std::make_shared<int64_t>(0);
+    auto propagator_fixings = propagator_fixings_;
+    auto sweep_fixings = sweep_fixings_;
+    auto chain_fixings = chain_fixings_;
+    auto ub_improvements = ub_improvements_;
+    auto propagator_calls = propagator_calls_;
+
+    // Capture labeling bounds by value (they won't change during solve).
+    auto fwd = std::make_shared<std::vector<double>>(fwd_bounds_);
+    auto bwd = std::make_shared<std::vector<double>>(bwd_bounds_);
+    double corr = correction_;
+
+    // Pre-build adjacency: for each node, list of (edge_idx, neighbor)
+    struct AdjEntry { int32_t edge; int32_t neighbor; };
+    auto adj = std::make_shared<std::vector<std::vector<AdjEntry>>>(n);
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        (*adj)[u].push_back({e, v});
+        (*adj)[v].push_back({e, u});
+    }
+
+    // Pre-build edge costs vector for fast access
+    auto edge_costs = std::make_shared<std::vector<double>>(m);
+    for (auto e : graph.edges()) {
+        (*edge_costs)[e] = prob_.edge_cost(e);
+    }
+
+    // Pre-build profit vector
+    auto profits = std::make_shared<std::vector<double>>(n);
+    for (int32_t i = 0; i < n; ++i) {
+        (*profits)[i] = prob_.profit(i);
+    }
+
+    HighsUserPropagator::setCallback(
+        [=, &prob = prob_](HighsDomain& domain,
+                           const HighsMipSolver& mipsolver,
+                           const HighsLpRelaxation& /*lp*/) {
+            // Skip sub-MIPs: different column space
+            if (mipsolver.submip) return;
+
+            double ub = mipsolver.mipdata_->upper_limit;
+            if (ub >= inf) return;
+
+            (*propagator_calls)++;
+
+            const auto& f = *fwd;
+            const auto& b = *bwd;
+            const auto& ec = *edge_costs;
+            const auto& pr = *profits;
+            const auto& adjacency = *adj;
+            auto& proc = *processed_edge;
+            int64_t& fixings = *propagator_fixings;
+
+            bool ub_improved = (ub < *last_ub - 1e-9);
+
+            // ── Trigger A: UB improved → full sweep ──
+            if (ub_improved) {
+                *last_ub = ub;
+                (*ub_improvements)++;
+                // Reset processed edges — tighter UB may enable new fixings
+                std::fill(proc.begin(), proc.end(), false);
+
+                for (int32_t e = 0; e < m; ++e) {
+                    if (domain.col_upper_[e] < 0.5) continue;  // already fixed
+
+                    // Try both orientations
+                    int32_t u = prob.graph().edge_source(e);
+                    int32_t v = prob.graph().edge_target(e);
+
+                    double lb1 = f[u] + ec[e] + b[v] + corr;
+                    double lb2 = f[v] + ec[e] + b[u] + corr;
+                    double lb = std::min(lb1, lb2);
+
+                    if (lb > ub + 1e-6) {
+                        domain.changeBound(
+                            HighsBoundType::kUpper, e, 0.0,
+                            HighsDomain::Reason::unspecified());
+                        fixings++;
+                        (*sweep_fixings)++;
+                    }
+                }
+
+                // Fix nodes where all incident edges are fixed to 0
+                for (int32_t i = 0; i < n; ++i) {
+                    if (domain.col_upper_[m + i] < 0.5) continue;
+                    bool all_fixed = true;
+                    for (const auto& [e, nb] : adjacency[i]) {
+                        if (domain.col_upper_[e] > 0.5) {
+                            all_fixed = false;
+                            break;
+                        }
+                    }
+                    if (all_fixed) {
+                        domain.changeBound(
+                            HighsBoundType::kUpper, m + i, 0.0,
+                            HighsDomain::Reason::unspecified());
+                    }
+                }
+            }
+
+            // ── Trigger B: Fixed edge x_(a,i) = 1 → chained bounds ──
+            for (int32_t e = 0; e < m; ++e) {
+                if (proc[e]) continue;
+                if (domain.col_lower_[e] < 0.5) continue;  // not fixed to 1
+                proc[e] = true;
+
+                int32_t a = prob.graph().edge_source(e);
+                int32_t i = prob.graph().edge_target(e);
+
+                // Tightened bound reaching i via a:
+                // cost_via_a = f[a] + cost(a,i) - profit(i)
+                double cost_a_to_i = f[a] + ec[e] - pr[i];
+
+                // For each unfixed edge (i,j) adjacent to i
+                for (const auto& [ej, j] : adjacency[i]) {
+                    if (ej == e) continue;  // skip the fixed edge itself
+                    if (domain.col_upper_[ej] < 0.5) continue;  // already fixed to 0
+
+                    double lb = cost_a_to_i + ec[ej] + b[j] + corr;
+                    if (lb > ub + 1e-6) {
+                        domain.changeBound(
+                            HighsBoundType::kUpper, ej, 0.0,
+                            HighsDomain::Reason::unspecified());
+                        fixings++;
+                        (*chain_fixings)++;
+                    }
+                }
+
+                // Tightened bound reaching a via i (return side):
+                double cost_via_i_return = ec[e] + b[i] - pr[a];
+
+                for (const auto& [ek, k] : adjacency[a]) {
+                    if (ek == e) continue;
+                    if (domain.col_upper_[ek] < 0.5) continue;
+
+                    double lb = f[k] + ec[ek] + cost_via_i_return + corr;
+                    if (lb > ub + 1e-6) {
+                        domain.changeBound(
+                            HighsBoundType::kUpper, ek, 0.0,
+                            HighsDomain::Reason::unspecified());
+                        fixings++;
+                        (*chain_fixings)++;
+                    }
+                }
+            }
+        });
+
+    std::cerr << "Installed domain propagator with labeling bounds\n";
+}
+
 std::vector<int32_t> HiGHSBridge::order_path(
     const std::vector<int32_t>& visited_nodes,
     const std::vector<int32_t>& active_edges) const {
@@ -404,6 +584,15 @@ SolveResult HiGHSBridge::extract_result() const {
     // Order the tour by following edges from depot
     result.tour = order_path(visited_nodes, active_edges);
     result.tour_arcs = std::move(active_edges);
+
+    // Print propagator statistics
+    if (propagator_calls_ && *propagator_calls_ > 0) {
+        std::cerr << "Propagator: " << *propagator_calls_ << " calls, "
+                  << *ub_improvements_ << " UB improvements, "
+                  << *propagator_fixings_ << " fixings ("
+                  << *sweep_fixings_ << " sweep + "
+                  << *chain_fixings_ << " chain)\n";
+    }
 
     // Attach separator statistics
     result.separator_stats = separator_stats_;

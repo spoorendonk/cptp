@@ -4,7 +4,10 @@
 #include <iostream>
 #include <thread>
 
+#include <tbb/task_group.h>
+
 #include "heuristic/warm_start.h"
+#include "preprocess/edge_elimination.h"
 #include "sep/sec_separator.h"
 #include "sep/rci_separator.h"
 #include "sep/multistar_separator.h"
@@ -128,16 +131,46 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
-    // Warm-start with greedy insertion heuristic (before formulation for UB)
-    double warm_start_ub = std::numeric_limits<double>::infinity();
+    // Run preprocessing and warm-start in parallel:
+    // - forward_labeling (source = depot)
+    // - backward_labeling (target = depot, same as forward for undirected)
+    // - build_warm_start
+    const int32_t source = problem_.source();
+    const int32_t target = problem_.target();
+    // correction = profit(source) when s == t (tour: depot profit double-subtracted)
+    double correction = problem_.is_tour() ? problem_.profit(source) : 0.0;
+
+    std::vector<double> fwd_bounds, bwd_bounds;
     heuristic::WarmStartResult warm_start;
+    double warm_start_ub = std::numeric_limits<double>::infinity();
+
     {
-        Timer ws_timer;
+        Timer preproc_timer;
         double budget_ms = std::min(500.0, std::max(10.0,
             static_cast<double>(problem_.num_nodes()) * 10.0));
-        warm_start = heuristic::build_warm_start(problem_, budget_ms);
+
+        tbb::task_group tg;
+        tg.run([&] {
+            fwd_bounds = preprocess::forward_labeling(problem_, source);
+        });
+        // For tour (s == t), backward = forward. Skip redundant computation.
+        if (source != target) {
+            tg.run([&] {
+                bwd_bounds = preprocess::backward_labeling(problem_, target);
+            });
+        }
+        tg.run([&] {
+            warm_start = heuristic::build_warm_start(problem_, budget_ms);
+        });
+        tg.wait();
+
+        // For tour, backward = forward
+        if (source == target) {
+            bwd_bounds = fwd_bounds;
+        }
+
         warm_start_ub = warm_start.objective;
-        std::cerr << "Warm-start heuristic: " << ws_timer.elapsed_seconds()
+        std::cerr << "Preprocessing: " << preproc_timer.elapsed_seconds()
                   << "s, UB=" << warm_start_ub << "\n";
     }
 
@@ -145,6 +178,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_separation_interval(separation_interval);
     bridge.set_max_cuts_per_separator(max_cuts_per_sep);
     bridge.set_upper_bound(warm_start_ub);
+    bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
 
     // Add separators
     bridge.add_separator(std::make_unique<sep::SECSeparator>());
@@ -156,6 +190,7 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     bridge.build_formulation();
     bridge.install_separators();
+    bridge.install_propagator();
 
     // Pass warm-start solution to HiGHS
     {
