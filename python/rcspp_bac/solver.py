@@ -15,7 +15,7 @@ def solve(
     source: int | None = None,
     target: int | None = None,
     time_limit: float = 600.0,
-    num_threads: int = 1,
+    num_threads: int | None = None,
     verbose: bool = False,
 ) -> SolveResult:
     """Solve an RCSPP instance.
@@ -55,7 +55,8 @@ def solve(
 
     options = [
         ("time_limit", str(time_limit)),
-        ("threads", str(num_threads)),
         ("output_flag", "true" if verbose else "false"),
     ]
+    if num_threads is not None:
+        options.append(("threads", str(num_threads)))
     return model.solve(options)

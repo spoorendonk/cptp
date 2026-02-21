@@ -8,15 +8,15 @@ from rcspp_bac._rcspp_bac import Model, load as _load
 
 def _rebuild_with_endpoints(problem, source, target):
     """Rebuild a Problem with overridden source/target."""
+    import numpy as np
     from rcspp_bac._rcspp_bac import Problem
 
-    g = problem.graph_edges()
     return Problem(
         num_nodes=problem.num_nodes,
-        edges=g,
-        edge_costs=problem.edge_costs,
-        profits=problem.profits,
-        demands=problem.demands,
+        edges=np.array(problem.graph_edges()),
+        edge_costs=np.array(problem.edge_costs),
+        profits=np.array(problem.profits),
+        demands=np.array(problem.demands),
         capacity=problem.capacity,
         source=source,
         target=target,
