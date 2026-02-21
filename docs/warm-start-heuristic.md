@@ -11,19 +11,21 @@ A good primal bound prunes more of the B&B tree early.
 
 ### Construction (greedy insertion)
 
-Given an ordering of customers, insert each one at the cheapest position in the tour:
+Given an ordering of customers, insert each one at the cheapest position in the route:
 
-1. Start with tour = [depot, depot]
+1. Initialize:
+   - **Tour** (source == target): route = [depot, depot]
+   - **Path** (source != target): route = [source, target]
 2. For each customer c in the given order:
-   - Find position p in tour minimizing `cost(prev,c) + cost(c,next) - cost(prev,next)`
+   - Find position p in route minimizing `cost(prev,c) + cost(c,next) - cost(prev,next)`
    - Insert if capacity allows
-3. If tour is still empty, force-insert the cheapest customer
+3. If too few customers inserted, force-insert the cheapest (tours need at least 2 customers for distinct edges)
 
 The insertion order determines which customers get added first (and consume capacity).
 Three deterministic orderings are used:
 - **Profit/demand ratio** (descending) -- best value per unit capacity
 - **Absolute profit** (descending)
-- **Distance from depot** (ascending) -- short detour customers first
+- **Distance from source** (ascending) -- short detour customers first
 
 Additional restarts use random permutations.
 
@@ -33,7 +35,7 @@ After construction, run improving moves until no improvement found (max 200 iter
 
 | Neighborhood | Description |
 |---|---|
-| **2-opt** | Reverse a segment of the tour |
+| **2-opt** | Reverse a segment of the route |
 | **Or-opt** | Relocate a chain of 1, 2, or 3 consecutive nodes |
 | **Node drop** | Remove a customer if its insertion cost exceeds its profit |
 | **Node add** | Insert an unvisited customer at its cheapest position if profitable |
@@ -68,8 +70,8 @@ highs.setSolution(start);
 ```
 
 The solution vector has size `num_edges + num_nodes`:
-- `sol[e] = 1` for edges in the tour
-- `sol[m + v] = 1` for visited nodes (including depot)
+- `sol[e] = 1` for edges in the route
+- `sol[m + v] = 1` for visited nodes (including source/target)
 
 ## Performance
 
