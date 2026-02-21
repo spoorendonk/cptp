@@ -114,6 +114,32 @@ TEST_CASE("Model solves s-t path instance", "[model][path]") {
     }
 }
 
+TEST_CASE("Model solves path with non-zero source", "[model][path]") {
+    // source=1, target=3 (neither is node 0)
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+
+    model.set_graph(4, edges, costs);
+    model.set_source(1);
+    model.set_target(3);
+
+    std::vector<double> profits = {15.0, 0.0, 15.0, 10.0};
+    model.set_profits(profits);
+
+    std::vector<double> demands = {3.0, 0.0, 4.0, 2.0};
+    model.add_capacity_resource(demands, 7.0);
+
+    auto result = model.solve(quiet);
+    REQUIRE(result.has_solution());
+    if (!result.tour.empty()) {
+        REQUIRE(result.tour.front() == 1);
+        REQUIRE(result.tour.back() == 3);
+    }
+}
+
 TEST_CASE("Model: source==target gives same result as set_depot", "[model][path]") {
     // Build two identical models, one using set_depot, one using set_source/set_target
     std::vector<cptp::Edge> edges = {

@@ -5,6 +5,9 @@
 #include "core/gomory_hu.h"
 #include "core/io.h"
 #include "core/problem.h"
+#include "heuristic/warm_start.h"
+#include "preprocess/edge_elimination.h"
+#include "preprocess/reachability.h"
 #include "sep/sec_separator.h"
 #include "sep/rci_separator.h"
 #include "sep/separation_context.h"
@@ -346,3 +349,267 @@ TEST_CASE("PathWyse IO: load path (with source/target line)", "[io]") {
     REQUIRE(prob.num_nodes() == 4);
     REQUIRE(prob.capacity() == 7.0);
 }
+
+// =====================================================================
+// SEC separator: target_in_S = true case (path target inside cut set)
+// =====================================================================
+
+TEST_CASE("SEC path: rhs_coeff=1 when target in S (target_in_S=true)", "[sec][path]") {
+    // source=0, target=3. Build a fractional solution where node 1 is
+    // visited but has insufficient flow, and the min-cut for node 1
+    // places {1,3} on the non-root side (S contains target=3).
+    // With target in S, rhs_coeff should be 1 (not 2), so a flow of
+    // 1.0 into S is enough and should NOT be violated.
+    auto prob = make_small_path_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+
+    y_values[0] = 1.0;  // source
+    y_values[1] = 1.0;  // intermediate
+    y_values[3] = 1.0;  // target
+    // Node 2 not visited
+
+    // Path: 0 -> 1 -> 3. Edges: {0,1} and {1,3} active.
+    // Min-cut for node 1: S={1,3} has cut δ(S) = {edge(0,1)} with flow=1.
+    // Since target=3 is in S, rhs_coeff = 1, violation = 1*1 - 1 = 0. No cut.
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if ((u == 0 && v == 1) || (u == 1 && v == 3)) {
+            x_values[e] = 1.0;
+        }
+    }
+
+    auto support = build_support(prob, x_values);
+
+    cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+    };
+
+    cptp::sep::SECSeparator sec;
+    auto cuts = sec.separate(ctx);
+
+    // If rhs_coeff were incorrectly 2.0, we'd get violation 2*1-1=1 > 0.
+    // Correct rhs_coeff=1.0 gives violation 0.0 → no cuts.
+    REQUIRE(cuts.empty());
+}
+
+TEST_CASE("SEC path: target_in_S=false gives rhs_coeff=2", "[sec][path]") {
+    // source=0, target=3. Build a solution where S does NOT contain target=3.
+    // Node 2 is visited but disconnected; the min-cut for node 2 should give
+    // S = {2} (not containing target=3), so rhs_coeff = 2.
+    auto prob = make_small_path_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+
+    y_values[0] = 1.0;  // source
+    y_values[2] = 0.8;  // intermediate, not connected
+    y_values[3] = 1.0;  // target
+
+    // Only connect source to target directly: edge {0,3}
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if (u == 0 && v == 3) x_values[e] = 1.0;
+    }
+
+    auto support = build_support(prob, x_values);
+
+    cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+    };
+
+    cptp::sep::SECSeparator sec;
+    auto cuts = sec.separate(ctx);
+
+    // Node 2 is disconnected from source with y=0.8. S={2} doesn't contain
+    // target=3, so rhs_coeff=2.0. Flow=0, violation = 2*0.8 - 0 = 1.6.
+    REQUIRE(!cuts.empty());
+    // Verify the violation magnitude is consistent with rhs_coeff=2
+    REQUIRE(cuts[0].violation > 1.0);
+}
+
+// =====================================================================
+// Preprocessing: demand reachability
+// =====================================================================
+
+TEST_CASE("Demand reachability: tour round-trip check", "[preprocess]") {
+    // 3 nodes, depot=0. Demands: 0, 3, 5. Capacity=7.
+    // Round-trip to node 1: 2*3 - 3 = 3 <= 7 → reachable
+    // Round-trip to node 2: 2*5 - 5 = 5 <= 7 → reachable
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    std::vector<double> costs = {1, 1, 1};
+    std::vector<double> profits = {0, 1, 1};
+    std::vector<double> demands = {0, 3, 5};
+    prob.build(3, edges, costs, profits, demands, 7.0, 0, 0);
+
+    auto reachable = cptp::preprocess::demand_reachability(prob);
+    REQUIRE(reachable[0]);
+    REQUIRE(reachable[1]);
+    REQUIRE(reachable[2]);
+}
+
+TEST_CASE("Demand reachability: tour eliminates unreachable node", "[preprocess]") {
+    // Capacity=4. Node 2 has demand=5.
+    // Round-trip to node 2: 2*5 - 5 = 5 > 4 → unreachable
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    std::vector<double> costs = {1, 1, 1};
+    std::vector<double> profits = {0, 1, 1};
+    std::vector<double> demands = {0, 2, 5};
+    prob.build(3, edges, costs, profits, demands, 4.0, 0, 0);
+
+    auto reachable = cptp::preprocess::demand_reachability(prob);
+    REQUIRE(reachable[0]);
+    REQUIRE(reachable[1]);  // 2*2 - 2 = 2 <= 4
+    REQUIRE_FALSE(reachable[2]);  // 2*5 - 5 = 5 > 4
+}
+
+TEST_CASE("Demand reachability: path uses bidirectional check", "[preprocess][path]") {
+    // 4 nodes, source=0, target=3. Demands: 0, 3, 4, 0. Capacity=6.
+    // Path check: dist_s[v] + dist_t[v] - demand(v) <= Q
+    //
+    // With uniform edge demands = demand(endpoint), Dijkstra from source:
+    // dist_s[0]=0, dist_s[1]=3, dist_s[2]=4, dist_s[3]=0 (demand=0)
+    // Dijkstra from target (node 3):
+    // dist_t[3]=0, dist_t[2]=4, dist_t[1]=3, dist_t[0]=0
+    //
+    // Node 1: dist_s=3, dist_t=3, check: 3+3-3=3 <= 6 → reachable
+    // Node 2: dist_s=4, dist_t=4, check: 4+4-4=4 <= 6 → reachable
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+    std::vector<double> costs = {1, 1, 1, 1, 1, 1};
+    std::vector<double> profits = {0, 1, 1, 0};
+    std::vector<double> demands = {0, 3, 4, 0};
+    prob.build(4, edges, costs, profits, demands, 6.0, 0, 3);
+
+    auto reachable = cptp::preprocess::demand_reachability(prob);
+    REQUIRE(reachable[0]);  // source always reachable
+    REQUIRE(reachable[3]);  // target always reachable
+    REQUIRE(reachable[1]);  // 3 + 3 - 3 = 3 <= 6
+    REQUIRE(reachable[2]);  // 4 + 4 - 4 = 4 <= 6
+}
+
+TEST_CASE("Demand reachability: path eliminates unreachable node", "[preprocess][path]") {
+    // Same setup but capacity=3. Node 2 has demand=4.
+    // Node 2: dist_s=4, dist_t=4, check: 4+4-4=4 > 3 → unreachable
+    // Node 1: dist_s=3, dist_t=3, check: 3+3-3=3 <= 3 → reachable
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+    std::vector<double> costs = {1, 1, 1, 1, 1, 1};
+    std::vector<double> profits = {0, 1, 1, 0};
+    std::vector<double> demands = {0, 3, 4, 0};
+    prob.build(4, edges, costs, profits, demands, 3.0, 0, 3);
+
+    auto reachable = cptp::preprocess::demand_reachability(prob);
+    REQUIRE(reachable[0]);
+    REQUIRE(reachable[3]);
+    REQUIRE(reachable[1]);
+    REQUIRE_FALSE(reachable[2]);
+}
+
+// =====================================================================
+// Preprocessing: edge elimination
+// =====================================================================
+
+TEST_CASE("Edge elimination: tour eliminates expensive edge", "[preprocess]") {
+    // 3 nodes. Edges: {0,1} cost=1, {0,2} cost=1, {1,2} cost=100.
+    // Profits: all 0. Capacity: large.
+    // With UB = 4 (tight), the edge {1,2} with cost=100 should be eliminated
+    // since any tour using it costs at least 100 + something > 4.
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    std::vector<double> costs = {1, 1, 100};
+    std::vector<double> profits = {0, 0, 0};
+    std::vector<double> demands = {0, 0, 0};
+    prob.build(3, edges, costs, profits, demands, 1e18, 0, 0);
+
+    auto eliminated = cptp::preprocess::edge_elimination(prob, 4.0);
+    REQUIRE_FALSE(eliminated[0]);  // {0,1} cost=1 — cheap
+    REQUIRE_FALSE(eliminated[1]);  // {0,2} cost=1 — cheap
+    REQUIRE(eliminated[2]);         // {1,2} cost=100 — eliminated
+}
+
+TEST_CASE("Edge elimination: path uses bidirectional labeling", "[preprocess][path]") {
+    // 4 nodes, source=0, target=3.
+    // Edges: {0,1}=1, {0,2}=1, {0,3}=1, {1,2}=100, {1,3}=1, {2,3}=1
+    // With tight UB, edge {1,2} (cost=100) should be eliminated.
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {1, 1, 1, 100, 1, 1};
+    std::vector<double> profits = {0, 0, 0, 0};
+    std::vector<double> demands = {0, 0, 0, 0};
+    prob.build(4, edges, costs, profits, demands, 1e18, 0, 3);
+
+    auto eliminated = cptp::preprocess::edge_elimination(prob, 5.0);
+    // Edge {1,2} cost=100 should be eliminated — any path using it costs >= 100
+    REQUIRE(eliminated[3]);
+    // Cheap edges should survive
+    REQUIRE_FALSE(eliminated[0]);  // {0,1}
+    REQUIRE_FALSE(eliminated[2]);  // {0,3}
+}
+
+// =====================================================================
+// Warm-start heuristic
+// =====================================================================
+
+TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
+    auto prob = make_small_problem();
+    auto result = cptp::heuristic::build_warm_start(prob, 50.0);
+
+    // Should produce a valid solution
+    REQUIRE(result.objective < std::numeric_limits<double>::max());
+    REQUIRE(result.col_values.size() ==
+            static_cast<size_t>(prob.num_edges() + prob.num_nodes()));
+
+    // Source/depot y-variable should be fixed
+    REQUIRE(result.col_values[prob.num_edges() + prob.source()] == 1.0);
+}
+
+TEST_CASE("Warm-start: path produces valid open path", "[heuristic][path]") {
+    auto prob = make_small_path_problem();
+    auto result = cptp::heuristic::build_warm_start(prob, 50.0);
+
+    REQUIRE(result.objective < std::numeric_limits<double>::max());
+
+    int32_t m = prob.num_edges();
+    // Both source and target y-variables should be 1
+    REQUIRE(result.col_values[m + prob.source()] == 1.0);
+    REQUIRE(result.col_values[m + prob.target()] == 1.0);
+
+    // Count active edges and visited nodes
+    int active_edges = 0;
+    for (int32_t e = 0; e < m; ++e) {
+        if (result.col_values[e] > 0.5) active_edges++;
+    }
+    int visited_nodes = 0;
+    for (int32_t i = 0; i < prob.num_nodes(); ++i) {
+        if (result.col_values[m + i] > 0.5) visited_nodes++;
+    }
+    // Path: #edges = #visited_nodes - 1 (open path, no closing edge)
+    REQUIRE(active_edges == visited_nodes - 1);
+}
+

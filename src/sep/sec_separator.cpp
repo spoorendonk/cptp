@@ -52,8 +52,11 @@ std::vector<Cut> SECSeparator::separate(const SeparationContext& ctx) {
         // Inside form: |E(S)| + |S| - 1 nonzeros
         // For paths with target_in_S, inside form derivation is complex,
         // so always use cut form in that case.
-        bool use_inside = !target_in_S &&
-                          (n_inside + s_size - 1) < (n_delta + 1);
+        // Inside form is degenerate (empty) when S = {target} (singleton),
+        // so require at least 1 nonzero.
+        int32_t inside_nnz = n_inside + s_size - 1;
+        bool use_inside = !target_in_S && inside_nnz > 0 &&
+                          inside_nnz < (n_delta + 1);
 
         Cut cut;
         cut.violation = sec_violation;
