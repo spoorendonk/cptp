@@ -49,14 +49,15 @@ void HiGHSBridge::build_formulation() {
     std::vector<double> col_lower(total_vars, 0.0);
     std::vector<double> col_upper(total_vars, 1.0);
 
-    // Fix depot y variable to 1 via bounds (no extra row needed)
-    col_lower[m + prob_.depot()] = 1.0;
+    // Fix source and target y variables to 1 via bounds
+    col_lower[m + prob_.source()] = 1.0;
+    col_lower[m + prob_.target()] = 1.0;
 
     // Fix unreachable nodes: demand-reachability preprocessing
     if (prob_.capacity() > 0 && prob_.capacity() < 1e17) {
         auto reachable = preprocess::demand_reachability(prob_);
         for (int32_t i = 0; i < n; ++i) {
-            if (!reachable[i] && i != prob_.depot()) {
+            if (!reachable[i] && i != prob_.source() && i != prob_.target()) {
                 col_upper[m + i] = 0.0;
                 for (auto e : graph.incident_edges(i))
                     col_upper[e] = 0.0;
@@ -77,7 +78,7 @@ void HiGHSBridge::build_formulation() {
         // Also eliminate nodes where all incident edges are eliminated
         int32_t node_elim_count = 0;
         for (int32_t i = 0; i < n; ++i) {
-            if (i == prob_.depot() || col_upper[m + i] == 0.0) continue;
+            if (i == prob_.source() || i == prob_.target() || col_upper[m + i] == 0.0) continue;
             bool all_eliminated = true;
             for (auto e : graph.incident_edges(i)) {
                 if (col_upper[e] > 0.0) { all_eliminated = false; break; }
@@ -116,7 +117,10 @@ void HiGHSBridge::build_formulation() {
 
     highs_.changeObjectiveSense(ObjSense::kMinimize);
 
-    // 1. Degree: sum_{e incident to i} x_e = 2*y_i
+    // 1. Degree constraints
+    // Tour (source == target): sum x_e = 2*y_i for all nodes
+    // Path (source != target): sum x_e = y_i for source/target (degree 1),
+    //                          sum x_e = 2*y_i for intermediates (degree 2)
     for (int32_t i = 0; i < n; ++i) {
         std::vector<int> indices;
         std::vector<double> values;
@@ -124,8 +128,10 @@ void HiGHSBridge::build_formulation() {
             indices.push_back(static_cast<int>(e));
             values.push_back(1.0);
         }
+        bool is_terminal = !prob_.is_tour() &&
+                           (i == prob_.source() || i == prob_.target());
         indices.push_back(m + i);
-        values.push_back(-2.0);
+        values.push_back(is_terminal ? -1.0 : -2.0);
         highs_.addRow(0.0, 0.0, static_cast<int>(indices.size()),
                        indices.data(), values.data());
     }
@@ -189,7 +195,7 @@ void HiGHSBridge::install_separators() {
             auto [support_graph, capacity] = builder.build();
 
             // Build Gomory-Hu tree: n-1 max-flows instead of 3*n
-            gomory_hu_tree flow_tree(support_graph, capacity, prob_.depot());
+            gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
 
             sep::SeparationContext ctx{
                 .problem = prob_,
@@ -271,7 +277,7 @@ void HiGHSBridge::install_separators() {
                 }
             }
             auto [support_graph, capacity] = builder.build();
-            gomory_hu_tree flow_tree(support_graph, capacity, prob_.depot());
+            gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
 
             sep::SeparationContext ctx{
                 .problem = prob_,
@@ -290,13 +296,13 @@ void HiGHSBridge::install_separators() {
         });
 }
 
-std::vector<int32_t> HiGHSBridge::order_tour(
+std::vector<int32_t> HiGHSBridge::order_path(
     const std::vector<int32_t>& visited_nodes,
     const std::vector<int32_t>& active_edges) const {
     if (visited_nodes.empty()) return {};
 
     const auto& graph = prob_.graph();
-    const int32_t depot = prob_.depot();
+    const int32_t start = prob_.source();
 
     // Build adjacency from active edges (undirected)
     std::vector<std::vector<int32_t>> adj(num_nodes_);
@@ -307,12 +313,12 @@ std::vector<int32_t> HiGHSBridge::order_tour(
         adj[v].push_back(u);
     }
 
-    // Follow the chain from depot
+    // Follow the chain from source
     std::vector<int32_t> ordered;
     ordered.reserve(visited_nodes.size() + 1);
 
     std::vector<bool> seen(num_nodes_, false);
-    int32_t current = depot;
+    int32_t current = start;
 
     do {
         ordered.push_back(current);
@@ -327,9 +333,9 @@ std::vector<int32_t> HiGHSBridge::order_tour(
         current = next;
     } while (current != -1);
 
-    // Close the tour
-    if (ordered.size() > 1) {
-        ordered.push_back(depot);
+    // For tours, close the loop
+    if (prob_.is_tour() && ordered.size() > 1) {
+        ordered.push_back(start);
     }
 
     // If some visited nodes weren't reached (disconnected), append them
@@ -396,7 +402,7 @@ SolveResult HiGHSBridge::extract_result() const {
     }
 
     // Order the tour by following edges from depot
-    result.tour = order_tour(visited_nodes, active_edges);
+    result.tour = order_path(visited_nodes, active_edges);
     result.tour_arcs = std::move(active_edges);
 
     // Attach separator statistics

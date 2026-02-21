@@ -42,6 +42,8 @@ NB_MODULE(_cptp, m) {
             std::vector<double> cost_vec(c_view.data(), c_view.data() + num_edges);
             self.set_graph(n, edge_vec, cost_vec);
         }, "num_nodes"_a, "edges"_a, "edge_costs"_a)
+        .def("set_source", &cptp::Model::set_source)
+        .def("set_target", &cptp::Model::set_target)
         .def("set_depot", &cptp::Model::set_depot)
         .def("set_profits", [](cptp::Model& self,
                                 nb::ndarray<double, nb::shape<nb::any>> profits) {

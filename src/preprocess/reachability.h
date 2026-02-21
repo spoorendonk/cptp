@@ -8,23 +8,19 @@
 
 namespace cptp::preprocess {
 
-/// Dijkstra from depot with weight = demand(target_node).
-/// Returns reachable[v] = true iff round-trip demand bound is feasible:
-///   2 * min_demand_path(depot, v) - demand(v) <= Q
-inline std::vector<bool> demand_reachability(const Problem& prob) {
+/// Dijkstra from a given root with weight = demand(target_node).
+/// Returns dist[v] = minimum cumulative demand on any path from root to v.
+inline std::vector<double> demand_dijkstra(const Problem& prob, int32_t root) {
     const int32_t n = prob.num_nodes();
     const auto& graph = prob.graph();
-    const double Q = prob.capacity();
-    const int32_t depot = prob.depot();
-
     constexpr double inf = std::numeric_limits<double>::infinity();
-    std::vector<double> dist(n, inf);
-    dist[depot] = 0.0;
 
-    // (cumulative_demand, node)
+    std::vector<double> dist(n, inf);
+    dist[root] = 0.0;
+
     using Entry = std::pair<double, int32_t>;
     std::priority_queue<Entry, std::vector<Entry>, std::greater<>> pq;
-    pq.emplace(0.0, depot);
+    pq.emplace(0.0, root);
 
     while (!pq.empty()) {
         auto [d, u] = pq.top();
@@ -41,15 +37,43 @@ inline std::vector<bool> demand_reachability(const Problem& prob) {
         }
     }
 
-    // Round-trip check: 2*dist[v] - demand(v) <= Q
+    return dist;
+}
+
+/// Demand-reachability preprocessing.
+/// Tour (source == target): round-trip check 2*dist[v] - demand(v) <= Q.
+/// Path (source != target): one-way check dist_s[v] + dist_t[v] - demand(v) <= Q.
+inline std::vector<bool> demand_reachability(const Problem& prob) {
+    const int32_t n = prob.num_nodes();
+    const double Q = prob.capacity();
+    const int32_t source = prob.source();
+    const int32_t target = prob.target();
+    constexpr double inf = std::numeric_limits<double>::infinity();
+
+    auto dist_s = demand_dijkstra(prob, source);
+
     std::vector<bool> reachable(n, false);
-    for (int32_t v = 0; v < n; ++v) {
-        if (dist[v] < inf) {
-            reachable[v] = (2.0 * dist[v] - prob.demand(v) <= Q);
+
+    if (prob.is_tour()) {
+        // Tour: round-trip check
+        for (int32_t v = 0; v < n; ++v) {
+            if (dist_s[v] < inf) {
+                reachable[v] = (2.0 * dist_s[v] - prob.demand(v) <= Q);
+            }
+        }
+    } else {
+        // Path: Dijkstra from both source and target
+        auto dist_t = demand_dijkstra(prob, target);
+        for (int32_t v = 0; v < n; ++v) {
+            if (dist_s[v] < inf && dist_t[v] < inf) {
+                reachable[v] = (dist_s[v] + dist_t[v] - prob.demand(v) <= Q);
+            }
         }
     }
-    // Depot is always reachable
-    reachable[depot] = true;
+
+    // Source and target are always reachable
+    reachable[source] = true;
+    reachable[target] = true;
 
     return reachable;
 }

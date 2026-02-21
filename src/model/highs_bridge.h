@@ -50,8 +50,8 @@ class HiGHSBridge {
     void set_upper_bound(double ub) { upper_bound_ = ub; }
 
  private:
-    /// Order the tour nodes by following edges from depot.
-    std::vector<int32_t> order_tour(const std::vector<int32_t>& visited_nodes,
+    /// Order the visited nodes by following edges from source.
+    std::vector<int32_t> order_path(const std::vector<int32_t>& visited_nodes,
                                      const std::vector<int32_t>& active_edges) const;
 
     const Problem& prob_;

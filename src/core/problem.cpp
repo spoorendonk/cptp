@@ -10,13 +10,15 @@ void Problem::build(int32_t num_nodes,
                     std::span<const double> profits,
                     std::span<const double> demands,
                     double capacity,
-                    int32_t depot) {
+                    int32_t source,
+                    int32_t target) {
     assert(profits.size() == static_cast<size_t>(num_nodes));
     assert(demands.size() == static_cast<size_t>(num_nodes));
     assert(edge_costs.size() == edges.size());
 
     num_nodes_ = num_nodes;
-    depot_ = depot;
+    source_ = source;
+    target_ = target;
     capacity_ = capacity;
 
     // Build static_graph from edge list

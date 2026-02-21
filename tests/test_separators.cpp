@@ -31,7 +31,28 @@ cptp::Problem make_small_problem() {
     std::vector<double> demands = {0, 3, 4, 2};
     double capacity = 7.0;
 
-    prob.build(4, edges, costs, profits, demands, capacity, 0);
+    prob.build(4, edges, costs, profits, demands, capacity, 0, 0);
+    return prob;
+}
+
+/// Build a small 4-node s-t path problem: source=0, target=3.
+cptp::Problem make_small_path_problem() {
+    cptp::Problem prob;
+
+    std::vector<cptp::Edge> edges;
+    std::vector<double> costs;
+    for (int i = 0; i < 4; ++i) {
+        for (int j = i + 1; j < 4; ++j) {
+            edges.push_back({i, j});
+            costs.push_back(10.0);
+        }
+    }
+
+    std::vector<double> profits = {0, 20, 15, 10};
+    std::vector<double> demands = {0, 3, 4, 2};
+    double capacity = 7.0;
+
+    prob.build(4, edges, costs, profits, demands, capacity, 0, 3);
     return prob;
 }
 
@@ -58,7 +79,7 @@ SupportData build_support(const cptp::Problem& prob,
         }
     }
     auto [sg, cap] = builder.build();
-    auto tree = std::make_unique<cptp::gomory_hu_tree>(sg, cap, prob.depot());
+    auto tree = std::make_unique<cptp::gomory_hu_tree>(sg, cap, prob.source());
     return {std::move(sg), std::move(cap), std::move(tree)};
 }
 
@@ -195,4 +216,114 @@ TEST_CASE("RCI separator basic test", "[rci]") {
 
     // Just verify it doesn't crash
     REQUIRE(true);
+}
+
+TEST_CASE("SEC separator for s-t path finds violated cuts", "[sec][path]") {
+    auto prob = make_small_path_problem();
+    REQUIRE_FALSE(prob.is_tour());
+    REQUIRE(prob.source() == 0);
+    REQUIRE(prob.target() == 3);
+
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    // Create a solution where node 2 is disconnected from source
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+
+    y_values[0] = 1.0;  // source
+    y_values[3] = 1.0;  // target
+    y_values[1] = 0.5;
+    y_values[2] = 0.5;
+
+    // Only connect 0-3 and 1-2 (node 2 disconnected from source)
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if ((u == 0 && v == 3) || (u == 1 && v == 2)) {
+            x_values[e] = 1.0;
+        }
+    }
+
+    auto support = build_support(prob, x_values);
+
+    cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+    };
+
+    cptp::sep::SECSeparator sec;
+    auto cuts = sec.separate(ctx);
+
+    // Should find violated SEC for disconnected nodes
+    REQUIRE(!cuts.empty());
+}
+
+TEST_CASE("SEC separator for s-t path: feasible path has no violations", "[sec][path]") {
+    auto prob = make_small_path_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    // Feasible path: 0 -> 1 -> 3 (source=0, target=3)
+    // Degree: source=1, node1=2, target=1
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+
+    y_values[0] = 1.0;  // source
+    y_values[1] = 1.0;  // intermediate
+    y_values[3] = 1.0;  // target
+
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if ((u == 0 && v == 1) || (u == 1 && v == 3)) {
+            x_values[e] = 1.0;
+        }
+    }
+
+    auto support = build_support(prob, x_values);
+
+    cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+    };
+
+    cptp::sep::SECSeparator sec;
+    auto cuts = sec.separate(ctx);
+
+    // No violated cuts on a feasible path
+    REQUIRE(cuts.empty());
+}
+
+TEST_CASE("Problem is_tour() and source/target accessors", "[problem]") {
+    cptp::Problem tour_prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    std::vector<double> costs = {1, 1, 1};
+    std::vector<double> profits = {0, 1, 1};
+    std::vector<double> demands = {0, 1, 1};
+
+    tour_prob.build(3, edges, costs, profits, demands, 10.0, 0, 0);
+    REQUIRE(tour_prob.is_tour());
+    REQUIRE(tour_prob.source() == 0);
+    REQUIRE(tour_prob.target() == 0);
+    REQUIRE(tour_prob.depot() == 0);
+
+    cptp::Problem path_prob;
+    path_prob.build(3, edges, costs, profits, demands, 10.0, 0, 2);
+    REQUIRE_FALSE(path_prob.is_tour());
+    REQUIRE(path_prob.source() == 0);
+    REQUIRE(path_prob.target() == 2);
+    REQUIRE(path_prob.depot() == 0);  // backward compat: returns source
 }
