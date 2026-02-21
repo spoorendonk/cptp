@@ -30,6 +30,16 @@ TEST_CASE("tiny4 optimal", "[optimal]") {
     REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1.0));
 }
 
+TEST_CASE("tiny4_path optimal", "[optimal][path]") {
+    auto r = solve_instance("tests/data/tiny4_path.txt", 30);
+    REQUIRE(r.is_optimal());
+    // Path 0 -> 1 -> 3: cost = 10 + 7 = 17, profit = 0 + 20 + 10 = 30, obj = -13
+    REQUIRE_THAT(r.objective, WithinAbs(-13.0, 1.0));
+    // Path should start at source=0 and end at target=3
+    REQUIRE(r.tour.front() == 0);
+    REQUIRE(r.tour.back() == 3);
+}
+
 TEST_CASE("B-n45-k6-54 optimal", "[optimal][slow]") {
     auto r = solve_instance("bench/instances/spprclib/B-n45-k6-54.sppcc", 60);
     REQUIRE(r.is_optimal());

@@ -31,7 +31,9 @@ inline double edge_cost(const Problem& prob, int32_t u, int32_t v) {
     return (e >= 0) ? prob.edge_cost(e) : std::numeric_limits<double>::max();
 }
 
-/// Compute tour objective: sum(edge costs) - sum(profits) - depot_profit.
+/// Compute tour/path objective: sum(edge costs) - sum(profits).
+/// For tours: subtract depot profit once (depot appears at both ends but counts once).
+/// For paths: subtract source and target profits.
 inline double tour_objective(const Problem& prob,
                              const std::vector<int32_t>& tour) {
     double cost = 0.0;
@@ -39,7 +41,14 @@ inline double tour_objective(const Problem& prob,
         cost += edge_cost(prob, tour[i], tour[i + 1]);
     for (size_t i = 1; i + 1 < tour.size(); ++i)
         cost -= prob.profit(tour[i]);
-    cost -= prob.profit(prob.depot());
+    if (prob.is_tour()) {
+        // Tour: depot profit counted once (depot is first and last element)
+        cost -= prob.profit(prob.source());
+    } else {
+        // Path: source and target profits (source is first, target is last)
+        cost -= prob.profit(tour.front());
+        cost -= prob.profit(tour.back());
+    }
     return cost;
 }
 
@@ -89,6 +98,9 @@ inline void local_search(const Problem& prob,
                          double& remaining_cap,
                          int max_iter = 200) {
     const int32_t n = prob.num_nodes();
+    // Minimum tour size for node drop: tours need >= 4 (depot + 2 customers + depot),
+    // paths need >= 3 (source + 1 customer + target).
+    const int32_t min_drop_size = prob.is_tour() ? 5 : 4;
 
     for (int iter = 0; iter < max_iter; ++iter) {
         bool improved = false;
@@ -138,8 +150,8 @@ inline void local_search(const Problem& prob,
         }
         if (improved) continue;
 
-        // --- Node drop (keep at least 2 customers for valid cycle) ---
-        for (int32_t i = 1; i < len - 1 && len >= 5 && !improved; ++i) {
+        // --- Node drop ---
+        for (int32_t i = 1; i < len - 1 && len >= min_drop_size && !improved; ++i) {
             int32_t c = tour[i];
             double save = edge_cost(prob, tour[i - 1], c)
                         + edge_cost(prob, c, tour[i + 1])
@@ -193,26 +205,38 @@ single_restart(const Problem& prob,
                const std::vector<int32_t>& customers,
                const std::vector<int32_t>& order) {
     const int32_t n = prob.num_nodes();
-    const int32_t depot = prob.depot();
+    const int32_t source = prob.source();
+    const int32_t target = prob.target();
     const double Q = prob.capacity();
+    const bool is_tour = prob.is_tour();
 
-    std::vector<int32_t> tour = {depot, depot};
+    // Initialize: tour for closed loop, path for open s-t
+    std::vector<int32_t> tour;
     std::vector<bool> in_tour(n, false);
-    in_tour[depot] = true;
+    if (is_tour) {
+        tour = {source, source};
+        in_tour[source] = true;
+    } else {
+        tour = {source, target};
+        in_tour[source] = true;
+        in_tour[target] = true;
+    }
     double remaining_cap = Q;
 
     greedy_insert(prob, tour, in_tour, remaining_cap, order);
 
-    // Ensure at least two customers for a valid cycle (binary edge vars
-    // mean each edge can be used at most once; a 2-stop tour depot→a→depot
-    // would need edge (depot,a) twice, which is infeasible).
-    while (tour.size() <= 3 && !customers.empty()) {
+    // Ensure enough customers for a valid solution.
+    // Tour needs ≥ 4 elements [depot, a, b, depot] (binary edges: can't use same edge twice).
+    // Path needs ≥ 2 elements [source, target] (always valid, edge source→target).
+    int32_t min_valid_size = is_tour ? 4 : 2;
+    int32_t min_construction_size = is_tour ? 3 : 2;
+
+    while (static_cast<int32_t>(tour.size()) <= min_construction_size && !customers.empty()) {
         double bd = std::numeric_limits<double>::max();
         int32_t bn = -1;
         for (int32_t c : customers) {
             if (in_tour[c]) continue;
             if (prob.demand(c) > remaining_cap) continue;
-            // Insert cost: cheapest insertion into current tour
             double best_delta = std::numeric_limits<double>::max();
             for (size_t pos = 0; pos + 1 < tour.size(); ++pos) {
                 double delta = edge_cost(prob, tour[pos], c)
@@ -224,7 +248,6 @@ single_restart(const Problem& prob,
             if (best_delta < bd) { bd = best_delta; bn = c; }
         }
         if (bn < 0) break;
-        // Find best insertion position
         size_t best_pos = 1;
         double best_delta = std::numeric_limits<double>::max();
         for (size_t pos = 0; pos + 1 < tour.size(); ++pos) {
@@ -242,9 +265,9 @@ single_restart(const Problem& prob,
         local_search(prob, tour, in_tour, remaining_cap);
     }
 
-    // Need at least 4 elements [depot, a, b, depot] for a valid binary-edge cycle
-    double obj = (tour.size() >= 4) ? tour_objective(prob, tour)
-                                    : std::numeric_limits<double>::max();
+    double obj = (static_cast<int32_t>(tour.size()) >= min_valid_size)
+                     ? tour_objective(prob, tour)
+                     : std::numeric_limits<double>::max();
     return {std::move(tour), obj};
 }
 
@@ -263,16 +286,17 @@ inline WarmStartResult build_warm_start(const Problem& prob,
     const auto& g = prob.graph();
     const int32_t n = prob.num_nodes();
     const int32_t m = prob.num_edges();
-    const int32_t depot = prob.depot();
+    const int32_t source = prob.source();
+    const int32_t target = prob.target();
     const double Q = prob.capacity();
 
     auto deadline = std::chrono::steady_clock::now()
                   + std::chrono::microseconds(static_cast<int64_t>(time_budget_ms * 1000));
 
-    // Build candidate list
+    // Build candidate list (exclude source and target)
     std::vector<int32_t> customers;
     for (int32_t i = 0; i < n; ++i) {
-        if (i != depot && prob.demand(i) <= Q)
+        if (i != source && i != target && prob.demand(i) <= Q)
             customers.push_back(i);
     }
 
@@ -299,12 +323,12 @@ inline WarmStartResult build_warm_start(const Problem& prob,
         });
         fixed_orders.push_back(std::move(order));
     }
-    // Order 3: cheapest from depot
+    // Order 3: cheapest from source
     {
         auto order = customers;
         std::sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
-            return detail::edge_cost(prob, depot, a)
-                 < detail::edge_cost(prob, depot, b);
+            return detail::edge_cost(prob, source, a)
+                 < detail::edge_cost(prob, source, b);
         });
         fixed_orders.push_back(std::move(order));
     }
@@ -353,10 +377,12 @@ inline WarmStartResult build_warm_start(const Problem& prob,
     }
 
     // --- Convert best tour to MIP solution vector ---
+    int32_t min_valid_size = prob.is_tour() ? 4 : 2;
     std::vector<double> sol(m + n, 0.0);
-    sol[m + depot] = 1.0;
+    sol[m + source] = 1.0;
+    sol[m + target] = 1.0;
 
-    if (best_tour.size() >= 4) {
+    if (static_cast<int32_t>(best_tour.size()) >= min_valid_size) {
         for (size_t i = 1; i + 1 < best_tour.size(); ++i)
             sol[m + best_tour[i]] = 1.0;
         for (size_t i = 0; i + 1 < best_tour.size(); ++i) {

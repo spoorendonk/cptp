@@ -12,7 +12,7 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
     const double tol = ctx.tol;
-    const int32_t depot = prob.depot();
+    const int32_t depot = prob.source();
 
     std::vector<Cut> cuts;
 

@@ -45,7 +45,7 @@ RCICandidate make_candidate(const gomory_hu_tree& tree, int32_t cut_node,
                             const SeparationContext& ctx) {
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
-    const int32_t depot = prob.depot();
+    const int32_t depot = prob.source();
 
     bool depot_on_source = !tree.on_root_side(cut_node, depot);
 
@@ -129,7 +129,7 @@ double add_drop_search(RCICandidate& c, const Problem& prob,
                        const SeparationContext& ctx, double Q, double tol) {
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
-    const int32_t depot = prob.depot();
+    const int32_t depot = prob.source();
 
     double best_viol = compute_violation(c, Q, tol);
     bool improved = true;
@@ -288,7 +288,7 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     const int32_t n = prob.num_nodes();
     const double tol = ctx.tol;
     const double Q = prob.capacity();
-    const int32_t depot = prob.depot();
+    const int32_t depot = prob.source();
 
     if (Q <= 0 || !ctx.flow_tree) return {};
 

@@ -248,7 +248,7 @@ Problem load_tsplib(const std::filesystem::path& path) {
     Problem prob;
     prob.name = header.count("NAME") ? header["NAME"] : path.stem().string();
     prob.build(dimension, edges, edge_costs, profits, demands,
-               static_cast<double>(capacity), depot);
+               static_cast<double>(capacity), depot, depot);
     return prob;
 }
 
@@ -294,9 +294,16 @@ Problem load_pathwyse(const std::filesystem::path& path) {
         // capacity was present
     }
 
+    // Optionally read source and target nodes (default: 0 0 = tour)
+    int32_t source = 0, target = 0;
+    if (f >> source >> target) {
+        // source/target were present
+    }
+
     Problem prob;
     prob.name = path.stem().string();
-    prob.build(num_nodes, edges, edge_costs, profits, demands, capacity, 0);
+    prob.build(num_nodes, edges, edge_costs, profits, demands, capacity,
+               source, target);
     return prob;
 }
 

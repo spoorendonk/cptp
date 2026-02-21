@@ -12,6 +12,8 @@ def solve(
     demands: np.ndarray,
     capacity: float,
     depot: int = 0,
+    source: int | None = None,
+    target: int | None = None,
     time_limit: float = 600.0,
     num_threads: int = 1,
     verbose: bool = False,
@@ -25,7 +27,9 @@ def solve(
         profits: (n,) array of node profits.
         demands: (n,) array of node demands.
         capacity: Vehicle capacity.
-        depot: Depot node index (default 0).
+        depot: Depot node index (default 0). Sets source = target = depot (tour).
+        source: Source node for s-t path. Overrides depot if set.
+        target: Target node for s-t path. Overrides depot if set.
         time_limit: Time limit in seconds.
         num_threads: Number of threads.
         verbose: Print solver output.
@@ -35,7 +39,13 @@ def solve(
     """
     model = _Model()
     model.set_graph(num_nodes, edges.astype(np.int32), edge_costs.astype(np.float64))
-    model.set_depot(depot)
+
+    if source is not None or target is not None:
+        model.set_source(source if source is not None else depot)
+        model.set_target(target if target is not None else depot)
+    else:
+        model.set_depot(depot)
+
     model.set_profits(profits.astype(np.float64))
     model.add_capacity_resource(demands.astype(np.float64), capacity)
     return model.solve(time_limit=time_limit, num_threads=num_threads, verbose=verbose)

@@ -31,8 +31,19 @@ void Model::set_graph(int32_t num_nodes,
     built_ = false;
 }
 
+void Model::set_source(int32_t source) {
+    source_ = source;
+    built_ = false;
+}
+
+void Model::set_target(int32_t target) {
+    target_ = target;
+    built_ = false;
+}
+
 void Model::set_depot(int32_t depot) {
-    depot_ = depot;
+    source_ = depot;
+    target_ = depot;
     built_ = false;
 }
 
@@ -70,7 +81,7 @@ void Model::build_problem() {
     }
 
     problem_.build(num_nodes_, edges_, edge_costs_, profits_, demands,
-                   capacity, depot_);
+                   capacity, source_, target_);
     built_ = true;
 }
 

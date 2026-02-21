@@ -28,13 +28,17 @@ class Problem {
                std::span<const double> profits,
                std::span<const double> demands,
                double capacity,
-               int32_t depot = 0);
+               int32_t source = 0,
+               int32_t target = 0);
 
     // --- Accessors ---
     const Graph& graph() const { return graph_; }
     int32_t num_nodes() const { return num_nodes_; }
     int32_t num_edges() const { return num_edges_; }
-    int32_t depot() const { return depot_; }
+    int32_t source() const { return source_; }
+    int32_t target() const { return target_; }
+    int32_t depot() const { return source_; }  // backward compat alias
+    bool is_tour() const { return source_ == target_; }
     double capacity() const { return capacity_; }
 
     double edge_cost(int32_t e) const { return edge_costs_[e]; }
@@ -51,7 +55,8 @@ class Problem {
     Graph graph_;
     int32_t num_nodes_ = 0;
     int32_t num_edges_ = 0;
-    int32_t depot_ = 0;
+    int32_t source_ = 0;
+    int32_t target_ = 0;
     double capacity_ = 0.0;
     std::vector<double> edge_costs_;
     std::vector<double> profits_;

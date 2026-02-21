@@ -52,13 +52,21 @@ docs/            — Algorithm documentation
 
 ## Key types
 
-- `cptp::Problem` — CPTP instance using `melon::static_digraph`
-- `cptp::Model` — User-facing solver interface
+- `cptp::Problem` — CPTP instance using `melon::static_digraph`; has `source()`, `target()`, `is_tour()`
+- `cptp::Model` — User-facing solver interface; `set_source()`/`set_target()` for paths, `set_depot()` for tours
 - `cptp::HiGHSBridge` — Wires separators into HiGHS MIP
 - `cptp::sep::Separator` — Base class for cut separators
-- `cptp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow
+- `cptp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow (path-aware)
 - `cptp::gomory_hu_tree` — Gusfield's algorithm, shared across separators
 - `cptp::heuristic::build_warm_start` — Parallel greedy + local search heuristic
+
+## Tour vs s-t path
+
+When `source == target` (default), the solver uses a closed tour formulation (degree 2 at all nodes).
+When `source != target`, it uses an open path formulation:
+- Degree 1 at source/target, degree 2 at intermediates
+- SEC cuts: sets containing the path target need only 1 cut crossing (path enters and terminates)
+- PathWyse format: optional `source target` line after the capacity line
 
 ## Namespace
 

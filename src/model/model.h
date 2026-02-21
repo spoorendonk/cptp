@@ -23,7 +23,9 @@ class Model {
                    std::span<const Edge> edges,
                    std::span<const double> edge_costs);
 
-    void set_depot(int32_t depot);
+    void set_source(int32_t source);
+    void set_target(int32_t target);
+    void set_depot(int32_t depot);  // sets source = target = depot (tour)
     void set_profits(std::span<const double> profits);
 
     void add_capacity_resource(std::span<const double> demands, double limit);
@@ -36,7 +38,8 @@ class Model {
     void build_problem();
 
     int32_t num_nodes_ = 0;
-    int32_t depot_ = 0;
+    int32_t source_ = 0;
+    int32_t target_ = 0;
     std::vector<Edge> edges_;
     std::vector<double> edge_costs_;
     std::vector<double> profits_;
