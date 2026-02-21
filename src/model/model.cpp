@@ -84,7 +84,8 @@ void Model::build_problem() {
         profits_.assign(num_nodes_, 0.0);
     }
 
-    problem_.build(num_nodes_, edges_, edge_costs_, profits_, demands,
+    problem_.build(num_nodes_, edges_, std::move(edge_costs_),
+                   std::move(profits_), std::move(demands),
                    capacity, source_, target_);
     built_ = true;
 }

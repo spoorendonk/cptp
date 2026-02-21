@@ -38,7 +38,11 @@ def solve(
         SolveResult with tour, objective, gap, etc.
     """
     model = _Model()
-    model.set_graph(num_nodes, edges.astype(np.int32), edge_costs.astype(np.float64))
+    model.set_graph(
+        num_nodes,
+        np.ascontiguousarray(edges, dtype=np.int32),
+        np.ascontiguousarray(edge_costs, dtype=np.float64),
+    )
 
     if source is not None or target is not None:
         model.set_source(source if source is not None else depot)
@@ -46,8 +50,8 @@ def solve(
     else:
         model.set_depot(depot)
 
-    model.set_profits(profits.astype(np.float64))
-    model.add_capacity_resource(demands.astype(np.float64), capacity)
+    model.set_profits(np.ascontiguousarray(profits, dtype=np.float64))
+    model.add_capacity_resource(np.ascontiguousarray(demands, dtype=np.float64), capacity)
 
     options = [
         ("time_limit", str(time_limit)),
