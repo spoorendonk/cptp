@@ -73,6 +73,7 @@ if(CPTP_BUILD_TESTS)
         tests/test_separators.cpp
         tests/test_model.cpp
         tests/test_optimal.cpp
+        tests/test_propagator.cpp
     )
     target_link_libraries(cptp_tests PRIVATE cptp_model Catch2::Catch2WithMain)
     catch_discover_tests(cptp_tests)
