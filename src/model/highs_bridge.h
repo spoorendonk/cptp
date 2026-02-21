@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -45,6 +46,9 @@ class HiGHSBridge {
     /// Jepsen et al. recommend 1: add only the most-violated cut.
     void set_max_cuts_per_separator(int32_t max_cuts) { max_cuts_per_sep_ = max_cuts; }
 
+    /// Set upper bound for edge elimination preprocessing.
+    void set_upper_bound(double ub) { upper_bound_ = ub; }
+
  private:
     /// Order the tour nodes by following edges from depot.
     std::vector<int32_t> order_tour(const std::vector<int32_t>& visited_nodes,
@@ -61,6 +65,7 @@ class HiGHSBridge {
     // Amortized separation: skip rounds to reduce overhead
     int32_t separation_interval_ = 1;  // 1 = every round (no skipping)
     int32_t max_cuts_per_sep_ = 3;     // max cuts per separator per round (0 = unlimited)
+    double upper_bound_ = std::numeric_limits<double>::infinity();
 
     // Cut statistics (updated from callback)
     mutable std::map<std::string, SeparatorStats> separator_stats_;

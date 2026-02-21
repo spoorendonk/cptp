@@ -4,11 +4,13 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <iostream>
 #include <mutex>
 
 #include "core/digraph.h"
 #include "core/gomory_hu.h"
 #include "mip/HighsUserSeparator.h"
+#include "preprocess/edge_elimination.h"
 #include "preprocess/reachability.h"
 #include "sep/sec_separator.h"
 #include "sep/separation_context.h"
@@ -59,6 +61,36 @@ void HiGHSBridge::build_formulation() {
                 for (auto e : graph.incident_edges(i))
                     col_upper[e] = 0.0;
             }
+        }
+    }
+
+    // Edge elimination: capacity-aware 2-cycle labeling bounds
+    if (upper_bound_ < std::numeric_limits<double>::infinity()) {
+        auto eliminated = preprocess::edge_elimination(prob_, upper_bound_);
+        int32_t edge_elim_count = 0;
+        for (auto e : graph.edges()) {
+            if (eliminated[e] && col_upper[e] > 0.0) {
+                col_upper[e] = 0.0;
+                edge_elim_count++;
+            }
+        }
+        // Also eliminate nodes where all incident edges are eliminated
+        int32_t node_elim_count = 0;
+        for (int32_t i = 0; i < n; ++i) {
+            if (i == prob_.depot() || col_upper[m + i] == 0.0) continue;
+            bool all_eliminated = true;
+            for (auto e : graph.incident_edges(i)) {
+                if (col_upper[e] > 0.0) { all_eliminated = false; break; }
+            }
+            if (all_eliminated) {
+                col_upper[m + i] = 0.0;
+                node_elim_count++;
+            }
+        }
+        if (edge_elim_count > 0 || node_elim_count > 0) {
+            std::cerr << "Edge elimination: " << edge_elim_count << "/" << m
+                      << " edges, " << node_elim_count << "/" << (n - 1)
+                      << " nodes fixed to 0\n";
         }
     }
 

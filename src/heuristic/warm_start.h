@@ -138,8 +138,8 @@ inline void local_search(const Problem& prob,
         }
         if (improved) continue;
 
-        // --- Node drop ---
-        for (int32_t i = 1; i < len - 1 && !improved; ++i) {
+        // --- Node drop (keep at least 2 customers for valid cycle) ---
+        for (int32_t i = 1; i < len - 1 && len >= 5 && !improved; ++i) {
             int32_t c = tour[i];
             double save = edge_cost(prob, tour[i - 1], c)
                         + edge_cost(prob, c, tour[i + 1])
@@ -203,38 +203,63 @@ single_restart(const Problem& prob,
 
     greedy_insert(prob, tour, in_tour, remaining_cap, order);
 
-    // Ensure at least one customer
-    if (tour.size() <= 2) {
+    // Ensure at least two customers for a valid cycle (binary edge vars
+    // mean each edge can be used at most once; a 2-stop tour depot→a→depot
+    // would need edge (depot,a) twice, which is infeasible).
+    while (tour.size() <= 3 && !customers.empty()) {
         double bd = std::numeric_limits<double>::max();
         int32_t bn = -1;
         for (int32_t c : customers) {
-            double d = edge_cost(prob, depot, c)
-                     + edge_cost(prob, c, depot) - prob.profit(c);
-            if (d < bd) { bd = d; bn = c; }
+            if (in_tour[c]) continue;
+            if (prob.demand(c) > remaining_cap) continue;
+            // Insert cost: cheapest insertion into current tour
+            double best_delta = std::numeric_limits<double>::max();
+            for (size_t pos = 0; pos + 1 < tour.size(); ++pos) {
+                double delta = edge_cost(prob, tour[pos], c)
+                             + edge_cost(prob, c, tour[pos + 1])
+                             - edge_cost(prob, tour[pos], tour[pos + 1])
+                             - prob.profit(c);
+                if (delta < best_delta) best_delta = delta;
+            }
+            if (best_delta < bd) { bd = best_delta; bn = c; }
         }
-        if (bn >= 0) {
-            tour.insert(tour.begin() + 1, bn);
-            in_tour[bn] = true;
-            remaining_cap -= prob.demand(bn);
+        if (bn < 0) break;
+        // Find best insertion position
+        size_t best_pos = 1;
+        double best_delta = std::numeric_limits<double>::max();
+        for (size_t pos = 0; pos + 1 < tour.size(); ++pos) {
+            double delta = edge_cost(prob, tour[pos], bn)
+                         + edge_cost(prob, bn, tour[pos + 1])
+                         - edge_cost(prob, tour[pos], tour[pos + 1]);
+            if (delta < best_delta) { best_delta = delta; best_pos = pos + 1; }
         }
+        tour.insert(tour.begin() + static_cast<ptrdiff_t>(best_pos), bn);
+        in_tour[bn] = true;
+        remaining_cap -= prob.demand(bn);
     }
 
     if (tour.size() > 2) {
         local_search(prob, tour, in_tour, remaining_cap);
     }
 
-    double obj = (tour.size() > 2) ? tour_objective(prob, tour)
-                                   : std::numeric_limits<double>::max();
+    // Need at least 4 elements [depot, a, b, depot] for a valid binary-edge cycle
+    double obj = (tour.size() >= 4) ? tour_objective(prob, tour)
+                                    : std::numeric_limits<double>::max();
     return {std::move(tour), obj};
 }
 
 }  // namespace detail
 
+struct WarmStartResult {
+    std::vector<double> col_values;  // size (num_edges + num_nodes)
+    double objective;                // minimization objective (cost - profit)
+};
+
 /// Build a warm-start solution via parallel randomized construction + local search.
 /// time_budget_ms: how long to spend on restarts (default 1000ms).
-/// Returns a col_value vector of size (num_edges + num_nodes) for HiGHS setSolution.
-inline std::vector<double> build_warm_start(const Problem& prob,
-                                            double time_budget_ms = 1000.0) {
+/// Returns solution vector + objective value.
+inline WarmStartResult build_warm_start(const Problem& prob,
+                                        double time_budget_ms = 1000.0) {
     const auto& g = prob.graph();
     const int32_t n = prob.num_nodes();
     const int32_t m = prob.num_edges();
@@ -331,7 +356,7 @@ inline std::vector<double> build_warm_start(const Problem& prob,
     std::vector<double> sol(m + n, 0.0);
     sol[m + depot] = 1.0;
 
-    if (!best_tour.empty() && best_tour.size() > 2) {
+    if (best_tour.size() >= 4) {
         for (size_t i = 1; i + 1 < best_tour.size(); ++i)
             sol[m + best_tour[i]] = 1.0;
         for (size_t i = 0; i + 1 < best_tour.size(); ++i) {
@@ -340,7 +365,7 @@ inline std::vector<double> build_warm_start(const Problem& prob,
         }
     }
 
-    return sol;
+    return {std::move(sol), best_obj};
 }
 
 }  // namespace cptp::heuristic

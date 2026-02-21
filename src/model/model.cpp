@@ -83,6 +83,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     highs.setOptionValue("presolve", "off");
     highs.setOptionValue("threads",
         static_cast<int>(std::thread::hardware_concurrency()));
+    // Disable strong branching: trust pseudocosts immediately.
+    // Benchmarks show pscost=0 or 2 outperforms default=8 on hard instances.
+    highs.setOptionValue("mip_pscost_minreliable", 0);
 
     // Intercept our custom options, forward the rest to HiGHS
     int32_t separation_interval = 1;
@@ -108,9 +111,23 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
+    // Warm-start with greedy insertion heuristic (before formulation for UB)
+    double warm_start_ub = std::numeric_limits<double>::infinity();
+    heuristic::WarmStartResult warm_start;
+    {
+        Timer ws_timer;
+        double budget_ms = std::min(500.0, std::max(10.0,
+            static_cast<double>(problem_.num_nodes()) * 10.0));
+        warm_start = heuristic::build_warm_start(problem_, budget_ms);
+        warm_start_ub = warm_start.objective;
+        std::cerr << "Warm-start heuristic: " << ws_timer.elapsed_seconds()
+                  << "s, UB=" << warm_start_ub << "\n";
+    }
+
     HiGHSBridge bridge(problem_, highs, separation_tol);
     bridge.set_separation_interval(separation_interval);
     bridge.set_max_cuts_per_separator(max_cuts_per_sep);
+    bridge.set_upper_bound(warm_start_ub);
 
     // Add separators
     bridge.add_separator(std::make_unique<sep::SECSeparator>());
@@ -121,18 +138,12 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.build_formulation();
     bridge.install_separators();
 
-    // Warm-start with greedy insertion heuristic
-    // Scale budget: ~1s for 50+ nodes, less for tiny instances
+    // Pass warm-start solution to HiGHS
     {
-        Timer ws_timer;
-        double budget_ms = std::min(500.0, std::max(10.0,
-            static_cast<double>(problem_.num_nodes()) * 10.0));
-        auto warm = heuristic::build_warm_start(problem_, budget_ms);
         HighsSolution start;
         start.value_valid = true;
-        start.col_value = std::move(warm);
+        start.col_value = std::move(warm_start.col_values);
         highs.setSolution(start);
-        std::cerr << "Warm-start heuristic: " << ws_timer.elapsed_seconds() << "s\n";
     }
 
     highs.run();
