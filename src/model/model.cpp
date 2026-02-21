@@ -5,6 +5,7 @@
 #include <thread>
 
 #include <tbb/task_group.h>
+#include <tbb/parallel_for.h>
 
 #include "heuristic/warm_start.h"
 #include "preprocess/edge_elimination.h"
@@ -106,6 +107,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t separation_interval = 1;
     int32_t max_cuts_per_sep = 3;  // top-k most-violated per separator per round
     double separation_tol = sep::kDefaultFracTol;
+    bool all_pairs_propagation = false;
     bool enable_rglm = false;
     for (const auto& [key, value] : options) {
         if (key == "separation_interval") {
@@ -118,6 +120,10 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "separation_tol") {
             separation_tol = std::stod(value);
+            continue;
+        }
+        if (key == "all_pairs_propagation") {
+            all_pairs_propagation = (value == "true" || value == "1");
             continue;
         }
         if (key == "enable_rglm") {
@@ -140,33 +146,68 @@ SolveResult Model::solve(const SolverOptions& options) {
     // correction = profit(source) when s == t (tour: depot profit double-subtracted)
     double correction = problem_.is_tour() ? problem_.profit(source) : 0.0;
 
+    const int32_t n = problem_.num_nodes();
     std::vector<double> fwd_bounds, bwd_bounds;
+    std::vector<double> all_pairs;
     heuristic::WarmStartResult warm_start;
     double warm_start_ub = std::numeric_limits<double>::infinity();
 
     {
         Timer preproc_timer;
-        double budget_ms = std::min(500.0, std::max(10.0,
-            static_cast<double>(problem_.num_nodes()) * 10.0));
 
-        tbb::task_group tg;
-        tg.run([&] {
-            fwd_bounds = preprocess::forward_labeling(problem_, source);
-        });
-        // For tour (s == t), backward = forward. Skip redundant computation.
-        if (source != target) {
+        if (all_pairs_propagation) {
+            // All-pairs labeling: uncapped warm-start budget so it fills
+            // the parallel slot (all-pairs typically takes longer).
+            double budget_ms = std::max(10.0, static_cast<double>(n) * 10.0);
+            constexpr double inf = std::numeric_limits<double>::infinity();
+            all_pairs.assign(static_cast<size_t>(n) * n, inf);
+
+            tbb::task_group tg;
             tg.run([&] {
-                bwd_bounds = preprocess::backward_labeling(problem_, target);
+                tbb::parallel_for(0, n, [&](int32_t s) {
+                    auto row = preprocess::forward_labeling(problem_, s);
+                    std::copy(row.begin(), row.end(),
+                              all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
+                });
             });
-        }
-        tg.run([&] {
-            warm_start = heuristic::build_warm_start(problem_, budget_ms);
-        });
-        tg.wait();
+            tg.run([&] {
+                warm_start = heuristic::build_warm_start(problem_, budget_ms);
+            });
+            tg.wait();
 
-        // For tour, backward = forward
-        if (source == target) {
-            bwd_bounds = fwd_bounds;
+            // Extract source row for fwd/bwd bounds
+            fwd_bounds.assign(
+                all_pairs.begin() + static_cast<ptrdiff_t>(source) * n,
+                all_pairs.begin() + static_cast<ptrdiff_t>(source) * n + n);
+            if (source == target) {
+                bwd_bounds = fwd_bounds;
+            } else {
+                bwd_bounds.assign(
+                    all_pairs.begin() + static_cast<ptrdiff_t>(target) * n,
+                    all_pairs.begin() + static_cast<ptrdiff_t>(target) * n + n);
+            }
+        } else {
+            // Default: depot-only labeling with capped warm-start budget
+            double budget_ms = std::min(500.0, std::max(10.0,
+                static_cast<double>(n) * 10.0));
+
+            tbb::task_group tg;
+            tg.run([&] {
+                fwd_bounds = preprocess::forward_labeling(problem_, source);
+            });
+            if (source != target) {
+                tg.run([&] {
+                    bwd_bounds = preprocess::backward_labeling(problem_, target);
+                });
+            }
+            tg.run([&] {
+                warm_start = heuristic::build_warm_start(problem_, budget_ms);
+            });
+            tg.wait();
+
+            if (source == target) {
+                bwd_bounds = fwd_bounds;
+            }
         }
 
         warm_start_ub = warm_start.objective;
@@ -179,6 +220,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_max_cuts_per_separator(max_cuts_per_sep);
     bridge.set_upper_bound(warm_start_ub);
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
+    if (all_pairs_propagation) {
+        bridge.set_all_pairs_bounds(std::move(all_pairs));
+    }
 
     // Add separators
     bridge.add_separator(std::make_unique<sep::SECSeparator>());

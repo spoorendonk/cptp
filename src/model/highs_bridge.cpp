@@ -309,6 +309,10 @@ void HiGHSBridge::set_labeling_bounds(std::vector<double> f,
     correction_ = correction;
 }
 
+void HiGHSBridge::set_all_pairs_bounds(std::vector<double> dist) {
+    all_pairs_ = std::move(dist);
+}
+
 void HiGHSBridge::install_propagator() {
     if (fwd_bounds_.empty() || bwd_bounds_.empty()) return;
 
@@ -336,6 +340,9 @@ void HiGHSBridge::install_propagator() {
     auto fwd = std::make_shared<std::vector<double>>(fwd_bounds_);
     auto bwd = std::make_shared<std::vector<double>>(bwd_bounds_);
     double corr = correction_;
+
+    // All-pairs bounds for stronger Trigger B (empty if not computed)
+    auto ap = std::make_shared<std::vector<double>>(std::move(all_pairs_));
 
     // Pre-build adjacency: for each node, list of (edge_idx, neighbor)
     struct AdjEntry { int32_t edge; int32_t neighbor; };
@@ -427,6 +434,10 @@ void HiGHSBridge::install_propagator() {
             }
 
             // ── Trigger B: Fixed edge x_(a,i) = 1 → chained bounds ──
+            const auto& apd = *ap;
+            const bool have_all_pairs = !apd.empty();
+            const int32_t depot = prob.depot();
+
             for (int32_t e = 0; e < m; ++e) {
                 if (proc[e]) continue;
                 if (domain.col_lower_[e] < 0.5) continue;  // not fixed to 1
@@ -435,39 +446,76 @@ void HiGHSBridge::install_propagator() {
                 int32_t a = prob.graph().edge_source(e);
                 int32_t i = prob.graph().edge_target(e);
 
-                // Tightened bound reaching i via a:
-                // cost_via_a = f[a] + cost(a,i) - profit(i)
-                double cost_a_to_i = f[a] + ec[e] - pr[i];
+                if (have_all_pairs) {
+                    // All-pairs Trigger B: scan ALL unfixed edges
+                    const double d_depot_a = apd[depot * n + a];
+                    const double d_depot_i = apd[depot * n + i];
+                    const double d_i_depot = apd[i * n + depot];
+                    const double d_a_depot = apd[a * n + depot];
+                    const double cost_ai = ec[e];
 
-                // For each unfixed edge (i,j) adjacent to i
-                for (const auto& [ej, j] : adjacency[i]) {
-                    if (ej == e) continue;  // skip the fixed edge itself
-                    if (domain.col_upper_[ej] < 0.5) continue;  // already fixed to 0
+                    for (int32_t ej = 0; ej < m; ++ej) {
+                        if (ej == e) continue;
+                        if (domain.col_upper_[ej] < 0.5) continue;
 
-                    double lb = cost_a_to_i + ec[ej] + b[j] + corr;
-                    if (lb > ub + 1e-6) {
-                        domain.changeBound(
-                            HighsBoundType::kUpper, ej, 0.0,
-                            HighsDomain::Reason::unspecified());
-                        fixings++;
-                        (*chain_fixings)++;
+                        int32_t u = prob.graph().edge_source(ej);
+                        int32_t v = prob.graph().edge_target(ej);
+
+                        // Orientation 1: depot→...→a→i→...→u→v→...→depot
+                        double lb1 = d_depot_a + cost_ai + apd[i * n + u] + ec[ej] + apd[v * n + depot] + corr;
+                        // Orientation 2: depot→...→u→v→...→a→i→...→depot
+                        double lb2 = apd[depot * n + u] + ec[ej] + apd[v * n + a] + cost_ai + d_i_depot + corr;
+                        // Also try reversed edge orientation (u,v) as (v,u)
+                        double lb3 = d_depot_a + cost_ai + apd[i * n + v] + ec[ej] + apd[u * n + depot] + corr;
+                        double lb4 = apd[depot * n + v] + ec[ej] + apd[u * n + a] + cost_ai + d_i_depot + corr;
+                        // And reversed fixed edge: depot→...→i→a→...
+                        double lb5 = d_depot_i + cost_ai + apd[a * n + u] + ec[ej] + apd[v * n + depot] + corr;
+                        double lb6 = apd[depot * n + u] + ec[ej] + apd[v * n + i] + cost_ai + d_a_depot + corr;
+                        double lb7 = d_depot_i + cost_ai + apd[a * n + v] + ec[ej] + apd[u * n + depot] + corr;
+                        double lb8 = apd[depot * n + v] + ec[ej] + apd[u * n + i] + cost_ai + d_a_depot + corr;
+
+                        double lb = std::min({lb1, lb2, lb3, lb4, lb5, lb6, lb7, lb8});
+
+                        if (lb > ub + 1e-6) {
+                            domain.changeBound(
+                                HighsBoundType::kUpper, ej, 0.0,
+                                HighsDomain::Reason::unspecified());
+                            fixings++;
+                            (*chain_fixings)++;
+                        }
                     }
-                }
+                } else {
+                    // Fallback: neighbor-only scan (original Trigger B)
+                    double cost_a_to_i = f[a] + ec[e] - pr[i];
 
-                // Tightened bound reaching a via i (return side):
-                double cost_via_i_return = ec[e] + b[i] - pr[a];
+                    for (const auto& [ej, j] : adjacency[i]) {
+                        if (ej == e) continue;
+                        if (domain.col_upper_[ej] < 0.5) continue;
 
-                for (const auto& [ek, k] : adjacency[a]) {
-                    if (ek == e) continue;
-                    if (domain.col_upper_[ek] < 0.5) continue;
+                        double lb = cost_a_to_i + ec[ej] + b[j] + corr;
+                        if (lb > ub + 1e-6) {
+                            domain.changeBound(
+                                HighsBoundType::kUpper, ej, 0.0,
+                                HighsDomain::Reason::unspecified());
+                            fixings++;
+                            (*chain_fixings)++;
+                        }
+                    }
 
-                    double lb = f[k] + ec[ek] + cost_via_i_return + corr;
-                    if (lb > ub + 1e-6) {
-                        domain.changeBound(
-                            HighsBoundType::kUpper, ek, 0.0,
-                            HighsDomain::Reason::unspecified());
-                        fixings++;
-                        (*chain_fixings)++;
+                    double cost_via_i_return = ec[e] + b[i] - pr[a];
+
+                    for (const auto& [ek, k] : adjacency[a]) {
+                        if (ek == e) continue;
+                        if (domain.col_upper_[ek] < 0.5) continue;
+
+                        double lb = f[k] + ec[ek] + cost_via_i_return + corr;
+                        if (lb > ub + 1e-6) {
+                            domain.changeBound(
+                                HighsBoundType::kUpper, ek, 0.0,
+                                HighsDomain::Reason::unspecified());
+                            fixings++;
+                            (*chain_fixings)++;
+                        }
                     }
                 }
             }

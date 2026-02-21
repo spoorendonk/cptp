@@ -54,6 +54,10 @@ class HiGHSBridge {
     /// correction = profit(source) if source==target (tour), 0 if source!=target (path).
     void set_labeling_bounds(std::vector<double> f, std::vector<double> b, double correction);
 
+    /// Set all-pairs labeling bounds for stronger domain propagation (Trigger B).
+    /// dist is a flat n×n matrix: d(s,v) = dist[s*n + v].
+    void set_all_pairs_bounds(std::vector<double> dist);
+
     /// Install domain propagator that fixes edges during B&C based on labeling bounds.
     void install_propagator();
 
@@ -79,6 +83,9 @@ class HiGHSBridge {
     std::vector<double> fwd_bounds_;   // f[v]: forward bounds (source → v)
     std::vector<double> bwd_bounds_;   // b[v]: backward bounds (v → target)
     double correction_ = 0.0;         // profit(source) if tour, 0 if path
+
+    // All-pairs labeling bounds for stronger Trigger B propagation
+    std::vector<double> all_pairs_;    // flat n×n: d(s,v) = all_pairs_[s*n+v]
 
     // Propagator statistics (shared with callback lambda)
     std::shared_ptr<int64_t> propagator_fixings_;
