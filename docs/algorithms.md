@@ -4,12 +4,16 @@
 
 The **Capacitated Profitable Trip Problem (CPTP)** is a variant of the Traveling Salesman Problem where:
 
-- A vehicle starts and ends at a depot
+- A vehicle starts at a **source** and ends at a **target** node
 - Each customer has a **profit** (reward for visiting), a **demand** (capacity consumed), and a **cost** (travel distance)
 - The vehicle has limited **capacity** Q
-- The objective is to minimize `travel_cost - collected_profit`, i.e., find a tour that balances short routes with high-value customers
+- The objective is to minimize `travel_cost - collected_profit`, i.e., find a route that balances short routes with high-value customers
 
 Not all customers need to be visited -- the solver decides which subset maximizes net benefit.
+
+The solver supports two modes:
+- **Tour** (source == target): closed loop from a depot, as in the original CPTP formulation
+- **s-t path** (source != target): open path from source to target
 
 ## MIP Formulation
 
@@ -21,9 +25,11 @@ Undirected edge formulation following Jepsen et al. (2014):
 **Objective**: `min sum(cost_e * x_e) - sum(profit_i * y_i)`
 
 **Constraints**:
-1. Degree: `sum(x_e : e incident to i) = 2 * y_i` for each node
+1. Degree:
+   - **Tour**: `sum(x_e : e incident to i) = 2 * y_i` for each node
+   - **Path**: `sum(x_e : e incident to i) = y_i` for source/target, `= 2 * y_i` for intermediates
 2. Capacity: `sum(demand_i * y_i) <= Q`
-3. Depot fixed: `y_depot = 1`
+3. Fixed nodes: `y_source = 1`, `y_target = 1`
 4. Subtour elimination (separated dynamically)
 5. Capacity inequalities (separated dynamically)
 
@@ -33,13 +39,12 @@ Three families of cuts are separated dynamically via HiGHS MIP callbacks. All se
 
 ### Subtour Elimination Constraints (SEC)
 
-For each customer t, check if the min-cut between depot and t in the fractional support graph violates:
+For each customer t, check if the min-cut between source and t in the fractional support graph violates the SEC. The Gomory-Hu tree (rooted at source) provides all pairwise min-cuts efficiently.
 
-```
-x(delta(S)) >= 2 * y_t
-```
+- **Tour**: `x(delta(S)) >= 2 * y_t` for any S not containing the depot
+- **Path**: `x(delta(S)) >= 2 * y_t` if S does not contain the path target (path must enter and leave S); `x(delta(S)) >= y_t` if S contains the path target (path enters S and terminates)
 
-Uses Dinitz max-flow to find violated cuts.
+Uses Dinitz max-flow to find violated cuts. When the sparser inside form has fewer nonzeros, a degree-substituted variant is used instead of the cut form.
 
 ### Rounded Capacity Inequalities (RCI)
 
@@ -74,23 +79,27 @@ Each max-flow call uses the **Dinitz algorithm** (O(V^2 E)) on the fractional su
 
 ### Demand-Reachability
 
-Computes the minimum-demand path from depot to each node via Dijkstra. If a node's round-trip demand exceeds capacity (`2 * min_demand_path(depot, v) - demand(v) > Q`), the node is fixed to zero before solving.
+- **Tour**: Dijkstra from depot; eliminates nodes where `2 * min_demand_path(depot, v) - demand(v) > Q` (round-trip check)
+- **Path**: Dijkstra from both source and target; eliminates nodes where `dist_source(v) + dist_target(v) - demand(v) > Q` (one-way check)
 
 ### Edge Elimination
 
-ESPPRC-style forward labeling from the depot with:
+ESPPRC-style forward labeling with:
 - Net cost tracking (edge costs minus collected profits)
 - Demand accumulation with capacity check
 - 2-cycle elimination (no immediate return to predecessor)
 - Label dominance to control enumeration
 
-For each edge, if the lower bound on any tour using that edge exceeds the warm-start upper bound, the edge variable is fixed to zero.
+- **Tour**: labeling from depot; lb(u,v) = f[u] + c(u,v) + f[v] + profit(depot)
+- **Path**: labeling from both source and target; lb(u,v) = min(f_s[u] + c(u,v) + f_t[v], f_s[v] + c(u,v) + f_t[u])
+
+For each edge, if the lower bound exceeds the warm-start upper bound, the edge variable is fixed to zero.
 
 ## Warm-Start Heuristic
 
 Parallel construction + local search heuristic using Intel TBB. See [warm-start-heuristic.md](warm-start-heuristic.md) for full details.
 
-**Construction**: Greedy cheapest-insertion with three deterministic orderings (profit/demand ratio, absolute profit, distance from depot) plus random restarts.
+**Construction**: Greedy cheapest-insertion with three deterministic orderings (profit/demand ratio, absolute profit, distance from source) plus random restarts. For paths, the initial route is `[source, target]` (open); for tours, `[depot, depot]` (closed).
 
 **Local search**: 2-opt, or-opt (1/2/3 chains), node drop, node add with first-improvement.
 

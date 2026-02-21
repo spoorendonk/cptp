@@ -3,6 +3,7 @@
 
 #include "core/digraph.h"
 #include "core/gomory_hu.h"
+#include "core/io.h"
 #include "core/problem.h"
 #include "sep/sec_separator.h"
 #include "sep/rci_separator.h"
@@ -326,4 +327,22 @@ TEST_CASE("Problem is_tour() and source/target accessors", "[problem]") {
     REQUIRE(path_prob.source() == 0);
     REQUIRE(path_prob.target() == 2);
     REQUIRE(path_prob.depot() == 0);  // backward compat: returns source
+}
+
+TEST_CASE("PathWyse IO: load tour (no source/target line)", "[io]") {
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
+    REQUIRE(prob.is_tour());
+    REQUIRE(prob.source() == 0);
+    REQUIRE(prob.target() == 0);
+    REQUIRE(prob.num_nodes() == 4);
+    REQUIRE(prob.capacity() == 7.0);
+}
+
+TEST_CASE("PathWyse IO: load path (with source/target line)", "[io]") {
+    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+    REQUIRE_FALSE(prob.is_tour());
+    REQUIRE(prob.source() == 0);
+    REQUIRE(prob.target() == 3);
+    REQUIRE(prob.num_nodes() == 4);
+    REQUIRE(prob.capacity() == 7.0);
 }

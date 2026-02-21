@@ -10,8 +10,9 @@ The solver targets an RCSPP with:
 - **Vertex profits**: each vertex has a profit collected when visited; the objective minimizes `travel_cost - collected_profit`
 - **Optional vertices**: not all vertices need to be visited -- the solver selects the optimal subset
 - **Negative-cost cycles**: the graph may contain negative cycles (profits can exceed edge costs), requiring elementary path constraints
+- **Tours or s-t paths**: supports closed tours (depot-to-depot) and open s-t paths (source-to-target) with automatic detection
 
-This problem is also known as the **Capacitated Profitable Tour Problem (CPTP)**, introduced by [Jepsen, Petersen, Spoorendonk & Pisinger (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X).
+This problem is also known as the **Capacitated Profitable Tour Problem (CPTP)**, introduced by [Jepsen, Petersen, Spoorendonk & Pisinger (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X). The s-t path variant extends it to open paths where source and target differ.
 
 ## Features
 
@@ -44,15 +45,24 @@ cmake --build build -j$(nproc)
 ## Usage
 
 ```bash
-./build/cptp-solve <instance> [--time_limit <sec>] [--threads <n>]
+./build/cptp-solve <instance> [--source <node>] [--target <node>] [--time_limit <sec>] [--threads <n>]
 ```
 
 Accepts TSPLIB (`.vrp`, `.sppcc`) and PathWyse (`.txt`) instance formats. All additional options are forwarded to HiGHS.
 
-### Example
+When `source != target`, the solver uses an open s-t path formulation (degree 1 at source/target, degree 2 at intermediates). When `source == target` (default), the standard tour formulation is used.
+
+### Examples
 
 ```bash
+# Tour (closed loop from depot)
 ./build/cptp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
+
+# s-t path (open path from node 0 to node 3)
+./build/cptp-solve tests/data/tiny4_path.txt
+
+# Override source/target via CLI
+./build/cptp-solve tests/data/tiny4.txt --source 0 --target 3
 ```
 
 ## Tests
@@ -77,7 +87,7 @@ docs/            Algorithm documentation
 
 ## Documentation
 
-- [Algorithms and techniques](docs/algorithms.md) -- formulation, separators, preprocessing, references
+- [Algorithms and techniques](docs/algorithms.md) -- formulation (tours and s-t paths), separators, preprocessing, references
 - [Warm-start heuristic](docs/warm-start-heuristic.md) -- construction, local search, parallelism
 
 ## Dependencies
