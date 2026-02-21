@@ -1,4 +1,10 @@
-# CPTP Branch-and-Cut Solver
+# rcspp-bac — Resource Constrained Shortest Path Branch-and-Cut Solver
+
+## Git Workflow
+
+- **Never commit directly to main.** Always create a feature branch, push, and open a PR.
+- **Linear history only.** Merge PRs with squash or rebase (no merge commits).
+- **No force-push to main.**
 
 ## Build
 
@@ -32,13 +38,16 @@ cmake --build build -j$(nproc)
 ## Architecture
 
 ```
-src/core/     — Problem definition, IO parsers (TSPLIB, PathWyse)
-src/sep/      — Solver-independent separators (SEC, RCI, Multistar, Comb)
-src/model/    — HiGHS integration (Model, HiGHSBridge)
-src/cli/      — CLI tool (cptp-solve)
-src/util/     — Utilities (Timer)
-python/       — nanobind Python bindings
-tests/        — Catch2 tests
+src/core/        — Problem definition, IO parsers (TSPLIB, PathWyse), Dinitz max-flow, Gomory-Hu tree
+src/sep/         — Solver-independent separators (SEC, RCI, Multistar)
+src/model/       — HiGHS integration (Model, HiGHSBridge)
+src/heuristic/   — Warm-start construction + local search
+src/preprocess/  — Demand-reachability and edge elimination
+src/cli/         — CLI tool (cptp-solve)
+src/util/        — Utilities (Timer)
+python/          — nanobind Python bindings
+tests/           — Catch2 tests
+docs/            — Algorithm documentation
 ```
 
 ## Key types
@@ -48,7 +57,9 @@ tests/        — Catch2 tests
 - `cptp::HiGHSBridge` — Wires separators into HiGHS MIP
 - `cptp::sep::Separator` — Base class for cut separators
 - `cptp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow
+- `cptp::gomory_hu_tree` — Gusfield's algorithm, shared across separators
+- `cptp::heuristic::build_warm_start` — Parallel greedy + local search heuristic
 
 ## Namespace
 
-All code under `cptp::` namespace, separators under `cptp::sep::`.
+All code under `cptp::` namespace, separators under `cptp::sep::`, heuristics under `cptp::heuristic::`, preprocessing under `cptp::preprocess::`.
