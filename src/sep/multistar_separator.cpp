@@ -65,6 +65,7 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
         cut.rhs = 0.0;
 
         if (lhs > tol && !cut.indices.empty()) {
+            cut.violation = lhs;
             all_cuts.push_back(std::move(cut));
         }
     }

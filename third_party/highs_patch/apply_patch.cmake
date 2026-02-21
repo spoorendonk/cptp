@@ -110,6 +110,17 @@ if(_found2 EQUAL -1)
       "  // Reject solutions that violate user lazy constraints (e.g. SEC/GSEC)\n  if (!mipsolver.submip && !HighsUserSeparator::isFeasible(sol)) return false;\n  const bool execute_mip_solution_callback ="
       CONTENT2 "${CONTENT2}")
 
+    # Patch runSetup(): also check user feasibility for MIP start solutions.
+    # HiGHS accepts warm-start solutions directly without calling addIncumbent(),
+    # bypassing our feasibility check. Add isFeasible() to the feasibility condition.
+    # Original: if (feasible && solobj < upper_bound) {
+    # New:      if (feasible && !mipsolver.submip) feasible = HighsUserSeparator::isFeasible(incumbent);
+    #           if (feasible && solobj < upper_bound) {
+    string(REPLACE
+      "    if (feasible && solobj < upper_bound) {\n      double prev_upper_bound = upper_bound;"
+      "    if (feasible && !mipsolver.submip) feasible = HighsUserSeparator::isFeasible(incumbent);\n    if (feasible && solobj < upper_bound) {\n      double prev_upper_bound = upper_bound;"
+      CONTENT2 "${CONTENT2}")
+
     file(WRITE "${MIP_DIR}/HighsMipSolverData.cpp" "${CONTENT2}")
     message(STATUS "Applied lazy constraint + incumbent feasibility patch to HighsMipSolverData.cpp")
 else()

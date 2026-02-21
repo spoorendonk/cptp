@@ -86,9 +86,19 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     // Intercept our custom options, forward the rest to HiGHS
     int32_t separation_interval = 1;
+    int32_t max_cuts_per_sep = 3;  // top-k most-violated per separator per round
+    double separation_tol = sep::kDefaultFracTol;
     for (const auto& [key, value] : options) {
         if (key == "separation_interval") {
             separation_interval = std::stoi(value);
+            continue;
+        }
+        if (key == "max_cuts_per_separator") {
+            max_cuts_per_sep = std::stoi(value);
+            continue;
+        }
+        if (key == "separation_tol") {
+            separation_tol = std::stod(value);
             continue;
         }
         auto status = highs.setOptionValue(key, value);
@@ -98,8 +108,9 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
-    HiGHSBridge bridge(problem_, highs);
+    HiGHSBridge bridge(problem_, highs, separation_tol);
     bridge.set_separation_interval(separation_interval);
+    bridge.set_max_cuts_per_separator(max_cuts_per_sep);
 
     // Add separators
     bridge.add_separator(std::make_unique<sep::SECSeparator>());

@@ -21,11 +21,13 @@ std::vector<Cut> SECSeparator::separate(const SeparationContext& ctx) {
         double yi = ctx.y_values[target];
 
         // Undirected SEC: flow from depot to i >= 2*y_i
-        if (flow >= 2.0 * yi - tol) continue;
+        double sec_violation = 2.0 * yi - flow;
+        if (sec_violation <= tol) continue;
 
         // SEC: sum(x_e for edges crossing cut) >= 2*y_target
         // In <= form: 2*y_target - sum(x_e) <= 0
         Cut cut;
+        cut.violation = sec_violation;
         for (auto e : graph.edges()) {
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);

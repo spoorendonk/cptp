@@ -1,5 +1,6 @@
 #include "model/highs_bridge.h"
 
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -183,12 +184,24 @@ void HiGHSBridge::install_separators() {
             }
             tg.wait();
 
-            // Add cuts to the cutpool
+            // Add cuts to the cutpool (limited per separator)
             for (size_t i = 0; i < separators_.size(); ++i) {
                 auto& stats = separator_stats_[separators_[i]->name()];
                 stats.time_seconds += elapsed[i];
                 if (!results[i].empty()) stats.rounds_called++;
-                for (auto& cut : results[i]) {
+
+                // Sort by violation (descending) and limit count
+                auto& cuts = results[i];
+                std::sort(cuts.begin(), cuts.end(),
+                    [](const sep::Cut& a, const sep::Cut& b) {
+                        return a.violation > b.violation;
+                    });
+                int32_t limit = (max_cuts_per_sep_ > 0)
+                    ? std::min(static_cast<int32_t>(cuts.size()), max_cuts_per_sep_)
+                    : static_cast<int32_t>(cuts.size());
+
+                for (int32_t j = 0; j < limit; ++j) {
+                    auto& cut = cuts[j];
                     std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
                     cutpool.addCut(mipsolver,
                                    hi.data(), cut.values.data(),

@@ -51,10 +51,12 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
         double rhs = 2.0 * (k - d_S / Q_r);
         double lhs = flow - (2.0 * served_demand) / Q_r;
 
-        if (lhs >= rhs - tol) continue;  // not violated
+        double rci_violation = rhs - lhs;
+        if (rci_violation <= tol) continue;  // not violated
 
         // In <= form: (2/Q_r)*sum q_i*y_i - x(delta(S)) <= -rhs
         Cut cut;
+        cut.violation = rci_violation;
 
         for (auto e : graph.edges()) {
             int32_t u = graph.edge_source(e);

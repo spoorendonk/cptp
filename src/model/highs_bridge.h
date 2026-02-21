@@ -41,6 +41,10 @@ class HiGHSBridge {
     /// 1 = every round (default), 2 = every other round, etc.
     void set_separation_interval(int32_t interval) { separation_interval_ = interval; }
 
+    /// Max cuts to add per separator per round (0 = unlimited).
+    /// Jepsen et al. recommend 1: add only the most-violated cut.
+    void set_max_cuts_per_separator(int32_t max_cuts) { max_cuts_per_sep_ = max_cuts; }
+
  private:
     /// Order the tour nodes by following edges from depot.
     std::vector<int32_t> order_tour(const std::vector<int32_t>& visited_nodes,
@@ -56,6 +60,7 @@ class HiGHSBridge {
 
     // Amortized separation: skip rounds to reduce overhead
     int32_t separation_interval_ = 1;  // 1 = every round (no skipping)
+    int32_t max_cuts_per_sep_ = 3;     // max cuts per separator per round (0 = unlimited)
 
     // Cut statistics (updated from callback)
     mutable std::map<std::string, SeparatorStats> separator_stats_;
