@@ -9,6 +9,7 @@
 #include "sep/rci_separator.h"
 #include "sep/multistar_separator.h"
 #include "sep/comb_separator.h"
+#include "sep/rglm_separator.h"
 
 #include "util/timer.h"
 
@@ -91,6 +92,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t separation_interval = 1;
     int32_t max_cuts_per_sep = 3;  // top-k most-violated per separator per round
     double separation_tol = sep::kDefaultFracTol;
+    bool enable_rglm = false;
     for (const auto& [key, value] : options) {
         if (key == "separation_interval") {
             separation_interval = std::stoi(value);
@@ -102,6 +104,10 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "separation_tol") {
             separation_tol = std::stod(value);
+            continue;
+        }
+        if (key == "enable_rglm") {
+            enable_rglm = (value == "true" || value == "1");
             continue;
         }
         auto status = highs.setOptionValue(key, value);
@@ -133,6 +139,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.add_separator(std::make_unique<sep::SECSeparator>());
     bridge.add_separator(std::make_unique<sep::RCISeparator>());
     bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
+    if (enable_rglm)
+        bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
     bridge.add_separator(std::make_unique<sep::CombSeparator>());
 
     bridge.build_formulation();
