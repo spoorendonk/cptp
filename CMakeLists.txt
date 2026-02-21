@@ -18,6 +18,7 @@ add_library(cptp_sep
     src/sep/rci_separator.cpp
     src/sep/multistar_separator.cpp
     src/sep/comb_separator.cpp
+    src/sep/rglm_separator.cpp
 )
 target_include_directories(cptp_sep PUBLIC src)
 target_link_libraries(cptp_sep PUBLIC TBB::tbb)

@@ -39,7 +39,7 @@ cmake --build build -j$(nproc)
 
 ```
 src/core/        — Problem definition, IO parsers (TSPLIB, PathWyse), Dinitz max-flow, Gomory-Hu tree
-src/sep/         — Solver-independent separators (SEC, RCI, Multistar)
+src/sep/         — Solver-independent separators (SEC, RCI, Multistar, RGLM, Comb)
 src/model/       — HiGHS integration (Model, HiGHSBridge)
 src/heuristic/   — Warm-start construction + local search
 src/preprocess/  — Demand-reachability and edge elimination
