@@ -13,7 +13,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
     const int32_t n = prob.num_nodes();
     const double tol = ctx.tol;
     const double Q = prob.capacity();
-    const int32_t depot = prob.depot();
+    const int32_t depot = prob.source();
 
     if (Q <= 0 || Q >= 1e17) return {};
 
