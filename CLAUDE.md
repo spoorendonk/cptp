@@ -31,7 +31,6 @@ cmake --build build -j$(nproc)
 - GCC 14, C++23
 - CMake 3.25+
 - `apt install libtbb-dev` (TBB 2021.11)
-- melon: git submodule in `third_party/melon`
 - HiGHS: fetched via CMake FetchContent (v1.10.0)
 - Catch2: fetched via CMake FetchContent (v3.7.1)
 

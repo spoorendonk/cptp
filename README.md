@@ -17,11 +17,12 @@ This problem is also known as the **Capacitated Profitable Tour Problem (CPTP)**
 ## Features
 
 - **MIP formulation** with binary edge and node variables (undirected)
-- **Dynamic cut separation**: subtour elimination (SEC), rounded capacity inequalities (RCI), multistar inequalities
+- **Dynamic cut separation**: subtour elimination (SEC), rounded capacity inequalities (RCI), multistar/GLM inequalities, rounded GLM (RGLM)
 - **Gomory-Hu tree** (Gusfield's algorithm) shared across separators for efficient min-cut computation
+- **Domain propagator**: labeling-based edge fixing during branch-and-bound
 - **Preprocessing**: demand-reachability filtering and ESPPRC-style edge elimination
 - **Warm-start heuristic**: parallel greedy construction + local search (2-opt, or-opt, node drop/add) via TBB
-- **MIP backend**: HiGHS with user cut callbacks
+- **MIP backend**: HiGHS with custom separator, feasibility check, and propagator callbacks
 - **Python bindings** via nanobind (optional)
 
 ## Build
@@ -30,7 +31,6 @@ Requires GCC 14+ (C++23), CMake 3.25+, and TBB:
 
 ```bash
 apt install libtbb-dev
-git submodule update --init
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
@@ -183,8 +183,9 @@ auto result = model.solve({{"time_limit", "120"}});
 
 ```
 src/core/        Problem definition, IO (TSPLIB & PathWyse), Dinitz max-flow, Gomory-Hu tree
-src/sep/         Cut separators (SEC, RCI, Multistar)
-src/model/       HiGHS MIP integration and cut callbacks
+src/sep/         Cut separators (SEC, RCI, Multistar, RGLM, Comb)
+src/model/       HiGHS MIP integration (separators, propagator, callbacks)
+src/util/        Utilities (Timer)
 src/heuristic/   Warm-start construction + local search
 src/preprocess/  Demand-reachability and edge elimination
 src/cli/         Command-line solver
@@ -195,13 +196,14 @@ docs/            Algorithm documentation
 
 ## Documentation
 
-- [Algorithms and techniques](docs/algorithms.md) -- formulation (tours and s-t paths), separators, preprocessing, references
+- [Algorithms and techniques](docs/algorithms.md) -- formulation, solver pipeline, preprocessing, references
+- [Cut separation](docs/separation.md) -- SEC, RCI, Multistar/GLM, RGLM, Comb, cut management
+- [Domain propagator](docs/domain-propagator.md) -- labeling-based edge fixing during B&C
 - [Warm-start heuristic](docs/warm-start-heuristic.md) -- construction, local search, parallelism
 
 ## Dependencies
 
 - [HiGHS](https://highs.dev) v1.10.0 -- MIP solver (fetched via CMake)
-- [melon](https://github.com/fhamonic/melon) -- graph data structures (git submodule)
 - [Catch2](https://github.com/catchorg/Catch2) v3.7.1 -- testing (fetched via CMake)
 - [TBB](https://github.com/oneapi-src/oneTBB) 2021.11 -- parallel heuristic
 
