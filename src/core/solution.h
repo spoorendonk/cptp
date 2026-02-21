@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace cptp {
+namespace rcspp {
 
 /// Per-separator statistics collected during branch-and-cut.
 struct SeparatorStats {
@@ -39,4 +39,4 @@ struct SolveResult {
     }
 };
 
-}  // namespace cptp
+}  // namespace rcspp

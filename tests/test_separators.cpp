@@ -18,10 +18,10 @@ namespace {
 
 /// Build a small 4-node problem: depot=0, customers=1,2,3.
 /// Complete undirected graph (6 edges for 4 nodes).
-cptp::Problem make_small_problem() {
-    cptp::Problem prob;
+rcspp::Problem make_small_problem() {
+    rcspp::Problem prob;
 
-    std::vector<cptp::Edge> edges;
+    std::vector<rcspp::Edge> edges;
     std::vector<double> costs;
     for (int i = 0; i < 4; ++i) {
         for (int j = i + 1; j < 4; ++j) {
@@ -40,10 +40,10 @@ cptp::Problem make_small_problem() {
 }
 
 /// Build a small 4-node s-t path problem: source=0, target=3.
-cptp::Problem make_small_path_problem() {
-    cptp::Problem prob;
+rcspp::Problem make_small_path_problem() {
+    rcspp::Problem prob;
 
-    std::vector<cptp::Edge> edges;
+    std::vector<rcspp::Edge> edges;
     std::vector<double> costs;
     for (int i = 0; i < 4; ++i) {
         for (int j = i + 1; j < 4; ++j) {
@@ -62,17 +62,17 @@ cptp::Problem make_small_path_problem() {
 
 /// Build support graph and Gomory-Hu tree from LP solution.
 struct SupportData {
-    cptp::digraph graph;
+    rcspp::digraph graph;
     std::vector<double> capacity;
-    std::unique_ptr<cptp::gomory_hu_tree> tree;
+    std::unique_ptr<rcspp::gomory_hu_tree> tree;
 };
 
-SupportData build_support(const cptp::Problem& prob,
+SupportData build_support(const rcspp::Problem& prob,
                           std::span<const double> x_values,
                           double tol = 1e-6) {
     const auto& g = prob.graph();
     int32_t n = prob.num_nodes();
-    cptp::digraph_builder builder(n);
+    rcspp::digraph_builder builder(n);
     for (auto e : g.edges()) {
         double xval = x_values[e];
         if (xval > tol) {
@@ -83,7 +83,7 @@ SupportData build_support(const cptp::Problem& prob,
         }
     }
     auto [sg, cap] = builder.build();
-    auto tree = std::make_unique<cptp::gomory_hu_tree>(sg, cap, prob.source());
+    auto tree = std::make_unique<rcspp::gomory_hu_tree>(sg, cap, prob.source());
     return {std::move(sg), std::move(cap), std::move(tree)};
 }
 
@@ -121,7 +121,7 @@ TEST_CASE("SEC separator finds violated cuts on fractional solution", "[sec]") {
 
     auto support = build_support(prob, x_values);
 
-    cptp::sep::SeparationContext ctx{
+    rcspp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
         .y_values = y_values,
@@ -131,7 +131,7 @@ TEST_CASE("SEC separator finds violated cuts on fractional solution", "[sec]") {
         .flow_tree = support.tree.get(),
     };
 
-    cptp::sep::SECSeparator sec;
+    rcspp::sep::SECSeparator sec;
     auto cuts = sec.separate(ctx);
 
     // Should find violated SEC for nodes 2 and/or 3 (disconnected from depot)
@@ -164,7 +164,7 @@ TEST_CASE("SEC separator finds no cuts on integer feasible solution", "[sec]") {
 
     auto support = build_support(prob, x_values);
 
-    cptp::sep::SeparationContext ctx{
+    rcspp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
         .y_values = y_values,
@@ -174,7 +174,7 @@ TEST_CASE("SEC separator finds no cuts on integer feasible solution", "[sec]") {
         .flow_tree = support.tree.get(),
     };
 
-    cptp::sep::SECSeparator sec;
+    rcspp::sep::SECSeparator sec;
     auto cuts = sec.separate(ctx);
 
     // No violated cuts on a feasible solution
@@ -205,7 +205,7 @@ TEST_CASE("RCI separator basic test", "[rci]") {
 
     auto support = build_support(prob, x_values);
 
-    cptp::sep::SeparationContext ctx{
+    rcspp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
         .y_values = y_values,
@@ -215,7 +215,7 @@ TEST_CASE("RCI separator basic test", "[rci]") {
         .flow_tree = support.tree.get(),
     };
 
-    cptp::sep::RCISeparator rci;
+    rcspp::sep::RCISeparator rci;
     auto cuts = rci.separate(ctx);
 
     // Just verify it doesn't crash
@@ -252,7 +252,7 @@ TEST_CASE("SEC separator for s-t path finds violated cuts", "[sec][path]") {
 
     auto support = build_support(prob, x_values);
 
-    cptp::sep::SeparationContext ctx{
+    rcspp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
         .y_values = y_values,
@@ -262,7 +262,7 @@ TEST_CASE("SEC separator for s-t path finds violated cuts", "[sec][path]") {
         .flow_tree = support.tree.get(),
     };
 
-    cptp::sep::SECSeparator sec;
+    rcspp::sep::SECSeparator sec;
     auto cuts = sec.separate(ctx);
 
     // Should find violated SEC for disconnected nodes
@@ -294,7 +294,7 @@ TEST_CASE("SEC separator for s-t path: feasible path has no violations", "[sec][
 
     auto support = build_support(prob, x_values);
 
-    cptp::sep::SeparationContext ctx{
+    rcspp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
         .y_values = y_values,
@@ -304,7 +304,7 @@ TEST_CASE("SEC separator for s-t path: feasible path has no violations", "[sec][
         .flow_tree = support.tree.get(),
     };
 
-    cptp::sep::SECSeparator sec;
+    rcspp::sep::SECSeparator sec;
     auto cuts = sec.separate(ctx);
 
     // No violated cuts on a feasible path
@@ -312,8 +312,8 @@ TEST_CASE("SEC separator for s-t path: feasible path has no violations", "[sec][
 }
 
 TEST_CASE("Problem is_tour() and source/target accessors", "[problem]") {
-    cptp::Problem tour_prob;
-    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    rcspp::Problem tour_prob;
+    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 1};
     std::vector<double> profits = {0, 1, 1};
     std::vector<double> demands = {0, 1, 1};
@@ -324,7 +324,7 @@ TEST_CASE("Problem is_tour() and source/target accessors", "[problem]") {
     REQUIRE(tour_prob.target() == 0);
     REQUIRE(tour_prob.depot() == 0);
 
-    cptp::Problem path_prob;
+    rcspp::Problem path_prob;
     path_prob.build(3, edges, costs, profits, demands, 10.0, 0, 2);
     REQUIRE_FALSE(path_prob.is_tour());
     REQUIRE(path_prob.source() == 0);
@@ -333,7 +333,7 @@ TEST_CASE("Problem is_tour() and source/target accessors", "[problem]") {
 }
 
 TEST_CASE("PathWyse IO: load tour (no source/target line)", "[io]") {
-    auto prob = cptp::io::load("tests/data/tiny4.txt");
+    auto prob = rcspp::io::load("tests/data/tiny4.txt");
     REQUIRE(prob.is_tour());
     REQUIRE(prob.source() == 0);
     REQUIRE(prob.target() == 0);
@@ -342,7 +342,7 @@ TEST_CASE("PathWyse IO: load tour (no source/target line)", "[io]") {
 }
 
 TEST_CASE("PathWyse IO: load path (with source/target line)", "[io]") {
-    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+    auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
     REQUIRE_FALSE(prob.is_tour());
     REQUIRE(prob.source() == 0);
     REQUIRE(prob.target() == 3);
@@ -386,7 +386,7 @@ TEST_CASE("SEC path: rhs_coeff=1 when target in S (target_in_S=true)", "[sec][pa
 
     auto support = build_support(prob, x_values);
 
-    cptp::sep::SeparationContext ctx{
+    rcspp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
         .y_values = y_values,
@@ -396,7 +396,7 @@ TEST_CASE("SEC path: rhs_coeff=1 when target in S (target_in_S=true)", "[sec][pa
         .flow_tree = support.tree.get(),
     };
 
-    cptp::sep::SECSeparator sec;
+    rcspp::sep::SECSeparator sec;
     auto cuts = sec.separate(ctx);
 
     // If rhs_coeff were incorrectly 2.0, we'd get violation 2*1-1=1 > 0.
@@ -429,7 +429,7 @@ TEST_CASE("SEC path: target_in_S=false gives rhs_coeff=2", "[sec][path]") {
 
     auto support = build_support(prob, x_values);
 
-    cptp::sep::SeparationContext ctx{
+    rcspp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
         .y_values = y_values,
@@ -439,7 +439,7 @@ TEST_CASE("SEC path: target_in_S=false gives rhs_coeff=2", "[sec][path]") {
         .flow_tree = support.tree.get(),
     };
 
-    cptp::sep::SECSeparator sec;
+    rcspp::sep::SECSeparator sec;
     auto cuts = sec.separate(ctx);
 
     // Node 2 is disconnected from source with y=0.8. S={2} doesn't contain
@@ -457,14 +457,14 @@ TEST_CASE("Demand reachability: tour round-trip check", "[preprocess]") {
     // 3 nodes, depot=0. Demands: 0, 3, 5. Capacity=7.
     // Round-trip to node 1: 2*3 - 3 = 3 <= 7 → reachable
     // Round-trip to node 2: 2*5 - 5 = 5 <= 7 → reachable
-    cptp::Problem prob;
-    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 1};
     std::vector<double> profits = {0, 1, 1};
     std::vector<double> demands = {0, 3, 5};
     prob.build(3, edges, costs, profits, demands, 7.0, 0, 0);
 
-    auto reachable = cptp::preprocess::demand_reachability(prob);
+    auto reachable = rcspp::preprocess::demand_reachability(prob);
     REQUIRE(reachable[0]);
     REQUIRE(reachable[1]);
     REQUIRE(reachable[2]);
@@ -473,14 +473,14 @@ TEST_CASE("Demand reachability: tour round-trip check", "[preprocess]") {
 TEST_CASE("Demand reachability: tour eliminates unreachable node", "[preprocess]") {
     // Capacity=4. Node 2 has demand=5.
     // Round-trip to node 2: 2*5 - 5 = 5 > 4 → unreachable
-    cptp::Problem prob;
-    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 1};
     std::vector<double> profits = {0, 1, 1};
     std::vector<double> demands = {0, 2, 5};
     prob.build(3, edges, costs, profits, demands, 4.0, 0, 0);
 
-    auto reachable = cptp::preprocess::demand_reachability(prob);
+    auto reachable = rcspp::preprocess::demand_reachability(prob);
     REQUIRE(reachable[0]);
     REQUIRE(reachable[1]);  // 2*2 - 2 = 2 <= 4
     REQUIRE_FALSE(reachable[2]);  // 2*5 - 5 = 5 > 4
@@ -497,14 +497,14 @@ TEST_CASE("Demand reachability: path uses bidirectional check", "[preprocess][pa
     //
     // Node 1: dist_s=3, dist_t=3, check: 3+3-3=3 <= 6 → reachable
     // Node 2: dist_s=4, dist_t=4, check: 4+4-4=4 <= 6 → reachable
-    cptp::Problem prob;
-    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
     std::vector<double> costs = {1, 1, 1, 1, 1, 1};
     std::vector<double> profits = {0, 1, 1, 0};
     std::vector<double> demands = {0, 3, 4, 0};
     prob.build(4, edges, costs, profits, demands, 6.0, 0, 3);
 
-    auto reachable = cptp::preprocess::demand_reachability(prob);
+    auto reachable = rcspp::preprocess::demand_reachability(prob);
     REQUIRE(reachable[0]);  // source always reachable
     REQUIRE(reachable[3]);  // target always reachable
     REQUIRE(reachable[1]);  // 3 + 3 - 3 = 3 <= 6
@@ -515,14 +515,14 @@ TEST_CASE("Demand reachability: path eliminates unreachable node", "[preprocess]
     // Same setup but capacity=3. Node 2 has demand=4.
     // Node 2: dist_s=4, dist_t=4, check: 4+4-4=4 > 3 → unreachable
     // Node 1: dist_s=3, dist_t=3, check: 3+3-3=3 <= 3 → reachable
-    cptp::Problem prob;
-    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
     std::vector<double> costs = {1, 1, 1, 1, 1, 1};
     std::vector<double> profits = {0, 1, 1, 0};
     std::vector<double> demands = {0, 3, 4, 0};
     prob.build(4, edges, costs, profits, demands, 3.0, 0, 3);
 
-    auto reachable = cptp::preprocess::demand_reachability(prob);
+    auto reachable = rcspp::preprocess::demand_reachability(prob);
     REQUIRE(reachable[0]);
     REQUIRE(reachable[3]);
     REQUIRE(reachable[1]);
@@ -538,14 +538,14 @@ TEST_CASE("Edge elimination: tour eliminates expensive edge", "[preprocess]") {
     // Profits: all 0. Capacity: large.
     // With UB = 4 (tight), the edge {1,2} with cost=100 should be eliminated
     // since any tour using it costs at least 100 + something > 4.
-    cptp::Problem prob;
-    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 100};
     std::vector<double> profits = {0, 0, 0};
     std::vector<double> demands = {0, 0, 0};
     prob.build(3, edges, costs, profits, demands, 1e18, 0, 0);
 
-    auto eliminated = cptp::preprocess::edge_elimination(prob, 4.0);
+    auto eliminated = rcspp::preprocess::edge_elimination(prob, 4.0);
     REQUIRE_FALSE(eliminated[0]);  // {0,1} cost=1 — cheap
     REQUIRE_FALSE(eliminated[1]);  // {0,2} cost=1 — cheap
     REQUIRE(eliminated[2]);         // {1,2} cost=100 — eliminated
@@ -555,8 +555,8 @@ TEST_CASE("Edge elimination: path uses bidirectional labeling", "[preprocess][pa
     // 4 nodes, source=0, target=3.
     // Edges: {0,1}=1, {0,2}=1, {0,3}=1, {1,2}=100, {1,3}=1, {2,3}=1
     // With tight UB, edge {1,2} (cost=100) should be eliminated.
-    cptp::Problem prob;
-    std::vector<cptp::Edge> edges = {
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {1, 1, 1, 100, 1, 1};
@@ -564,7 +564,7 @@ TEST_CASE("Edge elimination: path uses bidirectional labeling", "[preprocess][pa
     std::vector<double> demands = {0, 0, 0, 0};
     prob.build(4, edges, costs, profits, demands, 1e18, 0, 3);
 
-    auto eliminated = cptp::preprocess::edge_elimination(prob, 5.0);
+    auto eliminated = rcspp::preprocess::edge_elimination(prob, 5.0);
     // Edge {1,2} cost=100 should be eliminated — any path using it costs >= 100
     REQUIRE(eliminated[3]);
     // Cheap edges should survive
@@ -578,7 +578,7 @@ TEST_CASE("Edge elimination: path uses bidirectional labeling", "[preprocess][pa
 
 TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
     auto prob = make_small_problem();
-    auto result = cptp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
 
     // Should produce a valid solution
     REQUIRE(result.objective < std::numeric_limits<double>::max());
@@ -591,7 +591,7 @@ TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
 
 TEST_CASE("Warm-start: path produces valid open path", "[heuristic][path]") {
     auto prob = make_small_path_problem();
-    auto result = cptp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
 
     REQUIRE(result.objective < std::numeric_limits<double>::max());
 

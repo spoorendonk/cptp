@@ -14,7 +14,7 @@
 
 #include "core/problem.h"
 
-namespace cptp::heuristic {
+namespace rcspp::heuristic {
 
 namespace detail {
 
@@ -394,4 +394,4 @@ inline WarmStartResult build_warm_start(const Problem& prob,
     return {std::move(sol), best_obj};
 }
 
-}  // namespace cptp::heuristic
+}  // namespace rcspp::heuristic

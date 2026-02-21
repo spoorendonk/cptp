@@ -13,17 +13,22 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
-For Python bindings:
+For Python bindings (development):
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCPTP_BUILD_PYTHON=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DRCSPP_BUILD_PYTHON=ON
 cmake --build build -j$(nproc)
+```
+
+For pip-installable Python package:
+```bash
+pip install .
 ```
 
 ## Test
 
 ```bash
-./build/cptp_tests                              # C++ tests
-./build/cptp-solve tests/data/tiny4.txt         # CLI
+./build/rcspp_tests                              # C++ tests
+./build/rcspp-solve tests/data/tiny4.txt         # CLI
 ```
 
 ## Dependencies
@@ -42,7 +47,7 @@ src/preprocess/  — Demand-reachability and edge elimination via capacity-aware
 src/sep/         — Solver-independent separators (SEC, RCI, Multistar, RGLM, Comb)
 src/model/       — HiGHS integration (Model, HiGHSBridge, propagator)
 src/heuristic/   — Warm-start construction + local search
-src/cli/         — CLI tool (cptp-solve)
+src/cli/         — CLI tool (rcspp-solve)
 src/util/        — Utilities (Timer)
 python/          — nanobind Python bindings
 tests/           — Catch2 tests
@@ -51,13 +56,13 @@ docs/            — Algorithm documentation
 
 ## Key types
 
-- `cptp::Problem` — CPTP instance using `static_graph` (own CSR graph); has `source()`, `target()`, `is_tour()`
-- `cptp::Model` — User-facing solver interface; `set_source()`/`set_target()` for paths, `set_depot()` for tours
-- `cptp::HiGHSBridge` — Wires separators + domain propagator into HiGHS MIP
-- `cptp::sep::Separator` — Base class for cut separators
-- `cptp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow (path-aware)
-- `cptp::gomory_hu_tree` — Gusfield's algorithm, shared across separators
-- `cptp::heuristic::build_warm_start` — Parallel greedy + local search heuristic
+- `rcspp::Problem` — CPTP instance using `static_graph` (own CSR graph); has `source()`, `target()`, `is_tour()`
+- `rcspp::Model` — User-facing solver interface; `set_source()`/`set_target()` for paths, `set_depot()` for tours
+- `rcspp::HiGHSBridge` — Wires separators + domain propagator into HiGHS MIP
+- `rcspp::sep::Separator` — Base class for cut separators
+- `rcspp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow (path-aware)
+- `rcspp::gomory_hu_tree` — Gusfield's algorithm, shared across separators
+- `rcspp::heuristic::build_warm_start` — Parallel greedy + local search heuristic
 
 ## Tour vs s-t path
 
@@ -69,4 +74,4 @@ When `source != target`, it uses an open path formulation:
 
 ## Namespace
 
-All code under `cptp::` namespace, separators under `cptp::sep::`, heuristics under `cptp::heuristic::`, preprocessing under `cptp::preprocess::`.
+All code under `rcspp::` namespace, separators under `rcspp::sep::`, heuristics under `rcspp::heuristic::`, preprocessing under `rcspp::preprocess::`.

@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace cptp::sep {
+namespace rcspp::sep {
 
 /// Sparse representation of a single linear cut: a^T x <= rhs.
 struct Cut {
@@ -15,4 +15,4 @@ struct Cut {
     int32_t size() const { return static_cast<int32_t>(indices.size()); }
 };
 
-}  // namespace cptp::sep
+}  // namespace rcspp::sep

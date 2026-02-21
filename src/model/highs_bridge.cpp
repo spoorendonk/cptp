@@ -19,7 +19,7 @@
 
 #include <tbb/task_group.h>
 
-namespace cptp {
+namespace rcspp {
 
 HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, double frac_tol)
     : prob_(prob),
@@ -650,4 +650,4 @@ SolveResult HiGHSBridge::extract_result() const {
     return result;
 }
 
-}  // namespace cptp
+}  // namespace rcspp

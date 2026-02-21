@@ -10,7 +10,7 @@
 #include "core/gomory_hu.h"
 #include "core/problem.h"
 
-namespace cptp::sep {
+namespace rcspp::sep {
 
 namespace {
 
@@ -374,4 +374,4 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     return all_cuts;
 }
 
-}  // namespace cptp::sep
+}  // namespace rcspp::sep

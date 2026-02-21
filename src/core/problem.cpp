@@ -2,7 +2,7 @@
 
 #include <cassert>
 
-namespace cptp {
+namespace rcspp {
 
 void Problem::build(int32_t num_nodes,
                     std::span<const Edge> edges,
@@ -38,4 +38,4 @@ void Problem::build(int32_t num_nodes,
     demands_.assign(demands.begin(), demands.end());
 }
 
-}  // namespace cptp
+}  // namespace rcspp

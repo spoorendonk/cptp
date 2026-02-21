@@ -2,7 +2,7 @@
 
 #include "sep/separator.h"
 
-namespace cptp::sep {
+namespace rcspp::sep {
 
 /// Rounded GLM (RGLM) inequality separator (eq 24, Jepsen et al. 2014).
 /// Strengthens GLM/multistar cuts using ceiling-based rounding.
@@ -12,4 +12,4 @@ class RGLMSeparator : public Separator {
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 };
 
-}  // namespace cptp::sep
+}  // namespace rcspp::sep

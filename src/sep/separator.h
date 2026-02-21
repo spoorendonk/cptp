@@ -7,7 +7,7 @@
 #include "sep/cut.h"
 #include "sep/separation_context.h"
 
-namespace cptp::sep {
+namespace rcspp::sep {
 
 /// Base class for solver-independent cut separators.
 class Separator {
@@ -17,4 +17,4 @@ class Separator {
     virtual std::vector<Cut> separate(const SeparationContext& ctx) = 0;
 };
 
-}  // namespace cptp::sep
+}  // namespace rcspp::sep

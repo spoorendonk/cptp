@@ -7,7 +7,7 @@
 
 #include "core/static_graph.h"
 
-namespace cptp {
+namespace rcspp {
 
 using Graph = static_graph;
 
@@ -63,4 +63,4 @@ class Problem {
     std::vector<double> demands_;
 };
 
-}  // namespace cptp
+}  // namespace rcspp

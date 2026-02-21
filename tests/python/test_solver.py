@@ -1,4 +1,4 @@
-"""Test the Python CPTP solver bindings."""
+"""Test the Python RCSPP solver bindings."""
 
 import pytest
 import numpy as np
@@ -6,9 +6,9 @@ import numpy as np
 
 def test_model_basic():
     """Test basic model creation and solve."""
-    import cptp
+    import rcspp_bac
 
-    model = cptp.Model()
+    model = rcspp_bac.Model()
 
     edges = np.array([[0, 1], [1, 0], [0, 2], [2, 0], [1, 2], [2, 1]], dtype=np.int32)
     costs = np.array([5.0, 5.0, 3.0, 3.0, 4.0, 4.0])
@@ -18,7 +18,7 @@ def test_model_basic():
     model.set_profits(np.array([0.0, 10.0, 8.0]))
     model.add_capacity_resource(np.array([0.0, 2.0, 3.0]), 5.0)
 
-    result = model.solve(time_limit=30.0)
+    result = model.solve([("time_limit", "30")])
 
     assert result.has_solution()
     assert result.objective >= 0.0
@@ -27,9 +27,9 @@ def test_model_basic():
 
 def test_model_negative_costs():
     """Test model with negative edge costs."""
-    import cptp
+    import rcspp_bac
 
-    model = cptp.Model()
+    model = rcspp_bac.Model()
 
     edges = np.array([[0, 1], [1, 0], [0, 2], [2, 0], [1, 2], [2, 1]], dtype=np.int32)
     costs = np.array([-2.0, 5.0, 3.0, 3.0, 4.0, -1.0])
@@ -39,7 +39,7 @@ def test_model_negative_costs():
     model.set_profits(np.array([0.0, 5.0, 5.0]))
     model.add_capacity_resource(np.array([0.0, 1.0, 1.0]), 10.0)
 
-    result = model.solve(time_limit=30.0)
+    result = model.solve([("time_limit", "30")])
 
     assert result.has_solution()
     assert result.objective > 0.0

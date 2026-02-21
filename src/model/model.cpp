@@ -17,7 +17,7 @@
 
 #include "util/timer.h"
 
-namespace cptp {
+namespace rcspp {
 
 Model::Model() = default;
 
@@ -252,4 +252,4 @@ SolveResult Model::solve(const SolverOptions& options) {
     return result;
 }
 
-}  // namespace cptp
+}  // namespace rcspp

@@ -11,7 +11,7 @@ from pathlib import Path
 
 SPPRCLIB_DIR = Path(__file__).parent / "instances" / "spprclib"
 PATHWYSE_BIN = Path.home() / "code" / "pathwyse" / "bin" / "pathwyse"
-CPTP_BIN = Path(__file__).parent.parent / "build" / "cptp-solve"
+CPTP_BIN = Path(__file__).parent.parent / "build" / "rcspp-solve"
 PATHWYSE_DIR = Path.home() / "code" / "pathwyse"
 
 

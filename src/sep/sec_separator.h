@@ -2,7 +2,7 @@
 
 #include "sep/separator.h"
 
-namespace cptp::sep {
+namespace rcspp::sep {
 
 /// Subtour Elimination Constraint separator.
 /// Uses Dinitz max-flow on the fractional support graph to find
@@ -13,4 +13,4 @@ class SECSeparator : public Separator {
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 };
 
-}  // namespace cptp::sep
+}  // namespace rcspp::sep

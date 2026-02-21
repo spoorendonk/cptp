@@ -4,7 +4,7 @@
 #include <span>
 #include <vector>
 
-namespace cptp {
+namespace rcspp {
 
 /// A resource constraint on the problem (e.g., capacity).
 struct Resource {
@@ -15,4 +15,4 @@ struct Resource {
     double limit;                          // upper bound
 };
 
-}  // namespace cptp
+}  // namespace rcspp
