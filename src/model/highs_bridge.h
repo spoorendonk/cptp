@@ -11,6 +11,7 @@
 #include "core/solution.h"
 #include "sep/separation_context.h"
 #include "sep/separator.h"
+#include "util/logger.h"
 
 namespace rcspp {
 
@@ -20,7 +21,7 @@ using SolverOptions = std::vector<std::pair<std::string, std::string>>;
 /// Wires the CPTP formulation and custom separators into HiGHS.
 class HiGHSBridge {
  public:
-    HiGHSBridge(const Problem& prob, Highs& highs,
+    HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
                  double frac_tol = sep::kDefaultFracTol);
     ~HiGHSBridge();
 
@@ -72,6 +73,7 @@ class HiGHSBridge {
 
     const Problem& prob_;
     Highs& highs_;
+    Logger& logger_;
     int32_t num_edges_;
     int32_t num_nodes_;
     double frac_tol_;   // violation tolerance for fractional separation
