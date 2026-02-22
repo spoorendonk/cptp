@@ -68,6 +68,25 @@ heuristics (feasibility pump, rounding, sub-MIPs). Any integer solution with
 a violated SEC is rejected. This uses tight tolerance (1e-6) vs the looser
 fractional tolerance (default 0.1).
 
+### Sub-MIP feasibility and separation
+
+HiGHS primal heuristics (RENS, RINS) solve sub-MIPs that inherit our callbacks
+but run their own presolve, which remaps columns. Two mechanisms handle this:
+
+1. **Feasibility check with column mapping**: In `addIncumbent()`, sub-MIP
+   solutions are expanded from reduced to original column space via
+   `postSolveStack.undoPrimal()` before the SEC feasibility check. Without this,
+   ~20-42% of sub-MIP incumbents violate SEC and corrupt the upper bound.
+
+2. **Root-node SEC separation**: At the sub-MIP root node (`num_nodes == 0`),
+   the LP solution is expanded to original space, SEC separation runs, and
+   resulting cuts are translated back to reduced space. An inverse column map
+   (`orig_to_reduced`) maps cut indices; eliminated columns have their fixed
+   values subtracted from the cut RHS. Only SEC runs in sub-MIPs -- other
+   separators are skipped to minimize overhead.
+
+Sub-MIP separation is controlled by `--submip_separation true/false` (default: true).
+
 ## Rounded Capacity Inequalities (RCI)
 
 File: `src/sep/rci_separator.cpp`
@@ -279,6 +298,7 @@ Managed by `HiGHSBridge::install_separators()` (`src/model/highs_bridge.cpp`).
 | separation_tol | `--separation_tol X` | 0.1 | Fractional violation threshold |
 | separation_interval | `--separation_interval N` | 1 | Run separation every N-th callback (amortization) |
 | enable_rglm | `--enable_rglm true` | false | Enable RGLM separator |
+| submip_separation | `--submip_separation true` | true | SEC separation at sub-MIP root node |
 
 ### Tolerances
 

@@ -122,13 +122,17 @@ if(_found2 EQUAL -1)
       CONTENT2 "${CONTENT2}")
 
     # Patch addIncumbent(): reject solutions that fail user feasibility check.
-    # Skip for sub-MIPs (different column space).
+    # For sub-MIPs (with presolve on), expand reduced solution to original space
+    # via postSolveStack.undoPrimal before checking feasibility.
     # Original:  const bool execute_mip_solution_callback =
-    # New:       if (!mipsolver.submip && !HighsUserSeparator::isFeasible(sol)) return false;
+    # New:       { bool user_feasible = true;
+    #              if (mipsolver.submip) { expand via undoPrimal, check }
+    #              else { check directly }
+    #              if (!user_feasible) return false; }
     #            const bool execute_mip_solution_callback =
     string(REPLACE
       "  const bool execute_mip_solution_callback ="
-      "  // Reject solutions that violate user lazy constraints (e.g. SEC/GSEC)\n  if (!mipsolver.submip && !HighsUserSeparator::isFeasible(sol)) return false;\n  const bool execute_mip_solution_callback ="
+      "  // Reject solutions that violate user lazy constraints (e.g. SEC/GSEC)\n  {\n    bool user_feasible;\n    if (mipsolver.submip) {\n      // Sub-MIP: sol is in reduced (presolved) space; expand to original\n      HighsSolution temp_sol;\n      temp_sol.col_value = sol;\n      temp_sol.value_valid = true;\n      postSolveStack.undoPrimal(*mipsolver.options_mip_, temp_sol);\n      user_feasible = HighsUserSeparator::isFeasible(temp_sol.col_value);\n    } else {\n      user_feasible = HighsUserSeparator::isFeasible(sol);\n    }\n    if (!user_feasible) return false;\n  }\n  const bool execute_mip_solution_callback ="
       CONTENT2 "${CONTENT2}")
 
     # Patch runSetup(): also check user feasibility for MIP start solutions.
