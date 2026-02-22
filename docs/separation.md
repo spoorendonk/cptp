@@ -5,7 +5,7 @@ File: `src/sep/` directory
 ## Overview
 
 Five families of cutting planes are separated dynamically via HiGHS MIP callbacks.
-All separators implement `cptp::sep::Separator` and receive a `SeparationContext`
+All separators implement `rcspp::sep::Separator` and receive a `SeparationContext`
 containing the LP relaxation solution, problem data, and a shared Gomory-Hu tree.
 
 All cuts use CPTP-valid formulations from Jepsen et al. (2014) that account for
@@ -210,12 +210,12 @@ Follows the same structure as `MultistarSeparator::separate()`:
 
 CLI:
 ```bash
-./build/cptp-solve instance.sppcc --enable_rglm true
+./build/rcspp-solve instance.sppcc --enable_rglm true
 ```
 
 C++ API:
 ```cpp
-cptp::SolverOptions opts = {{"enable_rglm", "true"}};
+rcspp::SolverOptions opts = {{"enable_rglm", "true"}};
 auto result = model.solve(opts);
 ```
 

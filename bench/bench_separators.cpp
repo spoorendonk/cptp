@@ -25,7 +25,7 @@
 #include "core/solution.h"
 #include "model/model.h"
 
-using namespace cptp;
+using namespace rcspp;
 
 namespace {
 

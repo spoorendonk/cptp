@@ -38,14 +38,14 @@ cmake --build build -j$(nproc)
 For Python bindings:
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCPTP_BUILD_PYTHON=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DRCSPP_BUILD_PYTHON=ON
 cmake --build build -j$(nproc)
 ```
 
 ## CLI Usage
 
 ```bash
-./build/cptp-solve <instance> [--source <node>] [--target <node>] [--<highs_option> <value> ...]
+./build/rcspp-solve <instance> [--source <node>] [--target <node>] [--<highs_option> <value> ...]
 ```
 
 Accepts TSPLIB (`.vrp`, `.sppcc`) and PathWyse (`.txt`) instance formats. All options beyond `--source`/`--target` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
@@ -56,16 +56,16 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 
 ```bash
 # Tour (closed loop from depot)
-./build/cptp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
+./build/rcspp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
 
 # s-t path (source/target read from file)
-./build/cptp-solve tests/data/tiny4_path.txt
+./build/rcspp-solve tests/data/tiny4_path.txt
 
 # Override source/target via CLI (turns a tour instance into a path)
-./build/cptp-solve tests/data/tiny4.txt --source 0 --target 3
+./build/rcspp-solve tests/data/tiny4.txt --source 0 --target 3
 
 # Suppress HiGHS log output
-./build/cptp-solve tests/data/tiny4.txt --output_flag false
+./build/rcspp-solve tests/data/tiny4.txt --output_flag false
 ```
 
 ### Instance formats
@@ -88,12 +88,12 @@ Node profits and demands are read from the same format (see `src/core/io.cpp` fo
 
 ## C++ API
 
-Link against `cptp_model` (which pulls in `cptp_core` and `cptp_sep` transitively):
+Link against `rcspp_model` (which pulls in `rcspp_core` and `rcspp_sep` transitively):
 
 ```cmake
 # In your CMakeLists.txt
 add_subdirectory(path/to/rcspp-bac)
-target_link_libraries(my_app PRIVATE cptp_model)
+target_link_libraries(my_app PRIVATE rcspp_model)
 ```
 
 ### Solving a tour (closed loop)
@@ -101,10 +101,10 @@ target_link_libraries(my_app PRIVATE cptp_model)
 ```cpp
 #include "model/model.h"
 
-cptp::Model model;
+rcspp::Model model;
 
 // Undirected graph: 4 nodes, 6 edges
-std::vector<cptp::Edge> edges = {
+std::vector<rcspp::Edge> edges = {
     {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
 };
 std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -126,9 +126,9 @@ if (result.has_solution()) {
 ```cpp
 #include "model/model.h"
 
-cptp::Model model;
+rcspp::Model model;
 
-std::vector<cptp::Edge> edges = {
+std::vector<rcspp::Edge> edges = {
     {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
 };
 std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -154,9 +154,9 @@ if (result.has_solution()) {
 #include "core/io.h"
 #include "model/model.h"
 
-auto prob = cptp::io::load("instance.txt");  // reads source/target from file
+auto prob = rcspp::io::load("instance.txt");  // reads source/target from file
 
-cptp::Model model;
+rcspp::Model model;
 model.set_problem(std::move(prob));
 auto result = model.solve({{"time_limit", "120"}});
 ```
@@ -176,7 +176,7 @@ auto result = model.solve({{"time_limit", "120"}});
 ## Tests
 
 ```bash
-./build/cptp_tests
+./build/rcspp_tests
 ```
 
 ## Project Structure

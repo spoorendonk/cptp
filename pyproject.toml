@@ -1,0 +1,19 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.4.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "rcspp-bac"
+version = "0.1.0"
+description = "Branch-and-cut solver for the Resource Constrained Shortest Path Problem"
+requires-python = ">=3.10"
+dependencies = ["numpy"]
+
+[project.scripts]
+rcspp-bac = "rcspp_bac.__main__:main"
+
+[tool.scikit-build]
+cmake.args = ["-DRCSPP_BUILD_PYTHON=ON", "-DRCSPP_BUILD_TESTS=OFF"]
+cmake.minimum-version = "3.25"
+cmake.build-type = "Release"
+wheel.packages = ["python/rcspp_bac"]

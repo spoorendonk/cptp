@@ -7,7 +7,7 @@
 
 #include "core/static_graph.h"
 
-namespace cptp {
+namespace rcspp {
 
 using Graph = static_graph;
 
@@ -16,17 +16,27 @@ struct Edge {
     int32_t head;
 };
 
-/// CPTP instance: undirected graph with profits, costs, demands, capacity.
+/// RCSPP instance: undirected graph with profits, costs, demands, capacity.
 class Problem {
  public:
     Problem() = default;
 
-    /// Build from raw data. edges[i] = {tail, head} with tail < head.
+    /// Build from raw data (copies from spans). edges[i] = {tail, head} with tail < head.
     void build(int32_t num_nodes,
                std::span<const Edge> edges,
                std::span<const double> edge_costs,
                std::span<const double> profits,
                std::span<const double> demands,
+               double capacity,
+               int32_t source = 0,
+               int32_t target = 0);
+
+    /// Build by moving owned vectors (avoids copies when caller no longer needs them).
+    void build(int32_t num_nodes,
+               std::span<const Edge> edges,
+               std::vector<double> edge_costs,
+               std::vector<double> profits,
+               std::vector<double> demands,
                double capacity,
                int32_t source = 0,
                int32_t target = 0);
@@ -63,4 +73,4 @@ class Problem {
     std::vector<double> demands_;
 };
 
-}  // namespace cptp
+}  // namespace rcspp

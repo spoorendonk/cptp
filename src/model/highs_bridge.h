@@ -12,7 +12,7 @@
 #include "sep/separation_context.h"
 #include "sep/separator.h"
 
-namespace cptp {
+namespace rcspp {
 
 /// HiGHS options as string key-value pairs, forwarded directly.
 using SolverOptions = std::vector<std::pair<std::string, std::string>>;
@@ -101,4 +101,4 @@ class HiGHSBridge {
     mutable int64_t separation_calls_ = 0;  // total callback invocations
 };
 
-}  // namespace cptp
+}  // namespace rcspp

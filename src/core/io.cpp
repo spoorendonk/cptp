@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-namespace cptp::io {
+namespace rcspp::io {
 
 namespace {
 
@@ -307,4 +307,4 @@ Problem load_pathwyse(const std::filesystem::path& path) {
     return prob;
 }
 
-}  // namespace cptp::io
+}  // namespace rcspp::io

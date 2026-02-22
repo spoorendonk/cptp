@@ -10,7 +10,7 @@ TEST_CASE("Dinitz max-flow on simple graph", "[maxflow]") {
     // Simple graph: 0 -> 1 -> 3, 0 -> 2 -> 3
     // Capacities: 0->1: 10, 1->3: 5, 0->2: 8, 2->3: 7
     // Max flow from 0 to 3 should be 12 (5 via 1, 7 via 2)
-    cptp::digraph_builder builder(4);
+    rcspp::digraph_builder builder(4);
     builder.add_arc(0, 1, 10.0);
     builder.add_arc(1, 0, 0.0);
     builder.add_arc(1, 3, 5.0);
@@ -22,7 +22,7 @@ TEST_CASE("Dinitz max-flow on simple graph", "[maxflow]") {
 
     auto [graph, capacity] = builder.build();
 
-    cptp::dinitz alg(graph, capacity, 0, 3);
+    rcspp::dinitz alg(graph, capacity, 0, 3);
     alg.run();
 
     REQUIRE_THAT(alg.flow_value(), WithinAbs(12.0, 1e-9));
@@ -36,7 +36,7 @@ TEST_CASE("Dinitz max-flow on classic example", "[maxflow]") {
     //   3 -> 2 (9),  3 -> 5 (20)
     //   4 -> 3 (7),  4 -> 5 (4)
     // Max flow from 0 to 5 = 23
-    cptp::digraph_builder builder(6);
+    rcspp::digraph_builder builder(6);
     builder.add_arc(0, 1, 16.0);
     builder.add_arc(1, 0, 0.0);
     builder.add_arc(0, 2, 13.0);
@@ -58,7 +58,7 @@ TEST_CASE("Dinitz max-flow on classic example", "[maxflow]") {
 
     auto [graph, capacity] = builder.build();
 
-    cptp::dinitz alg(graph, capacity, 0, 5);
+    rcspp::dinitz alg(graph, capacity, 0, 5);
     alg.run();
 
     REQUIRE_THAT(alg.flow_value(), WithinAbs(23.0, 1e-9));
@@ -67,7 +67,7 @@ TEST_CASE("Dinitz max-flow on classic example", "[maxflow]") {
 TEST_CASE("Dinitz min-cut source side", "[maxflow]") {
     // 0 -> 1 (1), 0 -> 2 (1), 1 -> 3 (1), 2 -> 3 (1)
     // Max flow = 2
-    cptp::digraph_builder builder(4);
+    rcspp::digraph_builder builder(4);
     builder.add_arc(0, 1, 1.0);
     builder.add_arc(1, 0, 0.0);
     builder.add_arc(0, 2, 1.0);
@@ -79,7 +79,7 @@ TEST_CASE("Dinitz min-cut source side", "[maxflow]") {
 
     auto [graph, capacity] = builder.build();
 
-    cptp::dinitz alg(graph, capacity, 0, 3);
+    rcspp::dinitz alg(graph, capacity, 0, 3);
     alg.run();
 
     REQUIRE_THAT(alg.flow_value(), WithinAbs(2.0, 1e-9));
@@ -92,7 +92,7 @@ TEST_CASE("Dinitz min-cut source side", "[maxflow]") {
 TEST_CASE("Dinitz on symmetric graph (like SEC support)", "[maxflow]") {
     // Simulate undirected graph: 0-1 (cap 1), 0-2 (cap 1), 1-3 (cap 0.5), 2-3 (cap 0.5)
     // Each undirected edge becomes two directed arcs
-    cptp::digraph_builder builder(4);
+    rcspp::digraph_builder builder(4);
     builder.add_arc(0, 1, 1.0);
     builder.add_arc(1, 0, 1.0);
     builder.add_arc(0, 2, 1.0);
@@ -104,7 +104,7 @@ TEST_CASE("Dinitz on symmetric graph (like SEC support)", "[maxflow]") {
 
     auto [graph, capacity] = builder.build();
 
-    cptp::dinitz alg(graph, capacity, 0, 3);
+    rcspp::dinitz alg(graph, capacity, 0, 3);
     alg.run();
 
     // Max flow should be 2 * 0.5 = 1.0 (bottleneck at edges to node 3)

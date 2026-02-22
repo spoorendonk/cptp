@@ -36,7 +36,7 @@ int main(int argc, char* argv[]) {
     std::filesystem::path instance_path = first_arg;
 
     // Parse arguments: extract --source/--target, forward rest to HiGHS
-    cptp::SolverOptions options;
+    rcspp::SolverOptions options;
     int override_source = -1;
     int override_target = -1;
 
@@ -56,7 +56,7 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        auto problem = cptp::io::load(instance_path);
+        auto problem = rcspp::io::load(instance_path);
 
         // Apply CLI overrides for source/target
         if (override_source >= 0 || override_target >= 0) {
@@ -69,7 +69,7 @@ int main(int argc, char* argv[]) {
                           // Actually, set_problem on Model handles this already.
                           // For CLI override, we re-build the problem.
                           [&] {
-                              std::vector<cptp::Edge> edges;
+                              std::vector<rcspp::Edge> edges;
                               const auto& g = problem.graph();
                               for (auto e : g.edges())
                                   edges.push_back({g.edge_source(e), g.edge_target(e)});
@@ -92,7 +92,7 @@ int main(int argc, char* argv[]) {
         }
         std::cout << ")\n";
 
-        cptp::Model model;
+        rcspp::Model model;
         model.set_problem(std::move(problem));
 
         auto result = model.solve(options);

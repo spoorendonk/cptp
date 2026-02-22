@@ -11,7 +11,7 @@ from pathlib import Path
 
 SPPRCLIB_DIR = Path(__file__).parent / "instances" / "spprclib"
 PATHWYSE_BIN = Path.home() / "code" / "pathwyse" / "bin" / "pathwyse"
-CPTP_BIN = Path(__file__).parent.parent / "build" / "cptp-solve"
+RCSPP_BIN = Path(__file__).parent.parent / "build" / "rcspp-solve"
 PATHWYSE_DIR = Path.home() / "code" / "pathwyse"
 
 
@@ -145,12 +145,12 @@ def run_pathwyse(instance_path: Path, time_limit: int = 120) -> dict:
     return result
 
 
-def run_cptp(instance_path: Path, time_limit: int = 120) -> dict:
-    """Run our CPTP solver on an instance and parse the result."""
+def run_rcspp(instance_path: Path, time_limit: int = 120) -> dict:
+    """Run our RCSPP solver on an instance and parse the result."""
     result = {"status": "ERROR", "obj": None, "tour": [], "time": None, "cuts": 0}
     try:
         proc = subprocess.run(
-            [str(CPTP_BIN), str(instance_path),
+            [str(RCSPP_BIN), str(instance_path),
              "--time_limit", str(time_limit), "--output_flag", "false"],
             capture_output=True, text=True, timeout=time_limit + 30,
         )
@@ -240,36 +240,36 @@ def main():
         pw_result = run_pathwyse(pw_path, time_limit=time_limit)
 
         # Run our solver on original TSPLIB file
-        cptp_result = run_cptp(inst_path, time_limit=time_limit)
+        rcspp_result = run_rcspp(inst_path, time_limit=time_limit)
 
         # Format output
         pw_obj_str = f"{pw_result['obj']:.0f}" if pw_result["obj"] is not None else "N/A"
         pw_time_str = f"{pw_result['time']:.2f}s" if pw_result["time"] else "N/A"
-        our_obj_str = f"{cptp_result['obj']:.0f}" if cptp_result["obj"] is not None else "N/A"
-        our_time_str = f"{cptp_result['time']:.2f}s" if cptp_result["time"] else "N/A"
-        gap_str = f"{cptp_result.get('gap', -1):.2f}" if cptp_result.get("gap") is not None else "N/A"
-        cuts_str = str(cptp_result.get("cuts", 0))
+        our_obj_str = f"{rcspp_result['obj']:.0f}" if rcspp_result["obj"] is not None else "N/A"
+        our_time_str = f"{rcspp_result['time']:.2f}s" if rcspp_result["time"] else "N/A"
+        gap_str = f"{rcspp_result.get('gap', -1):.2f}" if rcspp_result.get("gap") is not None else "N/A"
+        cuts_str = str(rcspp_result.get("cuts", 0))
 
         # Compare objectives:
         # PathWyse obj = sum(arc_costs) + sum(node_weights) for visited nodes (including depot)
         # Our obj      = sum(edge_costs) - sum(profits) including depot profit
         # Both now include depot weight, so objectives should match directly.
         match_str = "?"
-        our_gap = cptp_result.get("gap", 100.0)
-        if pw_result["obj"] is not None and cptp_result["obj"] is not None:
+        our_gap = rcspp_result.get("gap", 100.0)
+        if pw_result["obj"] is not None and rcspp_result["obj"] is not None:
             expected_our = pw_result["obj"]
             if pw_result["status"] == "Optimal" and our_gap is not None and our_gap < 0.01:
                 # Both claim optimal — check match
-                if abs(cptp_result["obj"] - expected_our) < 1.0:
+                if abs(rcspp_result["obj"] - expected_our) < 1.0:
                     match_str = "OK"
                     matches += 1
                 else:
                     match_str = "FAIL"
                     mismatches += 1
-                    print(f"  DEBUG: depot_w={depot_weight}, expected_our={expected_our:.0f}, actual_our={cptp_result['obj']:.0f}")
+                    print(f"  DEBUG: expected_our={expected_our:.0f}, actual_our={rcspp_result['obj']:.0f}")
             elif pw_result["status"] == "Optimal":
                 # Our solver not proven optimal — check if we found a good solution
-                if cptp_result["obj"] <= expected_our + 1.0:
+                if rcspp_result["obj"] <= expected_our + 1.0:
                     match_str = "~OK"
                     matches += 1
                 else:

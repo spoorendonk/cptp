@@ -7,7 +7,7 @@
 #include "core/digraph.h"
 #include "core/dinitz.h"
 
-namespace cptp {
+namespace rcspp {
 
 /// Gomory-Hu tree via Gusfield's simplified algorithm.
 /// Computes all pairwise min-cuts with n-1 max-flow calls.
@@ -119,4 +119,4 @@ class gomory_hu_tree {
     std::vector<std::vector<bool>> cut_side_;
 };
 
-}  // namespace cptp
+}  // namespace rcspp

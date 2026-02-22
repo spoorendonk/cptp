@@ -6,13 +6,13 @@
 
 using Catch::Matchers::WithinAbs;
 
-static const cptp::SolverOptions quiet = {
+static const rcspp::SolverOptions quiet = {
     {"output_flag", "false"},
 };
 
-static cptp::SolveResult solve_instance(const char* path, int time_limit = 120) {
-    auto prob = cptp::io::load(path);
-    cptp::Model model;
+static rcspp::SolveResult solve_instance(const char* path, int time_limit = 120) {
+    auto prob = rcspp::io::load(path);
+    rcspp::Model model;
     model.set_problem(std::move(prob));
     auto opts = quiet;
     opts.push_back({"time_limit", std::to_string(time_limit)});

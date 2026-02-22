@@ -3,12 +3,12 @@
 #include <cstdint>
 #include <span>
 
-namespace cptp {
+namespace rcspp {
 class Problem;
 class gomory_hu_tree;
 }
 
-namespace cptp::sep {
+namespace rcspp::sep {
 
 /// Default fractional separation tolerance.
 /// Jepsen et al. (2008) found 0.4 optimal with CPLEX's built-in cuts.
@@ -26,4 +26,4 @@ struct SeparationContext {
     const gomory_hu_tree* flow_tree = nullptr;
 };
 
-}  // namespace cptp::sep
+}  // namespace rcspp::sep

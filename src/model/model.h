@@ -9,9 +9,9 @@
 #include "model/highs_bridge.h"
 #include "model/resource.h"
 
-namespace cptp {
+namespace rcspp {
 
-/// User-facing model: build a CPTP instance and solve it.
+/// User-facing model: build an RCSPP instance and solve it.
 class Model {
  public:
     Model();
@@ -48,4 +48,4 @@ class Model {
     bool built_ = false;
 };
 
-}  // namespace cptp
+}  // namespace rcspp

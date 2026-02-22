@@ -2,7 +2,7 @@
 
 #include "sep/separator.h"
 
-namespace cptp::sep {
+namespace rcspp::sep {
 
 /// Rounded Capacity Inequality separator.
 /// For a set S of customers, the RCI is:
@@ -14,4 +14,4 @@ class RCISeparator : public Separator {
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 };
 
-}  // namespace cptp::sep
+}  // namespace rcspp::sep
