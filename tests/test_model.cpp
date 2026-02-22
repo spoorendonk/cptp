@@ -168,3 +168,53 @@ TEST_CASE("Model: source==target gives same result as set_depot", "[model][path]
     REQUIRE(result_st.has_solution());
     REQUIRE_THAT(result_depot.objective, WithinAbs(result_st.objective, 1e-6));
 }
+
+TEST_CASE("Model: submip_separation=false produces valid result", "[model]") {
+    rcspp::Model model;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+
+    model.set_graph(4, edges, costs);
+    model.set_depot(0);
+
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    model.set_profits(profits);
+
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    model.add_capacity_resource(demands, 10.0);
+
+    auto opts = quiet;
+    opts.push_back({"submip_separation", "false"});
+    auto result = model.solve(opts);
+
+    REQUIRE(result.has_solution());
+    REQUIRE(result.objective < 0.0);
+}
+
+TEST_CASE("Model: submip_separation=true produces valid result", "[model]") {
+    rcspp::Model model;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+
+    model.set_graph(4, edges, costs);
+    model.set_depot(0);
+
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    model.set_profits(profits);
+
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    model.add_capacity_resource(demands, 10.0);
+
+    auto opts = quiet;
+    opts.push_back({"submip_separation", "true"});
+    auto result = model.solve(opts);
+
+    REQUIRE(result.has_solution());
+    REQUIRE(result.objective < 0.0);
+}
