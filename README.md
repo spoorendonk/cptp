@@ -2,6 +2,8 @@
 
 Branch-and-cut solver for a variant of the **Resource Constrained Shortest Path Problem (RCSPP)**.
 
+> **Disclaimer:** This project was developed entirely through [Claude Code](https://docs.anthropic.com/en/docs/claude-code). 😱
+
 ## Problem Variant
 
 The solver targets an RCSPP with:
@@ -12,7 +14,11 @@ The solver targets an RCSPP with:
 - **Negative-cost cycles**: the graph may contain negative cycles (profits can exceed edge costs), requiring elementary path constraints
 - **Tours or s-t paths**: supports closed tours (depot-to-depot) and open s-t paths (source-to-target) with automatic detection
 
-This problem is also known as the **Capacitated Profitable Tour Problem (CPTP)**, introduced by [Jepsen, Petersen, Spoorendonk & Pisinger (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X). The s-t path variant extends it to open paths where source and target differ.
+This problem generalizes the **Capacitated Profitable Tour Problem (CPTP)** of [Jepsen et al. (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X), which is the special case where source equals target (closed tour).
+
+## Use Cases
+
+The primary application is as a **pricing solver in branch-and-price for CVRP**. In column generation for vehicle routing, the pricing subproblem is an RCSPP where dual variables create vertex profits and negative-cost cycles. Standard labeling algorithms (Pessoa, Sadykov, Uchoa & Vanderbeck, 2020) solve the pricing subproblem via dynamic programming; this solver provides a branch-and-cut alternative following the approach of Jepsen et al. (2014), revisited by Paro (2022) with modern open-source MIP solvers.
 
 ## Features
 
@@ -20,10 +26,17 @@ This problem is also known as the **Capacitated Profitable Tour Problem (CPTP)**
 - **Dynamic cut separation**: subtour elimination (SEC), rounded capacity inequalities (RCI), multistar/GLM inequalities, rounded GLM (RGLM)
 - **Gomory-Hu tree** (Gusfield's algorithm) shared across separators for efficient min-cut computation
 - **Domain propagator**: labeling-based edge fixing during branch-and-bound
-- **Preprocessing**: demand-reachability filtering and ESPPRC-style edge elimination
+- **Preprocessing**: demand-reachability filtering and labeling-based edge elimination
 - **Warm-start heuristic**: parallel greedy construction + local search (2-opt, or-opt, node drop/add) via TBB
-- **MIP backend**: HiGHS with custom separator, feasibility check, and propagator callbacks
 - **Python bindings** via nanobind (optional)
+
+## MIP Backend
+
+Built on [HiGHS](https://highs.dev), an open-source LP/MIP solver from the University of Edinburgh. Three callback interfaces are patched into HiGHS (see `third_party/highs_patch/`):
+
+- **User separator** (`HighsUserSeparator`) -- cut separation at fractional and integer-feasible nodes
+- **Feasibility checker** -- lazy constraint validation rejecting subtour-violating incumbents from HiGHS heuristics
+- **Domain propagator** (`HighsUserPropagator`) -- labeling-based variable fixing during branch-and-bound
 
 ## Build
 
@@ -48,7 +61,7 @@ cmake --build build -j$(nproc)
 ./build/rcspp-solve <instance> [--source <node>] [--target <node>] [--<highs_option> <value> ...]
 ```
 
-Accepts TSPLIB (`.vrp`, `.sppcc`) and PathWyse (`.txt`) instance formats. All options beyond `--source`/`--target` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
+Accepts TSPLIB (`.vrp`, `.sppcc`) and numeric (`.txt`) instance formats. All options beyond `--source`/`--target` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
 
 When `source != target`, the solver uses an open s-t path formulation (degree 1 at source/target, degree 2 at intermediates). When `source == target` (default), the standard tour formulation is used.
 
@@ -70,7 +83,7 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 
 ### Instance formats
 
-**PathWyse `.txt`** (used by tests):
+**Numeric `.txt`** (used by tests):
 
 ```
 4 6               # num_nodes num_edges
@@ -86,92 +99,10 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 
 Node profits and demands are read from the same format (see `src/core/io.cpp` for full spec). **TSPLIB `.sppcc`/`.vrp`** files are also supported with the standard `DEPOT_SECTION` (always treated as tour).
 
-## C++ API
+## API
 
-Link against `rcspp_model` (which pulls in `rcspp_core` and `rcspp_sep` transitively):
-
-```cmake
-# In your CMakeLists.txt
-add_subdirectory(path/to/rcspp-bac)
-target_link_libraries(my_app PRIVATE rcspp_model)
-```
-
-### Solving a tour (closed loop)
-
-```cpp
-#include "model/model.h"
-
-rcspp::Model model;
-
-// Undirected graph: 4 nodes, 6 edges
-std::vector<rcspp::Edge> edges = {
-    {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
-};
-std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
-model.set_graph(4, edges, costs);
-
-model.set_depot(0);  // closed tour from node 0
-model.set_profits({0.0, 20.0, 15.0, 10.0});
-model.add_capacity_resource({0.0, 3.0, 4.0, 2.0}, /*capacity=*/7.0);
-
-auto result = model.solve({{"time_limit", "60"}});
-if (result.has_solution()) {
-    // result.tour = ordered node sequence, e.g. [0, 1, 3, 0]
-    // result.objective = travel_cost - collected_profit
-}
-```
-
-### Solving an s-t path (open)
-
-```cpp
-#include "model/model.h"
-
-rcspp::Model model;
-
-std::vector<rcspp::Edge> edges = {
-    {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
-};
-std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
-model.set_graph(4, edges, costs);
-
-// source != target → path mode (degree 1 at endpoints, degree 2 at intermediates)
-model.set_source(0);
-model.set_target(3);
-
-model.set_profits({0.0, 20.0, 15.0, 10.0});
-model.add_capacity_resource({0.0, 3.0, 4.0, 2.0}, /*capacity=*/7.0);
-
-auto result = model.solve({{"time_limit", "60"}, {"output_flag", "false"}});
-if (result.has_solution()) {
-    // result.tour = [source, ..., target], e.g. [0, 1, 3]
-    // result.tour.front() == 0, result.tour.back() == 3
-}
-```
-
-### Loading from file
-
-```cpp
-#include "core/io.h"
-#include "model/model.h"
-
-auto prob = rcspp::io::load("instance.txt");  // reads source/target from file
-
-rcspp::Model model;
-model.set_problem(std::move(prob));
-auto result = model.solve({{"time_limit", "120"}});
-```
-
-### SolveResult fields
-
-| Field | Type | Description |
-|---|---|---|
-| `status` | `Status` | `Optimal`, `Feasible`, `TimeLimit`, `Infeasible`, `Error` |
-| `objective` | `double` | `travel_cost - collected_profit` |
-| `bound` | `double` | Best dual bound |
-| `gap` | `double` | Relative MIP gap (0.0 = proven optimal) |
-| `tour` | `vector<int32_t>` | Ordered node sequence (path or tour) |
-| `time_seconds` | `double` | Wall-clock solve time |
-| `nodes` | `int64_t` | Branch-and-bound nodes explored |
+- **Python**: `pip install rcspp-bac` -- [usage and examples](docs/python-api.md)
+- **C++**: link against `rcspp_model` -- [usage and examples](docs/cpp-api.md)
 
 ## Tests
 
@@ -182,7 +113,7 @@ auto result = model.solve({{"time_limit", "120"}});
 ## Project Structure
 
 ```
-src/core/        Problem definition, IO (TSPLIB & PathWyse), Dinitz max-flow, Gomory-Hu tree
+src/core/        Problem definition, IO (TSPLIB & numeric), Dinitz max-flow, Gomory-Hu tree
 src/sep/         Cut separators (SEC, RCI, Multistar, RGLM, Comb)
 src/model/       HiGHS MIP integration (separators, propagator, callbacks)
 src/util/        Utilities (Timer)
@@ -196,17 +127,21 @@ docs/            Algorithm documentation
 
 ## Documentation
 
-- [Algorithms and techniques](docs/algorithms.md) -- formulation, solver pipeline, preprocessing, references
+- [Python API](docs/python-api.md) -- installation, `solve()`, `Model`, CLI
+- [C++ API](docs/cpp-api.md) -- CMake integration, tour/path examples, SolveResult
+- [Instance formats](docs/instance-formats.md) -- TSPLIB, numeric `.txt`
+- [Algorithms and techniques](docs/algorithms.md) -- formulation, solver pipeline, references
 - [Cut separation](docs/separation.md) -- SEC, RCI, Multistar/GLM, RGLM, Comb, cut management
+- [Preprocessing](docs/preprocessing.md) -- demand-reachability filtering, labeling-based edge elimination
 - [Domain propagator](docs/domain-propagator.md) -- labeling-based edge fixing during B&C
 - [Warm-start heuristic](docs/warm-start-heuristic.md) -- construction, local search, parallelism
 - [Benchmark results](docs/benchmarks.md) -- SPPRCLIB and Roberti instance results
 
 ## Dependencies
 
-- [HiGHS](https://highs.dev) v1.10.0 -- MIP solver (fetched via CMake)
-- [Catch2](https://github.com/catchorg/Catch2) v3.7.1 -- testing (fetched via CMake)
-- [TBB](https://github.com/oneapi-src/oneTBB) 2021.11 -- parallel heuristic
+- [HiGHS](https://highs.dev) -- MIP solver (fetched via CMake)
+- [Catch2](https://github.com/catchorg/Catch2) -- testing (fetched via CMake)
+- [TBB](https://github.com/oneapi-src/oneTBB) -- parallel heuristic
 
 ## Benchmarks
 
@@ -214,8 +149,15 @@ Tested on 76 instances from two standard sets: [SPPRCLIB](https://or.rwth-aachen
 
 See [docs/benchmarks.md](docs/benchmarks.md) for full results with UB/LB, gap, timing, and per-separator cut counts.
 
+## Related Projects
+
+- [PathWyse](https://doi.org/10.1080/10556788.2023.2296978) -- labeling-based exact solver for RCSPP (Salani, Basso & Giuffrida 2024)
+- [dparo/master-thesis](https://github.com/dparo/master-thesis) -- branch-and-cut pricer for CVRP using CPLEX (Paro 2022)
+
 ## References
 
 - Jepsen, M., Petersen, B., Spoorendonk, S., & Pisinger, D. (2014). [A branch-and-cut algorithm for the capacitated profitable tour problem](https://doi.org/10.1016/S1572-5286(14)00036-X). *Discrete Optimization*, 14, 78-96.
 - Jepsen, M., Petersen, B., Spoorendonk, S., & Pisinger, D. (2008). Subset-row inequalities applied to the vehicle-routing problem with time windows. *Operations Research*, 56(2), 497-511.
+- Pessoa, A., Sadykov, R., Uchoa, E., & Vanderbeck, F. (2020). A generic exact solver for vehicle routing and related problems. *Mathematical Programming*, 183, 483-523.
+- Paro, D. (2022). [Exact algorithms for capacitated vehicle routing problems](https://github.com/dparo/master-thesis). Master's thesis, University of Padua.
 - Salani, M., Basso, S., & Giuffrida, V. (2024). [PathWyse: a flexible, open-source library for the resource constrained shortest path problem](https://doi.org/10.1080/10556788.2023.2296978). *Optimization Methods and Software*, 39(2).

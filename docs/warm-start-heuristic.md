@@ -75,7 +75,7 @@ The solution vector has size `num_edges + num_nodes`:
 
 ## Performance
 
-Tested on SPPRCLIB instances (verified optimal against PathWyse):
+Tested on SPPRCLIB instances (verified against known optimal values from Jepsen et al. 2014):
 
 | Instance | Heuristic obj | Optimal | Gap | Heuristic time |
 |---|---|---|---|---|

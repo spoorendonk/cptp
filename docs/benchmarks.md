@@ -1,7 +1,8 @@
 # Benchmark Results
 
-Computational results on two standard CPTP/ESPPRC benchmark sets.
-All runs on a single thread, Linux, GCC 14.
+Computational results on two standard RCSPP benchmark sets.
+
+**Machine**: AMD Ryzen 9 3950X (single thread), 128 GB RAM, Linux 6.17, GCC 14, `-O2`.
 
 ## SPPRCLIB (45 instances)
 
@@ -121,10 +122,10 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 
 # Single instance
-./build/cptp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 60
+./build/rcspp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 60
 
 # Roberti instance
-./build/cptp-solve bench/instances/roberti/E-n76-k8_b.vrp --time_limit 300
+./build/rcspp-solve bench/instances/roberti/E-n76-k8_b.vrp --time_limit 300
 ```
 
 Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are in [`bench/progress.csv`](../bench/progress.csv).

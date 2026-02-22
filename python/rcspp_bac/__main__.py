@@ -29,7 +29,7 @@ def main(argv=None):
         prog="rcspp-bac",
         description="Branch-and-cut solver for the Resource Constrained Shortest Path Problem",
     )
-    parser.add_argument("instance", help="Path to instance file (PathWyse .txt or TSPLIB .sppcc/.vrp)")
+    parser.add_argument("instance", help="Path to instance file (.txt, .sppcc, or .vrp)")
     parser.add_argument("--source", type=int, default=None, help="Override source node")
     parser.add_argument("--target", type=int, default=None, help="Override target node")
     parser.add_argument("--time_limit", type=float, default=600.0, help="Time limit in seconds (default: 600)")

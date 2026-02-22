@@ -42,7 +42,7 @@ pip install .
 ## Architecture
 
 ```
-src/core/        — Problem definition, IO parsers (TSPLIB, PathWyse), Dinitz max-flow, Gomory-Hu tree
+src/core/        — Problem definition, IO parsers (TSPLIB, numeric .txt), Dinitz max-flow, Gomory-Hu tree
 src/preprocess/  — Demand-reachability and edge elimination via capacity-aware labeling
 src/sep/         — Solver-independent separators (SEC, RCI, Multistar, RGLM, Comb)
 src/model/       — HiGHS integration (Model, HiGHSBridge, propagator)
@@ -70,7 +70,7 @@ When `source == target` (default), the solver uses a closed tour formulation (de
 When `source != target`, it uses an open path formulation:
 - Degree 1 at source/target, degree 2 at intermediates
 - SEC cuts: sets containing the path target need only 1 cut crossing (path enters and terminates)
-- PathWyse format: optional `source target` line after the capacity line
+- Numeric `.txt` format: optional `source target` line after the capacity line
 
 ## Namespace
 
