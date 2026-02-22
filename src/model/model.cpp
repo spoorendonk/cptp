@@ -110,6 +110,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     double separation_tol = sep::kDefaultFracTol;
     bool all_pairs_propagation = false;
     bool enable_rglm = false;
+    bool submip_separation = true;
     for (const auto& [key, value] : options) {
         if (key == "separation_interval") {
             separation_interval = std::stoi(value);
@@ -129,6 +130,10 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "enable_rglm") {
             enable_rglm = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "submip_separation") {
+            submip_separation = (value == "true" || value == "1");
             continue;
         }
         auto status = highs.setOptionValue(key, value);
@@ -219,6 +224,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     HiGHSBridge bridge(problem_, highs, separation_tol);
     bridge.set_separation_interval(separation_interval);
     bridge.set_max_cuts_per_separator(max_cuts_per_sep);
+    bridge.set_submip_separation(submip_separation);
     bridge.set_upper_bound(warm_start_ub);
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
     if (all_pairs_propagation) {

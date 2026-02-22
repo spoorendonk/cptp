@@ -46,6 +46,10 @@ class HiGHSBridge {
     /// Jepsen et al. recommend 1: add only the most-violated cut.
     void set_max_cuts_per_separator(int32_t max_cuts) { max_cuts_per_sep_ = max_cuts; }
 
+    /// Enable SEC separation inside HiGHS sub-MIPs (RENS/RINS).
+    /// Requires column mapping via undoPrimal to translate between reduced/original space.
+    void set_submip_separation(bool enable) { submip_separation_ = enable; }
+
     /// Set upper bound for edge elimination preprocessing.
     void set_upper_bound(double ub) { upper_bound_ = ub; }
 
@@ -77,6 +81,7 @@ class HiGHSBridge {
     // Amortized separation: skip rounds to reduce overhead
     int32_t separation_interval_ = 1;  // 1 = every round (no skipping)
     int32_t max_cuts_per_sep_ = 3;     // max cuts per separator per round (0 = unlimited)
+    bool submip_separation_ = true;    // SEC separation at sub-MIP root node
     double upper_bound_ = std::numeric_limits<double>::infinity();
 
     // Labeling bounds for edge elimination and propagation
