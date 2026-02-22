@@ -139,6 +139,7 @@ docs/            Algorithm documentation
 
 ## Dependencies
 
+- [HiGHS](https://highs.dev) -- MIP solver (fetched via CMake)
 - [Catch2](https://github.com/catchorg/Catch2) -- testing (fetched via CMake)
 - [TBB](https://github.com/oneapi-src/oneTBB) -- parallel heuristic
 
@@ -150,7 +151,7 @@ See [docs/benchmarks.md](docs/benchmarks.md) for full results with UB/LB, gap, t
 
 ## Related Projects
 
-- [PathWyse](https://doi.org/10.1080/10556788.2023.2296978) -- labeling-based exact solver for RCSPP (Salani et al. 2024)
+- [PathWyse](https://doi.org/10.1080/10556788.2023.2296978) -- labeling-based exact solver for RCSPP (Salani, Basso & Giuffrida 2024)
 - [dparo/master-thesis](https://github.com/dparo/master-thesis) -- branch-and-cut pricer for CVRP using CPLEX (Paro 2022)
 
 ## References
@@ -159,3 +160,4 @@ See [docs/benchmarks.md](docs/benchmarks.md) for full results with UB/LB, gap, t
 - Jepsen, M., Petersen, B., Spoorendonk, S., & Pisinger, D. (2008). Subset-row inequalities applied to the vehicle-routing problem with time windows. *Operations Research*, 56(2), 497-511.
 - Pessoa, A., Sadykov, R., Uchoa, E., & Vanderbeck, F. (2020). A generic exact solver for vehicle routing and related problems. *Mathematical Programming*, 183, 483-523.
 - Paro, D. (2022). [Exact algorithms for capacitated vehicle routing problems](https://github.com/dparo/master-thesis). Master's thesis, University of Padua.
+- Salani, M., Basso, S., & Giuffrida, V. (2024). [PathWyse: a flexible, open-source library for the resource constrained shortest path problem](https://doi.org/10.1080/10556788.2023.2296978). *Optimization Methods and Software*, 39(2).
