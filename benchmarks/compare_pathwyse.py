@@ -20,6 +20,7 @@ Environment:
 
 import argparse
 import csv
+import math
 import os
 import re
 import subprocess
@@ -28,108 +29,209 @@ import tempfile
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
-DEFAULT_PATHWYSE_BIN = SCRIPT_DIR / ".pathwyse" / "build" / "pathwyse"
+DEFAULT_PATHWYSE_BIN = SCRIPT_DIR / ".pathwyse" / "bin" / "pathwyse"
 
 
-def parse_tsplib_sppcc(filepath: Path) -> dict:
-    """Parse a TSPLIB-format .sppcc file."""
-    data = {
-        "name": "",
-        "comment": "",
-        "dimension": 0,
-        "edge_weights": [],  # NxN matrix
-        "node_weights": [],  # N values
-        "capacity": 0,
-        "demands": [],       # N values (0-indexed)
+def _euc2d(x1: float, y1: float, x2: float, y2: float) -> int:
+    """EUC_2D distance (TSPLIB convention: nint)."""
+    return int(math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2) + 0.5)
+
+
+def parse_tsplib(filepath: Path) -> dict:
+    """Parse a TSPLIB-format .sppcc or .vrp file.
+
+    Handles two variants:
+    - SPPRCLIB .sppcc: EDGE_WEIGHT_SECTION (full matrix) + NODE_WEIGHT_SECTION
+    - Roberti .vrp: NODE_COORD_SECTION (EUC_2D) + PROFIT_SECTION
+    """
+    with open(filepath) as f:
+        lines = f.readlines()
+
+    # Parse into sections
+    header: dict[str, str] = {}
+    sections: dict[str, list[str]] = {}
+    current_section = None
+
+    section_names = {
+        "NODE_COORD_SECTION", "DEMAND_SECTION", "DEPOT_SECTION",
+        "EDGE_WEIGHT_SECTION", "NODE_WEIGHT_SECTION", "PROFIT_SECTION",
     }
 
-    with open(filepath) as f:
-        content = f.read()
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line == "EOF":
+            break
 
-    # Parse header fields
-    m = re.search(r"NAME\s*:\s*(.+)", content)
-    if m: data["name"] = m.group(1).strip()
-    m = re.search(r"COMMENT\s*:\s*(.+)", content)
-    if m: data["comment"] = m.group(1).strip()
-    m = re.search(r"DIMENSION\s*:\s*(\d+)", content)
-    if m: data["dimension"] = int(m.group(1))
-    m = re.search(r"CAPACITY\s*:\s*(\d+)", content)
-    if m: data["capacity"] = int(m.group(1))
+        # Check for section headers
+        if line in section_names:
+            current_section = line
+            sections[current_section] = []
+            continue
 
+        # A "KEY : value" header line terminates any open section
+        # Keys contain only uppercase letters, underscores, digits
+        pos = line.find(":")
+        if pos != -1:
+            key_candidate = line[:pos].strip()
+            if re.fullmatch(r"[A-Z][A-Z_0-9]*", key_candidate):
+                header[key_candidate] = line[pos + 1:].strip()
+                current_section = None
+                continue
+
+        if current_section is not None:
+            sections[current_section].append(line)
+
+    n = int(header.get("DIMENSION", 0))
+    capacity = float(header.get("CAPACITY", 0))
+    name = header.get("NAME", filepath.stem)
+    comment = header.get("COMMENT", "")
+
+    # Build distance matrix
+    dist: list[list[float]] = [[0.0] * n for _ in range(n)]
+
+    if "EDGE_WEIGHT_SECTION" in sections:
+        # Full matrix (SPPRCLIB .sppcc)
+        numbers = []
+        for line in sections["EDGE_WEIGHT_SECTION"]:
+            numbers.extend(float(x) for x in line.split())
+        assert len(numbers) == n * n, f"Expected {n*n} edge weights, got {len(numbers)}"
+        for i in range(n):
+            for j in range(n):
+                dist[i][j] = numbers[i * n + j]
+    elif "NODE_COORD_SECTION" in sections:
+        # EUC_2D coordinates
+        coords: list[tuple[float, float]] = []
+        for line in sections["NODE_COORD_SECTION"]:
+            parts = line.split()
+            coords.append((float(parts[1]), float(parts[2])))
+        for i in range(n):
+            for j in range(n):
+                if i != j:
+                    dist[i][j] = _euc2d(coords[i][0], coords[i][1],
+                                         coords[j][0], coords[j][1])
+
+    # Node weights / profits (PathWyse node_cost = -profit)
+    # SPPRCLIB: NODE_WEIGHT_SECTION has costs (positive = cost, negative = profit)
+    #           -> node_cost for PathWyse = node_weight (already cost)
+    # Roberti:  PROFIT_SECTION has positive profits
+    #           -> node_cost for PathWyse = -profit
+    node_costs: list[float] = [0.0] * n
+
+    if "NODE_WEIGHT_SECTION" in sections:
+        values = []
+        for line in sections["NODE_WEIGHT_SECTION"]:
+            values.extend(float(x) for x in line.split())
+        for i in range(n):
+            node_costs[i] = values[i]
+    elif "PROFIT_SECTION" in sections:
+        for line in sections["PROFIT_SECTION"]:
+            parts = line.split()
+            idx = int(parts[0]) - 1  # 1-indexed
+            profit = float(parts[1])
+            if 0 <= idx < n:
+                node_costs[idx] = -profit  # PathWyse: cost = -profit
+
+    # Demands (1-indexed in TSPLIB)
+    demands: list[float] = [0.0] * n
+    if "DEMAND_SECTION" in sections:
+        for line in sections["DEMAND_SECTION"]:
+            parts = line.split()
+            if len(parts) >= 2:
+                idx = int(parts[0]) - 1
+                if 0 <= idx < n:
+                    demands[idx] = float(parts[1])
+
+    # Depot (0-indexed)
+    depot = 0
+    if "DEPOT_SECTION" in sections:
+        for line in sections["DEPOT_SECTION"]:
+            d = int(line.strip())
+            if d >= 1:
+                depot = d - 1
+                break
+
+    # Depot demand = 0
+    demands[depot] = 0.0
+
+    return {
+        "name": name,
+        "comment": comment,
+        "dimension": n,
+        "capacity": capacity,
+        "dist": dist,
+        "node_costs": node_costs,
+        "demands": demands,
+        "depot": depot,
+    }
+
+
+def _needs_scaling(data: dict) -> int:
+    """Determine scale factor for PathWyse (which uses integer arithmetic).
+
+    Returns 1000 if fractional values are present, 1 otherwise.
+    """
+    for v in data["node_costs"]:
+        if v != int(v):
+            return 1000
+    for row in data["dist"]:
+        for v in row:
+            if v != int(v):
+                return 1000
+    return 1
+
+
+def convert_to_pathwyse(data: dict, output_path: Path) -> int:
+    """Write PathWyse native format from parsed TSPLIB data.
+
+    Returns the scale factor applied (1 if none). PathWyse uses int costs,
+    so fractional values are scaled up. Divide PathWyse objective by this
+    factor to get the real value.
+    """
     n = data["dimension"]
+    scale = _needs_scaling(data)
 
-    # Parse EDGE_WEIGHT_SECTION (full matrix)
-    idx = content.index("EDGE_WEIGHT_SECTION")
-    rest = content[idx + len("EDGE_WEIGHT_SECTION"):]
-    end_idx = rest.index("NODE_WEIGHT_SECTION")
-    numbers = list(map(int, rest[:end_idx].split()))
-    assert len(numbers) == n * n, f"Expected {n*n} edge weights, got {len(numbers)}"
-    data["edge_weights"] = [numbers[i*n:(i+1)*n] for i in range(n)]
-
-    # Parse NODE_WEIGHT_SECTION
-    idx = content.index("NODE_WEIGHT_SECTION")
-    rest = content[idx + len("NODE_WEIGHT_SECTION"):]
-    end_idx = rest.index("CAPACITY")
-    node_weights = list(map(int, rest[:end_idx].split()))
-    assert len(node_weights) == n, f"Expected {n} node weights, got {len(node_weights)}"
-    data["node_weights"] = node_weights
-
-    # Parse DEMAND_SECTION (1-indexed)
-    idx = content.index("DEMAND_SECTION")
-    rest = content[idx + len("DEMAND_SECTION"):]
-    end_marker = "EOF" if "EOF" in rest else "DEPOT_SECTION"
-    end_idx = rest.index(end_marker) if end_marker in rest else len(rest)
-    demand_text = rest[:end_idx].strip()
-    demands = [0] * n
-    for line in demand_text.split("\n"):
-        parts = line.strip().split()
-        if len(parts) >= 2:
-            node_id = int(parts[0]) - 1  # 1-indexed -> 0-indexed
-            demand = int(parts[1])
-            if 0 <= node_id < n:
-                demands[node_id] = demand
-    data["demands"] = demands
-
-    return data
-
-
-def convert_to_pathwyse(data: dict, output_path: Path):
-    """Convert parsed SPPCC data to PathWyse native format."""
-    n = data["dimension"]
     with open(output_path, "w") as f:
+        depot = data.get("depot", 0)
         f.write(f"NAME : {data['name']}\n")
         f.write(f"COMMENT : {data['comment']}\n")
         f.write(f"SIZE : {n}\n")
         f.write("DIRECTED : 1\n")
         f.write("CYCLIC : 1\n")
+        f.write(f"ORIGIN : {depot}\n")
+        f.write(f"DESTINATION : {depot}\n")
         f.write("RESOURCES : 1\n")
         f.write("RES_NAMES : 0\n")
         f.write("RES_TYPE\n")
         f.write("0 CAP\n")
         f.write("END\n")
         f.write("RES_BOUND\n")
-        f.write(f"0 0 {data['capacity']}\n")
+        # Capacity is a resource bound, not scaled
+        f.write(f"0 0 {int(data['capacity'])}\n")
         f.write("END\n")
 
-        # Edge costs
+        # Edge costs (scaled to int)
         f.write("EDGE_COST\n")
+        dist = data["dist"]
         for i in range(n):
             for j in range(n):
-                cost = data["edge_weights"][i][j]
-                f.write(f"{i} {j} {cost}\n")
+                f.write(f"{i} {j} {int(round(dist[i][j] * scale))}\n")
         f.write("END\n")
 
-        # Node costs
+        # Node costs (scaled to int)
         f.write("NODE_COST\n")
         for i in range(n):
-            f.write(f"{i} {data['node_weights'][i]}\n")
+            f.write(f"{i} {int(round(data['node_costs'][i] * scale))}\n")
         f.write("END\n")
 
-        # Node consumption (demands)
+        # Node consumption (demands — resource values, not scaled)
         f.write("NODE_CONSUMPTION\n")
         for i in range(n):
-            f.write(f"0 {i} {data['demands'][i]}\n")
+            f.write(f"0 {i} {int(data['demands'][i])}\n")
         f.write("END\n")
+
+    return scale
 
 
 def find_pathwyse_bin(override: str | None) -> Path:
@@ -183,15 +285,18 @@ def run_pathwyse(pw_bin: Path, instance_path: Path, time_limit: int) -> dict:
     return result
 
 
-def convert_instance(instance_path: Path, tmpdir: Path) -> Path:
-    """Convert TSPLIB instance to PathWyse format if needed. Returns path to use."""
+def convert_instance(instance_path: Path, tmpdir: Path) -> tuple[Path, int]:
+    """Convert TSPLIB instance to PathWyse format if needed.
+
+    Returns (path_to_use, scale_factor).
+    """
     suffix = instance_path.suffix.lower()
     if suffix in (".sppcc", ".vrp"):
-        data = parse_tsplib_sppcc(instance_path)
+        data = parse_tsplib(instance_path)
         pw_path = tmpdir / (instance_path.stem + ".pw")
-        convert_to_pathwyse(data, pw_path)
-        return pw_path
-    return instance_path
+        scale = convert_to_pathwyse(data, pw_path)
+        return pw_path, scale
+    return instance_path, 1
 
 
 def run_single(pw_bin: Path, instance_path: Path, expected: float | None,
@@ -199,11 +304,15 @@ def run_single(pw_bin: Path, instance_path: Path, expected: float | None,
     """Run PathWyse on one instance, return result dict."""
     tmpdir = Path(tempfile.mkdtemp(prefix="rcspp_pw_"))
     try:
-        pw_instance = convert_instance(instance_path, tmpdir)
+        pw_instance, scale = convert_instance(instance_path, tmpdir)
         result = run_pathwyse(pw_bin, pw_instance, time_limit=time_limit)
     finally:
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # Unscale the objective
+    if result["obj"] is not None and scale != 1:
+        result["obj"] = result["obj"] / scale
 
     name = instance_path.stem
     result["instance"] = name
@@ -227,10 +336,10 @@ def run_single(pw_bin: Path, instance_path: Path, expected: float | None,
             print(f"  Expected:        {expected:.6g}")
             if result["obj"] is not None:
                 diff = abs(result["obj"] - expected)
-                if diff < 1.0:
-                    print(f"  MATCH (diff={diff:.4f})")
+                if diff < 0.01:
+                    print(f"  MATCH (diff={diff:.6f})")
                 else:
-                    print(f"  MISMATCH (diff={diff:.2f})")
+                    print(f"  MISMATCH (diff={diff:.4f})")
 
     result["expected"] = expected
     return result
@@ -291,7 +400,7 @@ def main():
 
             match_str = "?"
             if r["obj"] is not None and r["expected"] is not None:
-                if abs(r["obj"] - r["expected"]) < 1.0:
+                if abs(r["obj"] - r["expected"]) < 0.01:
                     match_str = "OK"
                     matches += 1
                 else:

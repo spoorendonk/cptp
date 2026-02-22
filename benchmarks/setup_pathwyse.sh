@@ -18,4 +18,4 @@ cd "$PW_DIR"
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j"$(nproc)"
 
-echo "PathWyse built successfully at $PW_DIR/build/pathwyse"
+echo "PathWyse built successfully at $PW_DIR/bin/pathwyse"
