@@ -1,7 +1,8 @@
 # Benchmark Results
 
 Computational results on two standard RCSPP benchmark sets.
-All runs on a single thread, Linux, GCC 14.
+
+**Machine**: AMD Ryzen 9 3950X (single thread), 128 GB RAM, Linux 6.17, GCC 14, `-O2`.
 
 ## SPPRCLIB (45 instances)
 
