@@ -11,18 +11,6 @@
 namespace nb = nanobind;
 using namespace nb::literals;
 
-// Helper: wrap a std::vector<T> as a numpy array that owns its data via capsule.
-template <typename T>
-static nb::ndarray<nb::numpy, T, nb::shape<-1>>
-vec_to_numpy(std::vector<T>&& v) {
-    auto* data = new std::vector<T>(std::move(v));
-    nb::capsule owner(data, [](void* p) noexcept {
-        delete static_cast<std::vector<T>*>(p);
-    });
-    return nb::ndarray<nb::numpy, T, nb::shape<-1>>(
-        data->data(), {data->size()}, std::move(owner));
-}
-
 // Helper: wrap a const std::vector<T>& as a read-only numpy view (no copy).
 // The parent python object must stay alive (use rv_policy::reference_internal).
 template <typename T>

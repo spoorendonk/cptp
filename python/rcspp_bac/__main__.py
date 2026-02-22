@@ -74,18 +74,23 @@ def main(argv=None):
     result = model.solve(options)
 
     # Print results
-    path_str = " -> ".join(str(n) for n in result.tour)
-    label = "Tour" if problem.is_tour else "Path"
-    print(f"\n{label}: {path_str}")
-    print(f"Objective: {result.objective}  Bound: {result.bound}  "
-          f"Gap: {result.gap * 100:.2f}%  Time: {result.time_seconds:.2f}s  Nodes: {result.nodes}")
+    if result.has_solution():
+        path_str = " -> ".join(str(n) for n in result.tour)
+        label = "Tour" if problem.is_tour else "Path"
+        print(f"\n{label}: {path_str}")
+        print(f"Objective: {result.objective}  Bound: {result.bound}  "
+              f"Gap: {result.gap * 100:.2f}%  Time: {result.time_seconds:.2f}s  Nodes: {result.nodes}")
 
-    if result.total_cuts > 0:
-        print(f"User cuts: {result.total_cuts} ({result.separation_rounds} rounds)")
-        for name, stats in result.separator_stats.items():
-            print(f"  {name:<10} {stats.cuts_added:>6} cuts {stats.rounds_called:>6} rounds {stats.time_seconds:>8.3f}s")
+        if result.total_cuts > 0:
+            print(f"User cuts: {result.total_cuts} ({result.separation_rounds} rounds)")
+            for name, stats in result.separator_stats.items():
+                print(f"  {name:<10} {stats.cuts_added:>6} cuts {stats.rounds_called:>6} rounds {stats.time_seconds:>8.3f}s")
 
-    return 0 if result.has_solution() else 1
+        return 0
+    else:
+        print(f"\nNo feasible solution found (status: {result.status.name}, "
+              f"time: {result.time_seconds:.2f}s, nodes: {result.nodes})")
+        return 1
 
 
 if __name__ == "__main__":

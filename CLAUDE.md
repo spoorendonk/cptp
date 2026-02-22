@@ -56,7 +56,7 @@ docs/            — Algorithm documentation
 
 ## Key types
 
-- `rcspp::Problem` — CPTP instance using `static_graph` (own CSR graph); has `source()`, `target()`, `is_tour()`
+- `rcspp::Problem` — RCSPP instance using `static_graph` (own CSR graph); has `source()`, `target()`, `is_tour()`
 - `rcspp::Model` — User-facing solver interface; `set_source()`/`set_target()` for paths, `set_depot()` for tours
 - `rcspp::HiGHSBridge` — Wires separators + domain propagator into HiGHS MIP
 - `rcspp::sep::Separator` — Base class for cut separators

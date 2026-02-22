@@ -16,7 +16,7 @@ struct Edge {
     int32_t head;
 };
 
-/// CPTP instance: undirected graph with profits, costs, demands, capacity.
+/// RCSPP instance: undirected graph with profits, costs, demands, capacity.
 class Problem {
  public:
     Problem() = default;
