@@ -96,6 +96,7 @@ if(RCSPP_BUILD_TESTS)
             tests/test_optimal.cpp
             tests/test_propagator.cpp
             tests/test_thread_local.cpp
+            tests/test_ubs_cutoff.cpp
         )
         target_include_directories(rcspp_tests PRIVATE ${highs_SOURCE_DIR}/highs)
         target_link_libraries(rcspp_tests PRIVATE rcspp_model Catch2::Catch2WithMain)
