@@ -257,7 +257,7 @@ void HiGHSBridge::install_separators() {
                 sep::SECSeparator sec;
                 auto cuts = sec.separate(ctx);
 
-                std::sort(cuts.begin(), cuts.end(),
+                std::stable_sort(cuts.begin(), cuts.end(),
                     [](const sep::Cut& a, const sep::Cut& b) {
                         return a.violation > b.violation;
                     });
@@ -318,7 +318,7 @@ void HiGHSBridge::install_separators() {
                     if (!results[i].empty()) stats.rounds_called++;
 
                     auto& cuts = results[i];
-                    std::sort(cuts.begin(), cuts.end(),
+                    std::stable_sort(cuts.begin(), cuts.end(),
                         [](const sep::Cut& a, const sep::Cut& b) {
                             return a.violation > b.violation;
                         });

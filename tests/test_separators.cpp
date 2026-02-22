@@ -578,7 +578,7 @@ TEST_CASE("Edge elimination: path uses bidirectional labeling", "[preprocess][pa
 
 TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
     auto prob = make_small_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_warm_start(prob, 50);
 
     // Should produce a valid solution
     REQUIRE(result.objective < std::numeric_limits<double>::max());
@@ -591,7 +591,7 @@ TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
 
 TEST_CASE("Warm-start: path produces valid open path", "[heuristic][path]") {
     auto prob = make_small_path_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_warm_start(prob, 50);
 
     REQUIRE(result.objective < std::numeric_limits<double>::max());
 
