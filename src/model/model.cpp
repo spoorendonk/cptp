@@ -17,6 +17,7 @@
 #include "sep/multistar_separator.h"
 #include "sep/comb_separator.h"
 #include "sep/rglm_separator.h"
+#include "sep/spi_separator.h"
 
 #include "util/timer.h"
 
@@ -272,6 +273,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (enable_rglm)
         bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
     bridge.add_separator(std::make_unique<sep::CombSeparator>());
+    if (all_pairs_propagation)
+        bridge.add_separator(std::make_unique<sep::SPISeparator>());
 
     bridge.build_formulation();
 

@@ -25,6 +25,7 @@ add_library(rcspp_algorithms
     src/sep/multistar_separator.cpp
     src/sep/comb_separator.cpp
     src/sep/rglm_separator.cpp
+    src/sep/spi_separator.cpp
     src/sep/separation_oracle.cpp
     src/preprocess/bound_propagator.cpp
 )
