@@ -55,7 +55,8 @@ Build MIP formulation
     v
 Install HiGHS callbacks
     |-- User separator   --> separation.md
-    |-- Feasibility check (SEC on incumbents)
+    |-- Feasibility check (SEC on incumbents, with sub-MIP column mapping)
+    |-- Sub-MIP root SEC separation (column mapping via undoPrimal)
     '-- Domain propagator --> domain-propagator.md
     |
     v
