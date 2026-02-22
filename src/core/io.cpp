@@ -87,9 +87,10 @@ Problem load_tsplib(const std::filesystem::path& path) {
     std::vector<double> demands;
     std::vector<double> profits;
     int32_t depot = 0;
+    bool profit_section_used = false;
 
     std::string line;
-    enum class Section { Header, NodeCoord, Demand, Depot, EdgeWeight, NodeWeight, None };
+    enum class Section { Header, NodeCoord, Demand, Depot, EdgeWeight, NodeWeight, Profit, None };
     auto section = Section::Header;
     std::vector<std::vector<double>> edge_weight_matrix;
 
@@ -102,6 +103,7 @@ Problem load_tsplib(const std::filesystem::path& path) {
         if (line == "DEPOT_SECTION") { section = Section::Depot; continue; }
         if (line == "EDGE_WEIGHT_SECTION") { section = Section::EdgeWeight; continue; }
         if (line == "NODE_WEIGHT_SECTION") { section = Section::NodeWeight; continue; }
+        if (line == "PROFIT_SECTION") { section = Section::Profit; profit_section_used = true; continue; }
         if (line == "EOF") break;
 
         if (section == Section::Header) {
@@ -158,6 +160,16 @@ Problem load_tsplib(const std::filesystem::path& path) {
             // If we've read all weights, switch back to header
             if (static_cast<int>(profits.size()) >= dimension) {
                 section = Section::Header;
+            }
+            continue;
+        }
+
+        if (section == Section::Profit) {
+            // PROFIT_SECTION: id profit (1-indexed, like DEMAND_SECTION)
+            std::istringstream iss(line);
+            int id; double p;
+            if (iss >> id >> p) {
+                profits.push_back(p);
             }
             continue;
         }
@@ -232,7 +244,8 @@ Problem load_tsplib(const std::filesystem::path& path) {
     // node weights are costs (positive = cost, negative = profit).
     // profit = -node_weight for all nodes, including depot.
     // Depot's y variable is fixed to 1, so its profit acts as a constant offset.
-    if (!profits.empty()) {
+    // PROFIT_SECTION values are already positive profits — no negation needed.
+    if (!profits.empty() && !profit_section_used) {
         for (int i = 0; i < dimension; ++i) {
             profits[i] = -profits[i];  // negate: negative weight → positive profit
         }
