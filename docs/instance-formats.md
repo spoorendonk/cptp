@@ -31,7 +31,7 @@ DEPOT_SECTION
 EOF
 ```
 
-TSPLIB instances always use a tour formulation (depot from `DEPOT_SECTION`).
+Optional `PROFIT_SECTION` is supported for instances with explicit node profits (used by the Roberti Set 3 instances). TSPLIB instances always use a tour formulation (depot from `DEPOT_SECTION`).
 
 ## Numeric (`.txt`)
 
