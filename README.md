@@ -200,6 +200,7 @@ docs/            Algorithm documentation
 - [Cut separation](docs/separation.md) -- SEC, RCI, Multistar/GLM, RGLM, Comb, cut management
 - [Domain propagator](docs/domain-propagator.md) -- labeling-based edge fixing during B&C
 - [Warm-start heuristic](docs/warm-start-heuristic.md) -- construction, local search, parallelism
+- [Benchmark results](docs/benchmarks.md) -- SPPRCLIB and Roberti instance results
 
 ## Dependencies
 
@@ -209,7 +210,9 @@ docs/            Algorithm documentation
 
 ## Benchmarks
 
-Tested against [SPPRCLIB](https://or.rwth-aachen.de/research/spprclib) instances and verified against [PathWyse](https://doi.org/10.1080/10556788.2023.2296978).
+Tested on 76 instances from two standard sets: [SPPRCLIB](https://or.rwth-aachen.de/research/spprclib) (45 instances) and Roberti Set 3 from [Jepsen et al. (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X) (31 instances). **71 of 76 solved to proven optimality** (93%) within a 1-hour time limit. The 5 unsolved are large M-series instances (151--200 nodes).
+
+See [docs/benchmarks.md](docs/benchmarks.md) for full results with UB/LB, gap, timing, and per-separator cut counts.
 
 ## References
 
