@@ -50,7 +50,8 @@ src/heuristic/   — Warm-start construction + local search
 src/cli/         — CLI tool (rcspp-solve)
 src/util/        — Utilities (Timer)
 python/          — nanobind Python bindings
-tests/           — Catch2 tests
+tests/           — Catch2 tests + instance integration tests
+benchmarks/      — Benchmark instances, scripts, and results
 docs/            — Algorithm documentation
 ```
 

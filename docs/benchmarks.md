@@ -121,10 +121,10 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 
 # Single instance
-./build/cptp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 60
+./build/rcspp-solve benchmarks/instances/spprclib/B-n45-k6-54.sppcc --time_limit 60
 
 # Roberti instance
-./build/cptp-solve bench/instances/roberti/E-n76-k8_b.vrp --time_limit 300
+./build/rcspp-solve benchmarks/instances/roberti/E-n76-k8_b.vrp --time_limit 300
 ```
 
-Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are in [`bench/progress.csv`](../bench/progress.csv).
+Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are in [`benchmarks/progress.csv`](../benchmarks/progress.csv).

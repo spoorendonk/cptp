@@ -79,10 +79,10 @@ if(RCSPP_BUILD_TESTS)
     target_link_libraries(rcspp_tests PRIVATE rcspp_model Catch2::Catch2WithMain)
     catch_discover_tests(rcspp_tests)
 
-    # Benchmarks
-    add_executable(bench_separators bench/bench_separators.cpp)
-    target_link_libraries(bench_separators PRIVATE rcspp_model Catch2::Catch2WithMain)
-    rcspp_set_compiler_flags(bench_separators)
+    # Instance integration tests
+    add_executable(test_instances tests/test_instances.cpp)
+    target_link_libraries(test_instances PRIVATE rcspp_model Catch2::Catch2WithMain)
+    rcspp_set_compiler_flags(test_instances)
 
     add_executable(test_formulation tests/test_formulation.cpp)
     target_link_libraries(test_formulation PRIVATE rcspp_model)
