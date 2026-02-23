@@ -4,8 +4,6 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
-#include <iostream>
-#include <mutex>
 
 #include "core/digraph.h"
 #include "core/gomory_hu.h"
@@ -21,9 +19,11 @@
 
 namespace rcspp {
 
-HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, double frac_tol)
+HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
+                         double frac_tol)
     : prob_(prob),
       highs_(highs),
+      logger_(logger),
       num_edges_(prob.num_edges()),
       num_nodes_(prob.num_nodes()),
       frac_tol_(frac_tol),
@@ -94,9 +94,8 @@ void HiGHSBridge::build_formulation() {
             }
         }
         if (edge_elim_count > 0 || node_elim_count > 0) {
-            std::cerr << "Edge elimination: " << edge_elim_count << "/" << m
-                      << " edges, " << node_elim_count << "/" << (n - 1)
-                      << " nodes fixed to 0\n";
+            logger_.log("Edge elimination: {}/{} edges, {}/{} nodes fixed to 0",
+                        edge_elim_count, m, node_elim_count, n - 1);
         }
     }
 
@@ -606,7 +605,7 @@ void HiGHSBridge::install_propagator() {
             }
         });
 
-    std::cerr << "Installed domain propagator with labeling bounds\n";
+    logger_.log("Installed domain propagator with labeling bounds");
 }
 
 std::vector<int32_t> HiGHSBridge::order_path(
@@ -720,11 +719,9 @@ SolveResult HiGHSBridge::extract_result() const {
 
     // Print propagator statistics
     if (propagator_calls_ && *propagator_calls_ > 0) {
-        std::cerr << "Propagator: " << *propagator_calls_ << " calls, "
-                  << *ub_improvements_ << " UB improvements, "
-                  << *propagator_fixings_ << " fixings ("
-                  << *sweep_fixings_ << " sweep + "
-                  << *chain_fixings_ << " chain)\n";
+        logger_.log("Propagator: {} calls, {} UB improvements, {} fixings ({} sweep + {} chain)",
+                    *propagator_calls_, *ub_improvements_, *propagator_fixings_,
+                    *sweep_fixings_, *chain_fixings_);
     }
 
     // Attach separator statistics

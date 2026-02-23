@@ -321,130 +321,100 @@ if(_found_search EQUAL -1)
     # before normal child creation.
     string(REPLACE
       "  // finally open a new node with the branching decision added\n  // and remember that we have one open subtree left\n  HighsInt domchgPos = localdom.getDomainChangeStack().size();\n\n  bool passStabilizerToChildNode =\n      orbitsValidInChildNode(currnode.branchingdecision);\n  localdom.changeBound(currnode.branchingdecision);\n  currnode.opensubtrees = 1;\n  nodestack.emplace_back(\n      std::max(childLb, currnode.lower_bound), currnode.estimate,\n      currnode.nodeBasis,\n      passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n  nodestack.back().domgchgStackPos = domchgPos;\n\n  return NodeResult::kBranched;"
-      "  // Hyperplane branching: evaluate candidates vs variable branching\n  const auto& branchCb = HighsUserSeparator::getBranchingCallback();\n  if (branchCb && !mipsolver.submip) {\n    auto candidates = branchCb(mipsolver);\n    if (!candidates.empty()) {\n      double parentObj = lp->getObjective();\n      double vdi = std::max(0.0, childLb - parentObj);\n      double vui = std::max(0.0, currnode.other_child_lb - parentObj);\n      double var_score = std::min(vdi, vui) * std::max(vdi, vui);\n\n      int winner = HighsUserSeparator::evaluateCandidates(\n          candidates, var_score, mipsolver, (int)getCurrentDepth());\n      if (winner >= 0) {\n        auto& cand = candidates[winner];\n        // Compute LHS\n        const auto& sol = lp->getSolution().col_value;\n        double lhs = 0.0;\n        for (int j = 0; j < (int)cand.indices.size(); ++j)\n          lhs += cand.values[j] * sol[cand.indices[j]];\n\n        // Store hyperplane data for flip\n        HighsInt data_idx = HighsUserSeparator::allocHyperplaneData();\n        auto& data = HighsUserSeparator::getHyperplaneData(data_idx);\n        data.indices = cand.indices;\n        data.values = cand.values;\n        data.branch_value = lhs;\n        currnode.hp_data_idx = data_idx;\n\n        // Add branching row (down branch: lhs <= floor)\n        HighsInt hpPos = HighsUserSeparator::stackSize();\n        HighsUserSeparator::pushBranching(\n            mipsolver.mipdata_->lp, data,\n            -kHighsInf, std::floor(lhs));\n\n        // Also do normal variable branch\n        HighsInt domchgPos = localdom.getDomainChangeStack().size();\n        bool passStabilizerToChildNode =\n            orbitsValidInChildNode(currnode.branchingdecision);\n        localdom.changeBound(currnode.branchingdecision);\n        currnode.opensubtrees = 1;\n        nodestack.emplace_back(\n            std::max(childLb, currnode.lower_bound), currnode.estimate,\n            currnode.nodeBasis,\n            passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n        nodestack.back().domgchgStackPos = domchgPos;\n        nodestack.back().hp_stack_pos = hpPos;\n\n        return NodeResult::kBranched;\n      }\n    }\n  }\n\n  // finally open a new node with the branching decision added\n  // and remember that we have one open subtree left\n  HighsInt domchgPos = localdom.getDomainChangeStack().size();\n\n  bool passStabilizerToChildNode =\n      orbitsValidInChildNode(currnode.branchingdecision);\n  localdom.changeBound(currnode.branchingdecision);\n  currnode.opensubtrees = 1;\n  nodestack.emplace_back(\n      std::max(childLb, currnode.lower_bound), currnode.estimate,\n      currnode.nodeBasis,\n      passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n  nodestack.back().domgchgStackPos = domchgPos;\n\n  return NodeResult::kBranched;"
+      "  // Hyperplane branching: evaluate candidates vs variable branching\n  const auto& branchCb = HighsUserSeparator::getBranchingCallback();\n  if (branchCb && !mipsolver.submip) {\n    auto candidates = branchCb(mipsolver);\n    if (!candidates.empty()) {\n      // Use pseudocost estimates for var_score (comparable with HP scoring).\n      // SB-based childLb/other_child_lb are only meaningful when minreliable > 0.\n      double var_score = 0.0;\n      if (currnode.branchingdecision.column >= 0) {\n        double vd = pseudocost.getPseudocostDown(\n            currnode.branchingdecision.column, currnode.branching_point);\n        double vu = pseudocost.getPseudocostUp(\n            currnode.branchingdecision.column, currnode.branching_point);\n        var_score = std::min(vd, vu) * std::max(vd, vu);\n      }\n\n      int winner = HighsUserSeparator::evaluateCandidates(\n          candidates, var_score, mipsolver, (int)getCurrentDepth());\n      if (winner >= 0) {\n        auto& cand = candidates[winner];\n        const auto& sol = lp->getSolution().col_value;\n        double lhs = 0.0;\n        for (int j = 0; j < (int)cand.indices.size(); ++j)\n          lhs += cand.values[j] * sol[cand.indices[j]];\n\n        // Store hyperplane data for flip\n        HighsInt data_idx = HighsUserSeparator::allocHyperplaneData();\n        auto& data = HighsUserSeparator::getHyperplaneData(data_idx);\n        data.indices = cand.indices;\n        data.values = cand.values;\n        data.branch_value = lhs;\n        currnode.hp_data_idx = data_idx;\n\n        // Add branching row (down branch: lhs <= floor)\n        HighsInt hpPos = HighsUserSeparator::stackSize();\n        HighsUserSeparator::pushBranching(\n            mipsolver.mipdata_->lp, data,\n            -kHighsInf, std::floor(lhs));\n\n        // Push no-op domain marker so backtrack() has a kBranching sentinel\n        HighsInt domchgPos = localdom.getDomainChangeStack().size();\n        localdom.changeBound({localdom.col_lower_[currnode.branchingdecision.column],\n          currnode.branchingdecision.column, HighsBoundType::kLower});\n        currnode.opensubtrees = 1;\n        nodestack.emplace_back(\n            currnode.lower_bound, currnode.estimate,\n            currnode.nodeBasis, nullptr);\n        nodestack.back().domgchgStackPos = domchgPos;\n        nodestack.back().hp_stack_pos = hpPos;\n\n        return NodeResult::kBranched;\n      }\n    }\n  }\n\n  // finally open a new node with the branching decision added\n  // and remember that we have one open subtree left\n  HighsInt domchgPos = localdom.getDomainChangeStack().size();\n\n  bool passStabilizerToChildNode =\n      orbitsValidInChildNode(currnode.branchingdecision);\n  localdom.changeBound(currnode.branchingdecision);\n  currnode.opensubtrees = 1;\n  nodestack.emplace_back(\n      std::max(childLb, currnode.lower_bound), currnode.estimate,\n      currnode.nodeBasis,\n      passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n  nodestack.back().domgchgStackPos = domchgPos;\n  nodestack.back().hp_stack_pos = HighsUserSeparator::stackSize();\n\n  return NodeResult::kBranched;"
       SEARCH_CONTENT "${SEARCH_CONTENT}")
 
-    # ── 5c. Patch backtrack(): restore branching rows on backtrack + flip ──
-    # Find the backtrack loop body where nodestack.pop_back() happens after
-    # opensubtrees == 0 and patch to restore branching rows.
-    #
-    # The backtrack pattern in HighsSearch.cpp has two cases:
-    # 1. Normal backtrack (opensubtrees == 0): pop + localdom.backtrack()
-    # 2. Flip (opensubtrees == 1): flip branchingdecision + new child
-    #
-    # We need to handle both. The exact code varies by HiGHS version.
-    # We'll patch around the nodestack.pop_back() + localdom.backtrack() pattern
-    # and the flip section.
-
-    # Patch: after "nodestack.pop_back();" + "localdom.backtrack();" in backtrack,
-    # add restoreBranching call. We target the pattern in the while loop.
+    # ── 5c. Patch backtrack pop_back + localdom.backtrack(): restore branching rows ──
+    # Pattern in HiGHS v1.13.1 has #ifndef NDEBUG around the backtrack() return value.
+    # We match the exact pattern: nodestack.pop_back() followed by #ifndef block.
+    # This pattern appears 3 times (backtrack, backtrackPlunge, backtrackUntilDepth).
     string(REPLACE
-      "      nodestack.pop_back();\n      localdom.backtrack();"
-      "      HighsInt hpPos_bt = nodestack.back().hp_stack_pos;\n      nodestack.pop_back();\n      localdom.backtrack();\n      HighsUserSeparator::restoreBranching(mipsolver.mipdata_->lp, hpPos_bt);"
+      "      nodestack.pop_back();\n#ifndef NDEBUG\n      HighsDomainChange branchchg =\n#endif\n          localdom.backtrack();"
+      "      HighsInt hpPos_pop = nodestack.back().hp_stack_pos;\n      nodestack.pop_back();\n#ifndef NDEBUG\n      HighsDomainChange branchchg =\n#endif\n          localdom.backtrack();\n      HighsUserSeparator::restoreBranching(mipsolver.mipdata_->lp, hpPos_pop);"
       SEARCH_CONTENT "${SEARCH_CONTENT}")
 
-    # Patch the flip section: after flipping branchingdecision bounds,
-    # add hyperplane flip logic. The flip creates a new child.
-    # We look for the pattern where emplace_back happens after the flip.
-    # The flip code changes branchingdecision.boundval and boundtype,
-    # then does localdom.changeBound + emplace_back.
-    #
-    # After the flip's emplace_back, set hp_stack_pos on the new child.
-    # Before changeBound, add the up-branch row if hp_data_idx >= 0.
+    # backtrackUntilDepth has a slightly different pattern (4-space indent)
     string(REPLACE
-      "    localdom.changeBound(currnode.branchingdecision);\n    nodestack.emplace_back("
-      "    // Hyperplane flip: add up-branch row if parent had hyperplane\n    HighsInt hpPos_flip = HighsUserSeparator::stackSize();\n    if (currnode.hp_data_idx >= 0) {\n      auto& flipData = HighsUserSeparator::getHyperplaneData(currnode.hp_data_idx);\n      HighsUserSeparator::pushBranching(\n          mipsolver.mipdata_->lp, flipData,\n          std::ceil(flipData.branch_value), kHighsInf);\n    }\n    localdom.changeBound(currnode.branchingdecision);\n    nodestack.emplace_back("
+      "    nodestack.pop_back();\n\n#ifndef NDEBUG\n    HighsDomainChange branchchg =\n#endif\n        localdom.backtrack();"
+      "    HighsInt hpPos_pop = nodestack.back().hp_stack_pos;\n    nodestack.pop_back();\n\n#ifndef NDEBUG\n    HighsDomainChange branchchg =\n#endif\n        localdom.backtrack();\n    HighsUserSeparator::restoreBranching(mipsolver.mipdata_->lp, hpPos_pop);"
       SEARCH_CONTENT "${SEARCH_CONTENT}")
 
-    # After the flip's emplace_back + domgchgStackPos assignment, add hp_stack_pos
-    # The pattern is: nodestack.back().domgchgStackPos = domchgPos;
-    # followed by either return or break.
-    # We need to add hp_stack_pos right after domgchgStackPos in the flip context.
-    # Since this pattern appears in multiple places, we target the specific one
-    # in backtrack() by looking for the unique context.
+    # ── 5d. Patch flip sections in backtrack() and backtrackPlunge() ──
+    # When hp_data_idx >= 0, we skip the branchingdecision flip, push a no-op
+    # marker, and add the up-branch hyperplane row.
+    # This pattern appears twice (backtrack + backtrackPlunge) with 4-space indent.
+    string(REPLACE
+      "    size_t numChangedCols = localdom.getChangedCols().size();\n    bool passStabilizerToChildNode =\n        orbitsValidInChildNode(currnode.branchingdecision);\n    localdom.changeBound(currnode.branchingdecision);"
+      "    size_t numChangedCols = localdom.getChangedCols().size();\n    HighsInt hpPos_flip = HighsUserSeparator::stackSize();\n    if (currnode.hp_data_idx >= 0) {\n      // Hyperplane flip: push no-op marker + up-branch row\n      auto& flipData = HighsUserSeparator::getHyperplaneData(currnode.hp_data_idx);\n      localdom.changeBound({localdom.col_lower_[currnode.branchingdecision.column],\n          currnode.branchingdecision.column, HighsBoundType::kLower});\n      HighsUserSeparator::pushBranching(\n          mipsolver.mipdata_->lp, flipData,\n          std::ceil(flipData.branch_value), kHighsInf);\n    } else {\n      localdom.changeBound(currnode.branchingdecision);\n    }\n    bool passStabilizerToChildNode =\n        (currnode.hp_data_idx < 0) && orbitsValidInChildNode(currnode.branchingdecision);"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # backtrackPlunge has HighsInt instead of size_t for numChangedCols
+    string(REPLACE
+      "    HighsInt numChangedCols = localdom.getChangedCols().size();\n    bool passStabilizerToChildNode =\n        orbitsValidInChildNode(currnode.branchingdecision);\n    localdom.changeBound(currnode.branchingdecision);"
+      "    HighsInt numChangedCols = localdom.getChangedCols().size();\n    HighsInt hpPos_flip = HighsUserSeparator::stackSize();\n    if (currnode.hp_data_idx >= 0) {\n      auto& flipData = HighsUserSeparator::getHyperplaneData(currnode.hp_data_idx);\n      localdom.changeBound({localdom.col_lower_[currnode.branchingdecision.column],\n          currnode.branchingdecision.column, HighsBoundType::kLower});\n      HighsUserSeparator::pushBranching(\n          mipsolver.mipdata_->lp, flipData,\n          std::ceil(flipData.branch_value), kHighsInf);\n    } else {\n      localdom.changeBound(currnode.branchingdecision);\n    }\n    bool passStabilizerToChildNode =\n        (currnode.hp_data_idx < 0) && orbitsValidInChildNode(currnode.branchingdecision);"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5e. Patch flip in backtrackUntilDepth() ──
+    # This one has 2-space indent.
+    string(REPLACE
+      "  HighsInt domchgPos = localdom.getDomainChangeStack().size();\n  bool passStabilizerToChildNode =\n      orbitsValidInChildNode(currnode.branchingdecision);\n  localdom.changeBound(currnode.branchingdecision);\n  nodestack.emplace_back(\n      currnode.lower_bound, currnode.estimate, currnode.nodeBasis,\n      passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n\n  lp->flushDomain(localdom);\n  nodestack.back().domgchgStackPos = domchgPos;"
+      "  HighsInt domchgPos = localdom.getDomainChangeStack().size();\n  HighsInt hpPos_flip = HighsUserSeparator::stackSize();\n  if (currnode.hp_data_idx >= 0) {\n    auto& flipData = HighsUserSeparator::getHyperplaneData(currnode.hp_data_idx);\n    localdom.changeBound({localdom.col_lower_[currnode.branchingdecision.column],\n          currnode.branchingdecision.column, HighsBoundType::kLower});\n    HighsUserSeparator::pushBranching(\n        mipsolver.mipdata_->lp, flipData,\n        std::ceil(flipData.branch_value), kHighsInf);\n  } else {\n    localdom.changeBound(currnode.branchingdecision);\n  }\n  bool passStabilizerToChildNode =\n      (currnode.hp_data_idx < 0) && orbitsValidInChildNode(currnode.branchingdecision);\n  nodestack.emplace_back(\n      currnode.lower_bound, currnode.estimate, currnode.nodeBasis,\n      passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n\n  lp->flushDomain(localdom);\n  nodestack.back().domgchgStackPos = domchgPos;\n  nodestack.back().hp_stack_pos = hpPos_flip;"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5f. Set hp_stack_pos on flip child in backtrack() and backtrackPlunge() ──
+    # After the flip's emplace_back, set hp_stack_pos. The pattern ends with:
+    #   lp->flushDomain(localdom);
+    #   nodestack.back().domgchgStackPos = domchgPos;
+    #   break;
+    # This appears in both backtrack() and backtrackPlunge().
+    string(REPLACE
+      "    lp->flushDomain(localdom);\n    nodestack.back().domgchgStackPos = domchgPos;\n    break;"
+      "    lp->flushDomain(localdom);\n    nodestack.back().domgchgStackPos = domchgPos;\n    nodestack.back().hp_stack_pos = hpPos_flip;\n    break;"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5g. Restore branching rows when flip child is pruned or queued ──
+    # When the flip child is pruned (infeasible/cutoff) or sent to the node queue,
+    # localdom.backtrack() is called but branching rows must also be removed.
+    # The prune pattern is: "localdom.backtrack();\n      localdom.clearChangedCols(numChangedCols);\n      if (countTreeWeight)"
+    # This appears in backtrack() and backtrackPlunge().
+    string(REPLACE
+      "      localdom.backtrack();\n      localdom.clearChangedCols(numChangedCols);\n      if (countTreeWeight) treeweight += std::ldexp(1.0, -getCurrentDepth());\n      continue;"
+      "      HighsUserSeparator::restoreBranching(mipsolver.mipdata_->lp, hpPos_flip);\n      localdom.backtrack();\n      localdom.clearChangedCols(numChangedCols);\n      if (countTreeWeight) treeweight += std::ldexp(1.0, -getCurrentDepth());\n      continue;"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5h. Prevent hyperplane-branched nodes from going to the node queue ──
+    # The node queue stores only domain changes, not LP branching rows.
+    # Also add a guard AFTER the ancestor score loop since it can override nodeToQueue.
+    string(REPLACE
+      "    bool nodeToQueue = nodelb > mipsolver.mipdata_->optimality_limit;\n    // we check if switching"
+      "    bool nodeToQueue = nodelb > mipsolver.mipdata_->optimality_limit;\n    if (currnode.hp_data_idx >= 0) nodeToQueue = false;  // hyperplane nodes can't be queued\n    // we check if switching"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # Add a second guard right before the nodeToQueue block
+    string(REPLACE
+      "    if (nodeToQueue) {\n      // if (!mipsolver.submip) printf(\"node goes to queue\\n\");"
+      "    if (currnode.hp_data_idx >= 0) nodeToQueue = false;  // guard after ancestor score check\n    if (nodeToQueue) {\n      // if (!mipsolver.submip) printf(\"node goes to queue\\n\");"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5i. Suppress debug asserts for hyperplane branches ──
+    # The asserts check branchchg matches branchingdecision. For hyperplane branches
+    # the domain change is a no-op marker, not the branchingdecision.
+    # Guard with hp_data_idx check.
+
+    # Pattern in backtrack() and backtrackPlunge() (6-space indent, multi-line assert)
+    string(REPLACE
+      "      assert(\n          (branchchg.boundtype == HighsBoundType::kLower &&\n           branchchg.boundval >= nodestack.back().branchingdecision.boundval) ||\n          (branchchg.boundtype == HighsBoundType::kUpper &&\n           branchchg.boundval <= nodestack.back().branchingdecision.boundval));\n      assert(branchchg.boundtype ==\n             nodestack.back().branchingdecision.boundtype);\n      assert(branchchg.column == nodestack.back().branchingdecision.column);"
+      "      if (nodestack.back().hp_data_idx < 0) {\n      assert(\n          (branchchg.boundtype == HighsBoundType::kLower &&\n           branchchg.boundval >= nodestack.back().branchingdecision.boundval) ||\n          (branchchg.boundtype == HighsBoundType::kUpper &&\n           branchchg.boundval <= nodestack.back().branchingdecision.boundval));\n      assert(branchchg.boundtype ==\n             nodestack.back().branchingdecision.boundtype);\n      assert(branchchg.column == nodestack.back().branchingdecision.column);\n      }"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # Pattern in backtrackUntilDepth() (4-space indent, single-line asserts)
+    string(REPLACE
+      "    assert(\n        (branchchg.boundtype == HighsBoundType::kLower &&\n         branchchg.boundval >= nodestack.back().branchingdecision.boundval) ||\n        (branchchg.boundtype == HighsBoundType::kUpper &&\n         branchchg.boundval <= nodestack.back().branchingdecision.boundval));\n    assert(branchchg.boundtype == nodestack.back().branchingdecision.boundtype);\n    assert(branchchg.column == nodestack.back().branchingdecision.column);"
+      "    if (nodestack.back().hp_data_idx < 0) {\n    assert(\n        (branchchg.boundtype == HighsBoundType::kLower &&\n         branchchg.boundval >= nodestack.back().branchingdecision.boundval) ||\n        (branchchg.boundtype == HighsBoundType::kUpper &&\n         branchchg.boundval <= nodestack.back().branchingdecision.boundval));\n    assert(branchchg.boundtype == nodestack.back().branchingdecision.boundtype);\n    assert(branchchg.column == nodestack.back().branchingdecision.column);\n    }"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
 
     file(WRITE "${MIP_DIR}/HighsSearch.cpp" "${SEARCH_CONTENT}")
     message(STATUS "Applied hyperplane branching patch to HighsSearch.cpp")
 else()
     message(STATUS "HighsSearch.cpp hyperplane patch already applied, skipping")
-endif()
-
-# ── 5d. Patch: set hp_stack_pos after domgchgStackPos in flip context ──
-# Re-read to apply additional patches
-file(READ "${MIP_DIR}/HighsSearch.cpp" SEARCH_CONTENT2)
-
-string(FIND "${SEARCH_CONTENT2}" "hp_stack_pos = hpPos_flip" _found_hpflip)
-if(_found_hpflip EQUAL -1)
-    # In the flip context, after domgchgStackPos is set, add hp_stack_pos.
-    # We look for the domgchgStackPos assignment that follows the flip emplace_back.
-    # The unique context is: "hpPos_flip" appears nearby.
-    # Since there may be multiple domgchgStackPos assignments, we target
-    # the one in the backtrack function by matching the larger context.
-    #
-    # The flip emplace_back pattern ends with:
-    #   nodestack.back().domgchgStackPos = domchgPos;
-    # We want to add:
-    #   nodestack.back().hp_stack_pos = hpPos_flip;
-    # But we need to be careful about which occurrence to match.
-    # Let's match the full flip block context.
-
-    # Actually, let's just do a simple approach: replace all
-    # "nodestack.back().domgchgStackPos = domchgPos;" with a version
-    # that also sets hp_stack_pos. But we only want this in backtrack contexts.
-    # The branch() function already handles it. In backtrack, there's typically
-    # one occurrence after the flip emplace_back.
-    #
-    # Since we already patched the branch() path to set hp_stack_pos for
-    # hyperplane wins, and the normal branch path doesn't set it (defaults to 0),
-    # we need the flip's child to get the correct hp_stack_pos.
-    #
-    # For the flip: the child should get hpPos_flip (stack size before push).
-    # We need to find the specific domgchgStackPos in the backtrack flip path.
-    # The unique context around it is "Hyperplane flip:" which we just inserted.
-
-    # Target the flip section specifically by looking for the pattern we just inserted
-    string(REPLACE
-      "    nodestack.emplace_back(\n        std::max(otherLb, currnode.lower_bound), currnode.estimate,"
-      "    nodestack.emplace_back(\n        std::max(otherLb, currnode.lower_bound), currnode.estimate,"
-      SEARCH_CONTENT2 "${SEARCH_CONTENT2}")
-
-    # Just add after every domgchgStackPos assignment in backtrack.
-    # Since hp_stack_pos defaults to 0, this is safe even if no hyperplane was used.
-    # We'll use a replace_all-style approach, but CMake doesn't have that easily.
-    # Instead, let's target the unique string pattern in the flip section:
-    # After "passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n    nodestack.back().domgchgStackPos = domchgPos;"
-    # which appears in the backtrack flip.
-    string(REPLACE
-      "passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n    nodestack.back().domgchgStackPos = domchgPos;\n\n    return"
-      "passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n    nodestack.back().domgchgStackPos = domchgPos;\n    nodestack.back().hp_stack_pos = hpPos_flip;\n\n    return"
-      SEARCH_CONTENT2 "${SEARCH_CONTENT2}")
-
-    file(WRITE "${MIP_DIR}/HighsSearch.cpp" "${SEARCH_CONTENT2}")
-    message(STATUS "Applied hp_stack_pos flip patch to HighsSearch.cpp")
-else()
-    message(STATUS "hp_stack_pos flip patch already applied, skipping")
-endif()
-
-# ── 5e. Patch backtrackUntilDepth(): same pattern as backtrack ──
-# backtrackUntilDepth has similar pop_back + backtrack patterns.
-# Re-read and check if it needs patching (it uses the same nodestack).
-# In HiGHS, backtrackUntilDepth may or may not exist depending on version.
-# If it exists and has the same pattern, patch it.
-file(READ "${MIP_DIR}/HighsSearch.cpp" SEARCH_CONTENT3)
-
-# Check if backtrackUntilDepth exists and needs patching
-string(FIND "${SEARCH_CONTENT3}" "backtrackUntilDepth" _found_btdepth)
-if(NOT _found_btdepth EQUAL -1)
-    # Check if already patched in this function
-    string(FIND "${SEARCH_CONTENT3}" "hpPos_btd" _found_btd_patched)
-    if(_found_btd_patched EQUAL -1)
-        # backtrackUntilDepth has a similar loop with pop_back + backtrack.
-        # It may use a slightly different pattern. Since we already patched
-        # the main "nodestack.pop_back();\n      localdom.backtrack();" pattern
-        # above (which would have caught both if they're identical), we check
-        # if there's another instance that wasn't caught.
-        # Actually, we already used string(REPLACE) which replaces ALL occurrences,
-        # so both backtrack() and backtrackUntilDepth() should be patched.
-        message(STATUS "backtrackUntilDepth exists; pop_back pattern already handled by global replace")
-    endif()
 endif()

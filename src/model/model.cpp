@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <iostream>
 #include <thread>
 
 #include <tbb/task_group.h>
@@ -97,6 +96,8 @@ void Model::build_problem() {
 SolveResult Model::solve(const SolverOptions& options) {
     build_problem();
 
+    logger_.log("rcspp-bac v0.1");
+
     Timer timer;
 
     Highs highs;
@@ -116,6 +117,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool enable_rglm = false;
     bool submip_separation = true;
     std::string branch_hyper = "off";
+    bool output_flag = true;
     for (const auto& [key, value] : options) {
         if (key == "separation_interval") {
             separation_interval = std::stoi(value);
@@ -145,11 +147,24 @@ SolveResult Model::solve(const SolverOptions& options) {
             branch_hyper = value;
             continue;
         }
+        if (key == "output_flag") {
+            output_flag = (value == "true" || value == "1");
+            continue;
+        }
         auto status = highs.setOptionValue(key, value);
         if (status != HighsStatus::kOk) {
-            std::cerr << "Warning: HiGHS rejected option " << key
-                      << " = " << value << "\n";
+            logger_.log("Warning: HiGHS rejected option {} = {}", key, value);
         }
+    }
+
+    // Suppress HiGHS console output; forward through our logger if enabled
+    highs.setOptionValue("output_flag", false);
+    if (output_flag) {
+        highs.setLogCallback(
+            [](HighsLogType /*type*/, const char* message, void* data) {
+                static_cast<Logger*>(data)->log(std::string_view{message});
+            },
+            &logger_);
     }
 
     // Run preprocessing and warm-start in parallel:
@@ -226,11 +241,11 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
 
         warm_start_ub = warm_start.objective;
-        std::cerr << "Preprocessing: " << preproc_timer.elapsed_seconds()
-                  << "s, UB=" << warm_start_ub << "\n";
+        logger_.log("Preprocessing: {}s, UB={}", preproc_timer.elapsed_seconds(),
+                    warm_start_ub);
     }
 
-    HiGHSBridge bridge(problem_, highs, separation_tol);
+    HiGHSBridge bridge(problem_, highs, logger_, separation_tol);
     bridge.set_separation_interval(separation_interval);
     bridge.set_max_cuts_per_separator(max_cuts_per_sep);
     bridge.set_submip_separation(submip_separation);
