@@ -82,7 +82,7 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 
 ```bash
 # Tour (closed loop from depot)
-./build/rcspp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
+./build/rcspp-solve benchmarks/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
 
 # s-t path (source/target read from file)
 ./build/rcspp-solve tests/data/tiny4_path.txt
@@ -138,6 +138,7 @@ src/preprocess/  Demand-reachability and edge elimination
 src/cli/         Command-line solver
 python/          nanobind Python bindings
 tests/           Catch2 unit and regression tests
+benchmarks/      Benchmark instances, scripts, and results
 docs/            Algorithm documentation
 ```
 

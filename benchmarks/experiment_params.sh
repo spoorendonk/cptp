@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SOLVER="./build/rcspp-solve"
-INST_DIR="bench/instances/spprclib"
+INST_DIR="benchmarks/instances/spprclib"
 TIME_LIMIT=120
 
 INSTANCES=(
