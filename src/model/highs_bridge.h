@@ -10,6 +10,7 @@
 #include "core/problem.h"
 #include "core/solution.h"
 #include "sep/separation_context.h"
+#include "sep/separation_oracle.h"
 #include "sep/separator.h"
 #include "util/logger.h"
 

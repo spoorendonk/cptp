@@ -4,8 +4,9 @@ File: `src/heuristic/warm_start.h` (header-only)
 
 ## Purpose
 
-Provides an initial feasible solution to HiGHS via `setSolution()` before MIP solving.
-A good primal bound prunes more of the B&B tree early.
+Provides an initial feasible solution via parallel randomized greedy construction
+and local search. Solver-independent — can be used standalone or fed to any MIP
+solver as a warm start.
 
 ## Algorithm
 
@@ -59,11 +60,11 @@ The heuristic supports two modes, controlled by the `deterministic` solver optio
 - May find better bounds on fast multi-core hardware
 - Results vary between runs
 
-## Integration
-
-In `Model::solve()` (model.cpp):
+## Standalone Usage
 
 ```cpp
+#include "heuristic/warm_start.h"
+
 // Deterministic (default): fixed restart count, reproducible
 auto warm_start = heuristic::build_warm_start(problem_, num_restarts);
 
@@ -72,16 +73,42 @@ auto warm_start = heuristic::build_warm_start(problem_, num_restarts, budget_ms)
 
 // warm_start.objective = travel_cost - collected_profit
 // warm_start.col_values = solution vector (edges + nodes)
+```
 
-HighsSolution start;
-start.value_valid = true;
-start.col_value = std::move(warm_start.col_values);
-highs.setSolution(start);
+Python:
+```python
+from rcspp_bac import build_warm_start
+warm = build_warm_start(prob, time_budget_ms=500.0)
 ```
 
 The solution vector has size `num_edges + num_nodes`:
-- `sol[e] = 1` for edges in the route
-- `sol[m + v] = 1` for visited nodes (including source/target)
+- `col_values[e] = 1` for edges in the route
+- `col_values[m + v] = 1` for visited nodes (including source/target)
+
+## Testing
+
+6 C++ tests (`[heuristic]` tag) and 5 Python tests verify:
+- Tour produces a valid closed loop with correct degree (degree 2 at all visited nodes)
+- Path produces a valid open path (degree 1 at source/target, degree 2 at intermediates)
+- Total demand of visited nodes respects vehicle capacity
+- Source/target y-variables are set to 1
+- Edge count equals visited-node count minus 1 (path) or equals visited-node count (tour)
+- Objective is finite
+
+```bash
+./build/rcspp_algo_tests [heuristic]
+```
+
+## HiGHS Integration
+
+In `Model::solve()` (model.cpp), the warm start is fed to HiGHS:
+
+```cpp
+HighsSolution start;
+start.value_valid = true;
+start.col_value = std::move(warm.col_values);
+highs.setSolution(start);
+```
 
 ## Performance
 

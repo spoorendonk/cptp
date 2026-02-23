@@ -1,4 +1,4 @@
-build/
+build*/
 .cache/
 .claude/
 __pycache__/
