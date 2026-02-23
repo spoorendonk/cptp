@@ -8,6 +8,7 @@
 #include "core/solution.h"
 #include "model/highs_bridge.h"
 #include "model/resource.h"
+#include "util/logger.h"
 
 namespace rcspp {
 
@@ -33,6 +34,7 @@ class Model {
     SolveResult solve(const SolverOptions& options = {});
 
     const Problem& problem() const { return problem_; }
+    Logger& logger() { return logger_; }
 
  private:
     void build_problem();
@@ -45,6 +47,7 @@ class Model {
     std::vector<double> profits_;
     std::vector<Resource> resources_;
     Problem problem_;
+    Logger logger_;
     bool built_ = false;
 };
 
