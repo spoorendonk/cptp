@@ -1,28 +1,26 @@
-# Optimal values computed by cptp-bac (up to 1h time limit)
+# Optimal values computed by rcspp-bac (up to 5min time limit)
 # Instances from Roberti (Set 3, Jepsen et al. 2014) via dparo-cptp
 # Only proven optima (gap=0%) are listed.
 instance,optimal
 E-n101-k14_a,-6.667
-E-n101-k14_b,-0.002
 E-n101-k8_a,-23.977
-E-n101-k8_b,-10.425
+E-n101-k8_b,-18.738
 E-n76-k10_a,-3.81
-E-n76-k10_b,-2.2
+E-n76-k10_b,-8.138
 E-n76-k14_a,-3.436
 E-n76-k14_b,-0.002
 E-n76-k7_a,-6.032
-E-n76-k7_b,-0.846
+E-n76-k7_b,-5.792
 E-n76-k8_a,-6.635
-E-n76-k8_b,-12.167
-F-n45-k4_a,-11.967
+E-n76-k8_b,-19.209
+F-n135-k7_a,-13.856
+F-n45-k4_a,-13.714
 F-n72-k4_a,0.005
-M-n121-k7_b,-6.659
-M-n151-k12_a,-5.799
 P-n101-k4_a,-7.219
-P-n101-k4_b,-7.712
+P-n101-k4_b,-13.17
 P-n70-k10_a,-2.828
-P-n70-k10_b,-0.238
+P-n70-k10_b,-2.477
 P-n76-k4_a,-2.903
-P-n76-k4_b,-7.048
+P-n76-k4_b,-13.164
 P-n76-k5_a,-3.96
-P-n76-k5_b,-7.405
+P-n76-k5_b,-13.64

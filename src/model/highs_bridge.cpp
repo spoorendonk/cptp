@@ -16,6 +16,7 @@
 #include "preprocess/reachability.h"
 #include "sep/sec_separator.h"
 #include "sep/separation_context.h"
+#include "sep/separation_oracle.h"
 
 #include <tbb/task_group.h>
 
@@ -58,6 +59,14 @@ void HiGHSBridge::build_formulation() {
     std::vector<double> col_cost(total_vars, 0.0);
     std::vector<double> col_lower(total_vars, 0.0);
     std::vector<double> col_upper(total_vars, 1.0);
+
+    // Tour mode: depot-incident edges allow x_e ∈ {0,1,2} to permit 2-node tours
+    // (Jepsen et al. 2014, standard CPTP/CVRP formulation)
+    if (prob_.is_tour()) {
+        for (auto e : graph.incident_edges(prob_.source())) {
+            col_upper[e] = 2.0;
+        }
+    }
 
     // Fix source and target y variables to 1 via bounds
     col_lower[m + prob_.source()] = 1.0;
@@ -271,7 +280,7 @@ void HiGHSBridge::install_separators() {
                 sep::SECSeparator sec;
                 auto cuts = sec.separate(ctx);
 
-                std::sort(cuts.begin(), cuts.end(),
+                std::stable_sort(cuts.begin(), cuts.end(),
                     [](const sep::Cut& a, const sep::Cut& b) {
                         return a.violation > b.violation;
                     });
@@ -332,7 +341,7 @@ void HiGHSBridge::install_separators() {
                     if (!results[i].empty()) stats.rounds_called++;
 
                     auto& cuts = results[i];
-                    std::sort(cuts.begin(), cuts.end(),
+                    std::stable_sort(cuts.begin(), cuts.end(),
                         [](const sep::Cut& a, const sep::Cut& b) {
                             return a.violation > b.violation;
                         });
@@ -365,37 +374,11 @@ void HiGHSBridge::install_separators() {
             const int32_t n = num_nodes_;
             if (static_cast<int32_t>(sol.size()) < m + n) return true;
 
-            const auto& graph = prob_.graph();
-            const double graph_tol = 1e-6;  // for edge inclusion in support graph
-
-            // Build support graph and Gomory-Hu tree for feasibility check
-            digraph_builder builder(n);
-            for (auto e : graph.edges()) {
-                double xval = sol[e];
-                if (xval > graph_tol) {
-                    int32_t u = graph.edge_source(e);
-                    int32_t v = graph.edge_target(e);
-                    builder.add_arc(u, v, xval);
-                    builder.add_arc(v, u, xval);
-                }
-            }
-            auto [support_graph, capacity] = builder.build();
-            gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
-
-            sep::SeparationContext ctx{
-                .problem = prob_,
-                .x_values = std::span(sol.data(), static_cast<size_t>(m)),
-                .y_values = std::span(sol.data() + m, static_cast<size_t>(n)),
-                .x_offset = x_offset(),
-                .y_offset = y_offset(),
-                .tol = int_tol_,
-                .flow_tree = &flow_tree,
-            };
-
-            // Only check SEC — these are the lazy constraints
-            sep::SECSeparator sec;
-            auto cuts = sec.separate(ctx);
-            return cuts.empty();
+            sep::SeparationOracle oracle(prob_);
+            return oracle.is_feasible(
+                std::span(sol.data(), static_cast<size_t>(m)),
+                std::span(sol.data() + m, static_cast<size_t>(n)),
+                x_offset(), y_offset());
         });
 }
 

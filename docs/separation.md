@@ -4,9 +4,11 @@ File: `src/sep/` directory
 
 ## Overview
 
-Five families of cutting planes are separated dynamically via HiGHS MIP callbacks.
-All separators implement `rcspp::sep::Separator` and receive a `SeparationContext`
-containing the LP relaxation solution, problem data, and a shared Gomory-Hu tree.
+Five families of cutting planes are separated dynamically. All separators are
+**solver-independent** — they implement `rcspp::sep::Separator` and receive a
+`SeparationContext` containing the LP relaxation solution, problem data, and a
+shared Gomory-Hu tree. The `SeparationOracle` class bundles all separators into
+a single call usable from any MIP solver's cut callback.
 
 All cuts use formulations valid for RCSPP with optional vertices (y variables),
 originally developed for the CPTP (Jepsen et al. 2014). Standard CVRP cuts are
@@ -279,9 +281,101 @@ Implements a BFS-based heuristic for comb separation (Jepsen et al. eq 13):
 formulation requires y-variable corrections not present in the standard CVRP
 comb form.
 
-## Cut Management
+## SeparationOracle (solver-independent)
+
+File: `src/sep/separation_oracle.h`, `src/sep/separation_oracle.cpp`
+
+The `SeparationOracle` class provides a solver-independent interface to all
+separators. It handles support graph construction, Gomory-Hu tree computation,
+and parallel separator execution — everything needed to generate cuts from an
+LP relaxation solution.
+
+### Usage
+
+```cpp
+#include "sep/separation_oracle.h"
+
+rcspp::sep::SeparationOracle oracle(prob);
+oracle.add_default_separators();  // SEC + RCI + Multistar + Comb
+
+// In your solver's cut callback:
+auto cuts = oracle.separate(x_values, y_values, x_offset, y_offset);
+```
+
+### Pipeline (per `separate()` call)
+
+1. Build fractional support graph from edge LP values
+2. Build Gomory-Hu tree (n-1 max-flow calls via Dinitz)
+3. Build `SeparationContext` (LP values, problem, GH tree, offsets)
+4. Run all registered separators **in parallel** (TBB task group)
+5. For each separator: sort cuts by violation (descending), keep top-k
+6. Merge and sort all cuts by violation
+
+### Feasibility check
+
+`oracle.is_feasible(x, y, x_off, y_off)` creates a temporary SEC separator
+with tight tolerance (1e-6) and checks for violated subtour elimination
+constraints. Used as a lazy-constraint callback on integer-feasible solutions.
+
+### Parameters
+
+| Method | Default | Description |
+|---|---|---|
+| `set_max_cuts_per_separator(k)` | 3 | Top-k most-violated cuts per separator per round (0 = unlimited) |
+| `separate(..., tol)` | 0.1 | Violation tolerance for cut separation |
+
+### Adding separators
+
+Default set via `add_default_separators()`: SEC, RCI, Multistar, Comb.
+
+Individual separators:
+```cpp
+oracle.add_separator(std::make_unique<rcspp::sep::SECSeparator>());
+oracle.add_separator(std::make_unique<rcspp::sep::RCISeparator>());
+oracle.add_separator(std::make_unique<rcspp::sep::MultistarSeparator>());
+oracle.add_separator(std::make_unique<rcspp::sep::CombSeparator>());
+oracle.add_separator(std::make_unique<rcspp::sep::RGLMSeparator>());
+```
+
+### Cut format
+
+Each `Cut` returned by `separate()`:
+
+| Field | Type | Description |
+|---|---|---|
+| `indices` | `vector<int32_t>` | Column indices in the LP |
+| `values` | `vector<double>` | Coefficients |
+| `rhs` | `double` | Right-hand side (<= form) |
+| `violation` | `double` | Violation amount |
+
+### Testing
+
+The SeparationOracle and individual separators are covered by 24 C++ tests (`[oracle]`, `[sec]`, `[rci]`, `[multistar]`, `[comb]`, `[rglm]`, `[separator]` tags) and 9 Python tests:
+
+| Component | Tests | Coverage |
+|---|---|---|
+| SeparationOracle | 13 C++ + 9 Python | Tour/path cuts, feasibility, offsets, limits, no-separator edge case, cut struct validation |
+| SEC separator | 7 C++ | Violated/feasible (tour + path), target-in-S rhs handling, multi-disconnected |
+| RCI separator | 2 C++ | Basic + high-demand fractional solution |
+| Multistar | 1 C++ | Basic execution |
+| Comb | 1 C++ | Basic execution |
+| RGLM | 1 C++ | Basic execution |
+
+```bash
+./build/rcspp_algo_tests [oracle]     # SeparationOracle tests
+./build/rcspp_algo_tests [sec]        # SEC separator
+./build/rcspp_algo_tests [rci]        # RCI separator
+./build/rcspp_algo_tests [multistar]  # Multistar
+./build/rcspp_algo_tests [comb]       # Comb
+./build/rcspp_algo_tests [rglm]       # RGLM
+./build/rcspp_algo_tests [separator]  # Separator name() accessors
+```
+
+## Cut Management (HiGHS)
 
 Managed by `HiGHSBridge::install_separators()` (`src/model/highs_bridge.cpp`).
+The HiGHS integration uses `SeparationOracle` internally for feasibility checking
+and wraps the same separation pipeline for HiGHS's user separator callback.
 
 ### Per-round pipeline
 

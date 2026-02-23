@@ -71,10 +71,11 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
         }
 
         // Sort by contribution descending (most violating first).
-        std::sort(teeth.begin(), teeth.end(),
-                  [](const Tooth& a, const Tooth& b) {
-                      return a.contrib > b.contrib;
-                  });
+        // stable_sort preserves deterministic edge-iteration order for equal contributions.
+        std::stable_sort(teeth.begin(), teeth.end(),
+                         [](const Tooth& a, const Tooth& b) {
+                             return a.contrib > b.contrib;
+                         });
 
         // Greedy selection: no shared inside or outside nodes.
         std::vector<bool> used_inside(n, false);

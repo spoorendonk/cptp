@@ -22,21 +22,25 @@ The primary application is as a **pricing solver in branch-and-price for CVRP**.
 
 ## Features
 
-- **MIP formulation** with binary edge and node variables (undirected)
-- **Dynamic cut separation**: subtour elimination (SEC), rounded capacity inequalities (RCI), multistar/GLM inequalities, rounded GLM (RGLM)
+- **Pluggable algorithm library** (`rcspp_algorithms`) — separators, propagation, heuristic, and preprocessing, usable with any MIP solver
+- **Dynamic cut separation**: subtour elimination (SEC), rounded capacity inequalities (RCI), multistar/GLM inequalities, rounded GLM (RGLM), comb
 - **Gomory-Hu tree** (Gusfield's algorithm) shared across separators for efficient min-cut computation
 - **Domain propagator**: labeling-based edge fixing during branch-and-bound
 - **Preprocessing**: demand-reachability filtering and labeling-based edge elimination
 - **Warm-start heuristic**: parallel greedy construction + local search (2-opt, or-opt, node drop/add) via TBB
-- **Python bindings** via nanobind (optional)
+- **Batteries-included HiGHS integration** — full branch-and-cut solver out of the box
+- **Python bindings** via nanobind (optional), with algorithm API available without HiGHS
 
-## MIP Backend
+## Architecture
 
-Built on [HiGHS](https://highs.dev), an open-source LP/MIP solver from the University of Edinburgh. Three callback interfaces are patched into HiGHS (see `third_party/highs_patch/`):
+The project is split into two layers:
 
-- **User separator** (`HighsUserSeparator`) -- cut separation at fractional and integer-feasible nodes
-- **Feasibility checker** -- lazy constraint validation rejecting subtour-violating incumbents from HiGHS heuristics
-- **Domain propagator** (`HighsUserPropagator`) -- labeling-based variable fixing during branch-and-bound
+1. **`rcspp_algorithms`** — solver-independent library containing all cutting-plane separators, bound propagation, warm-start heuristic, and preprocessing. Only depends on TBB. Can be used standalone from any MIP solver's cut callback.
+
+2. **`rcspp_model`** (optional) — HiGHS integration that wires the algorithms into HiGHS's branch-and-cut framework. Three callback interfaces are patched into HiGHS (see `third_party/highs_patch/`):
+   - **User separator** (`HighsUserSeparator`) — cut separation at fractional and integer-feasible nodes
+   - **Feasibility checker** — lazy constraint validation rejecting subtour-violating incumbents
+   - **Domain propagator** (`HighsUserPropagator`) — labeling-based variable fixing during B&B
 
 ## Build
 
@@ -45,6 +49,13 @@ Requires GCC 14+ (C++23), CMake 3.25+, and TBB:
 ```bash
 apt install libtbb-dev
 cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+```
+
+To build only the algorithm library (no HiGHS dependency):
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DRCSPP_BUILD_HIGHS=OFF
 cmake --build build -j$(nproc)
 ```
 
@@ -61,7 +72,20 @@ cmake --build build -j$(nproc)
 ./build/rcspp-solve <instance> [--source <node>] [--target <node>] [--<highs_option> <value> ...]
 ```
 
-Accepts TSPLIB (`.vrp`, `.sppcc`) and numeric (`.txt`) instance formats. All options beyond `--source`/`--target` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
+Accepts TSPLIB (`.vrp`, `.sppcc`) and numeric (`.txt`) instance formats. All options beyond `--source`/`--target`/`--branch_hyper` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
+
+#### Hyperplane branching
+
+The `--branch_hyper` option enables dynamic constraint branching, which adds/removes LP constraint rows during the branch-and-bound search. Modes:
+
+| Mode | Description |
+|------|-------------|
+| `off` (default) | Standard variable branching only |
+| `pairs` | Ryan-Foster pairs: branch on `y_i + y_j` for nearest-neighbor node pairs |
+| `clusters` | Cluster demand: branch on `sum(d_i * y_i)` for small node clusters |
+| `demand` | Global demand: branch on total demand `sum(d_i * y_i)` |
+| `cardinality` | Cardinality: branch on `sum(y_i)` (number of visited nodes) |
+| `all` | All of the above combined |
 
 When `source != target`, the solver uses an open s-t path formulation (degree 1 at source/target, degree 2 at intermediates). When `source == target` (default), the standard tour formulation is used.
 
@@ -69,7 +93,7 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 
 ```bash
 # Tour (closed loop from depot)
-./build/rcspp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
+./build/rcspp-solve benchmarks/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
 
 # s-t path (source/target read from file)
 ./build/rcspp-solve tests/data/tiny4_path.txt
@@ -79,6 +103,9 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 
 # Suppress HiGHS log output
 ./build/rcspp-solve tests/data/tiny4.txt --output_flag false
+
+# Hyperplane branching (Ryan-Foster pairs)
+./build/rcspp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --branch_hyper pairs
 ```
 
 ### Instance formats
@@ -99,49 +126,147 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 
 Node profits and demands are read from the same format (see `src/core/io.cpp` for full spec). **TSPLIB `.sppcc`/`.vrp`** files are also supported with the standard `DEPOT_SECTION` (always treated as tour).
 
-## API
+## Standalone Algorithm API
 
-- **Python**: `pip install rcspp-bac` -- [usage and examples](docs/python-api.md)
-- **C++**: link against `rcspp_model` -- [usage and examples](docs/cpp-api.md)
+The separators, heuristic, and propagator can be used independently of HiGHS — plug them into any MIP solver's cut callback (Gurobi, CPLEX, SCIP, etc.).
+
+### C++ (link against `rcspp_algorithms`)
+
+```cpp
+#include "sep/separation_oracle.h"
+#include "preprocess/bound_propagator.h"
+#include "heuristic/warm_start.h"
+
+// Build or load a Problem
+rcspp::Problem prob = rcspp::io::load("instance.txt");
+
+// --- Cut separation ---
+rcspp::sep::SeparationOracle oracle(prob);
+oracle.add_default_separators();  // SEC + RCI + Multistar + Comb
+
+// Inside your solver's cut callback:
+auto cuts = oracle.separate(x_values, y_values, x_offset, y_offset);
+for (auto& cut : cuts) {
+    // cut.indices, cut.values, cut.rhs — add to your solver
+}
+
+// --- Feasibility check (lazy constraints) ---
+if (!oracle.is_feasible(x_int, y_int, x_offset, y_offset)) {
+    // reject incumbent — subtour violation
+}
+
+// --- Warm-start heuristic ---
+auto warm = rcspp::heuristic::build_warm_start(prob, /*budget_ms=*/500.0);
+// warm.col_values — initial solution, warm.objective — objective value
+
+// --- Bound propagation ---
+auto fwd = rcspp::preprocess::forward_labeling(prob, prob.source());
+auto bwd = rcspp::preprocess::backward_labeling(prob, prob.target());
+double correction = prob.is_tour() ? prob.profits()[prob.source()] : 0.0;
+
+rcspp::preprocess::BoundPropagator prop(prob, fwd, bwd, correction);
+auto fixed_edges = prop.sweep(upper_bound, col_upper);       // Trigger A
+auto chain = prop.propagate_fixed_edge(e, upper_bound, col_upper);  // Trigger B
+```
+
+### Python (no HiGHS required)
+
+```python
+import numpy as np
+from rcspp_bac import (
+    Problem, SeparationOracle, BoundPropagator,
+    build_warm_start, forward_labeling, backward_labeling, edge_elimination,
+)
+
+prob = Problem(num_nodes=4, edges=edges, edge_costs=costs,
+               profits=profits, demands=demands, capacity=7.0)
+
+# Cut separation
+oracle = SeparationOracle(prob)
+oracle.add_default_separators()
+cuts = oracle.separate(x_values, y_values, x_offset=0, y_offset=num_edges)
+
+for cut in cuts:
+    # cut.indices (int32), cut.values (float64), cut.rhs — add to solver
+    pass
+
+# Warm-start heuristic
+warm = build_warm_start(prob, time_budget_ms=500.0)
+
+# Bound propagation
+fwd = forward_labeling(prob, prob.source)
+bwd = backward_labeling(prob, prob.target)
+prop = BoundPropagator(prob, fwd, bwd, correction=0.0)
+fixed = prop.sweep(upper_bound=100.0, col_upper=np.ones(prob.num_edges))
+```
+
+See [C++ API](docs/cpp-api.md) and [Python API](docs/python-api.md) for full documentation.
+
+## Solver API (HiGHS)
+
+- **Python**: `pip install rcspp-bac` — [usage and examples](docs/python-api.md)
+- **C++**: link against `rcspp_model` — [usage and examples](docs/cpp-api.md)
 
 ## Tests
 
 ```bash
-./build/rcspp_tests
+./build/rcspp_algo_tests                    # 57 C++ algorithm tests (no HiGHS needed)
+./build/rcspp_tests                         # 26 C++ integration tests (requires HiGHS)
+pytest tests/python/test_algorithms.py      # 33 Python algorithm tests (no HiGHS needed)
+pytest tests/python/test_solver.py          # Python solver tests (requires HiGHS)
 ```
+
+The algorithm tests (`rcspp_algo_tests`) cover all solver-independent components:
+- **SeparationOracle**: cut generation, feasibility checks, offset handling, cut limits, tour and path modes
+- **Individual separators**: SEC, RCI, Multistar, Comb, RGLM — both violation detection and correctness
+- **BoundPropagator**: Trigger A sweep, Trigger B chain fixings, all-pairs bounds, path mode
+- **Preprocessing**: demand reachability, edge elimination, labeling bounds
+- **Warm-start heuristic**: tour/path construction, degree/capacity consistency
+- **Core**: Dinitz max-flow, Gomory-Hu tree, Problem accessors, IO parsing
+
+Python algorithm tests mirror the C++ coverage for the `rcspp_bac` package bindings.
 
 ## Project Structure
 
 ```
 src/core/        Problem definition, IO (TSPLIB & numeric), Dinitz max-flow, Gomory-Hu tree
-src/sep/         Cut separators (SEC, RCI, Multistar, RGLM, Comb)
-src/model/       HiGHS MIP integration (separators, propagator, callbacks)
-src/util/        Utilities (Logger, Timer)
+src/sep/         Cut separators (SEC, RCI, Multistar, RGLM, Comb) + SeparationOracle
+src/preprocess/  BoundPropagator, demand-reachability, edge elimination
 src/heuristic/   Warm-start construction + local search
-src/preprocess/  Demand-reachability and edge elimination
-src/cli/         Command-line solver
+src/model/       HiGHS MIP integration (optional — separators, propagator, callbacks)
+src/cli/         Command-line solver (requires HiGHS)
+src/util/        Utilities (Logger, Timer)
 python/          nanobind Python bindings
-tests/           Catch2 unit and regression tests
+tests/           Catch2 unit tests + Python test suites
+benchmarks/      Benchmark instances, scripts, and results
 docs/            Algorithm documentation
 ```
 
+### Libraries
+
+| Target | Depends on | Description |
+|---|---|---|
+| `rcspp_algorithms` | TBB | Solver-independent: separators, propagation, heuristic, preprocessing |
+| `rcspp_model` | `rcspp_algorithms` + HiGHS | HiGHS integration (optional, controlled by `RCSPP_BUILD_HIGHS`) |
+
 ## Documentation
 
-- [Python API](docs/python-api.md) -- installation, `solve()`, `Model`, CLI
-- [C++ API](docs/cpp-api.md) -- CMake integration, tour/path examples, SolveResult
-- [Instance formats](docs/instance-formats.md) -- TSPLIB, numeric `.txt`
-- [Algorithms and techniques](docs/algorithms.md) -- formulation, solver pipeline, references
-- [Cut separation](docs/separation.md) -- SEC, RCI, Multistar/GLM, RGLM, Comb, cut management
-- [Preprocessing](docs/preprocessing.md) -- demand-reachability filtering, labeling-based edge elimination
-- [Domain propagator](docs/domain-propagator.md) -- labeling-based edge fixing during B&C
-- [Warm-start heuristic](docs/warm-start-heuristic.md) -- construction, local search, parallelism
-- [Benchmark results](docs/benchmarks.md) -- SPPRCLIB and Roberti instance results
+- [Python API](docs/python-api.md) — installation, algorithm API, `solve()`, `Model`, CLI
+- [C++ API](docs/cpp-api.md) — CMake integration, standalone algorithms, solver examples
+- [Instance formats](docs/instance-formats.md) — TSPLIB, numeric `.txt`
+- [Algorithms and techniques](docs/algorithms.md) — formulation, solver pipeline, references
+- [Cut separation](docs/separation.md) — SEC, RCI, Multistar/GLM, RGLM, Comb, SeparationOracle
+- [Preprocessing](docs/preprocessing.md) — demand-reachability filtering, labeling-based edge elimination
+- [Domain propagator](docs/domain-propagator.md) — BoundPropagator, labeling-based edge fixing
+- [Warm-start heuristic](docs/warm-start-heuristic.md) — construction, local search, parallelism
+- [Benchmark results](docs/benchmarks.md) — SPPRCLIB and Roberti instance results
 
 ## Dependencies
 
-- [HiGHS](https://highs.dev) -- MIP solver (fetched via CMake)
-- [Catch2](https://github.com/catchorg/Catch2) -- testing (fetched via CMake)
-- [TBB](https://github.com/oneapi-src/oneTBB) -- parallel heuristic
+- [TBB](https://github.com/oneapi-src/oneTBB) — parallel heuristic and separators (required)
+- [HiGHS](https://highs.dev) — MIP solver (fetched via CMake, optional with `-DRCSPP_BUILD_HIGHS=OFF`)
+- [Catch2](https://github.com/catchorg/Catch2) — testing (fetched via CMake)
+- [nanobind](https://github.com/wjakob/nanobind) — Python bindings (fetched via CMake, optional)
 
 ## Benchmarks
 

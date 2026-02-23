@@ -7,10 +7,10 @@
 //   - Cuts added per separator type, separation rounds
 //
 // Usage:
-//   ./bench_separators                         # all benchmarks
-//   ./bench_separators "[small]"               # small instances only
-//   ./bench_separators "[spprclib]"            # SPPRCLIB instances only
-//   ./bench_separators --benchmark-samples 3   # fewer samples for timing
+//   ./test_instances                         # all benchmarks
+//   ./test_instances "[small]"               # small instances only
+//   ./test_instances "[spprclib]"            # SPPRCLIB instances only
+//   ./test_instances --benchmark-samples 3   # fewer samples for timing
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/benchmark/catch_benchmark.hpp>
@@ -31,13 +31,13 @@ namespace {
 
 std::filesystem::path find_instances_dir() {
     for (const auto& candidate : {
-        std::filesystem::path("bench/instances"),
-        std::filesystem::path("../bench/instances"),
-        std::filesystem::path("../../bench/instances"),
+        std::filesystem::path("benchmarks/instances"),
+        std::filesystem::path("../benchmarks/instances"),
+        std::filesystem::path("../../benchmarks/instances"),
     }) {
         if (std::filesystem::exists(candidate)) return candidate;
     }
-    return "bench/instances";
+    return "benchmarks/instances";
 }
 
 SolveResult solve_instance(Problem& prob, double time_limit) {

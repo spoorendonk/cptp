@@ -1,13 +1,59 @@
 # Domain Propagator
 
-File: `src/model/highs_bridge.cpp` (install_propagator method)
+Files: `src/preprocess/bound_propagator.h` (solver-independent), `src/model/highs_bridge.cpp` (HiGHS integration)
 
 ## Overview
 
-A custom domain propagator injected into HiGHS via the `HighsUserPropagator` patch.
-Runs inside `HighsSearch.cpp` after HiGHS's built-in reduced-cost fixing
-(`HighsRedcostFixing`). Uses labeling bounds to fix edge variables to zero when
-no improving tour can use that edge.
+Labeling-based domain propagation fixes edge variables to zero when no improving
+tour/path can use that edge. Available in two forms:
+
+1. **`BoundPropagator`** (solver-independent) — standalone class in `src/preprocess/bound_propagator.h`, usable from any MIP solver's propagation callback.
+2. **HiGHS integration** — injected via `HighsUserPropagator` patch, runs inside `HighsSearch.cpp` after HiGHS's built-in reduced-cost fixing.
+
+## BoundPropagator (solver-independent)
+
+File: `src/preprocess/bound_propagator.h`, `src/preprocess/bound_propagator.cpp`
+
+Encapsulates labeling bounds, adjacency structures, and both propagation triggers
+into a reusable class. Pre-builds edge costs, profits, and adjacency lists in the
+constructor for efficient repeated calls.
+
+```cpp
+#include "preprocess/bound_propagator.h"
+#include "preprocess/edge_elimination.h"
+
+auto fwd = rcspp::preprocess::forward_labeling(prob, prob.source());
+auto bwd = rcspp::preprocess::backward_labeling(prob, prob.target());
+double correction = prob.is_tour() ? prob.profits()[prob.source()] : 0.0;
+
+rcspp::preprocess::BoundPropagator prop(prob, fwd, bwd, correction);
+
+// Trigger A: sweep all edges when UB improves
+auto fixed = prop.sweep(upper_bound, col_upper);
+auto fixed_nodes = prop.sweep_nodes(col_upper, /*y_offset=*/num_edges);
+
+// Trigger B: chain fixings when edge is branched to 1
+auto chain = prop.propagate_fixed_edge(edge, upper_bound, col_upper);
+
+// Optional: all-pairs bounds for stronger Trigger B
+prop.set_all_pairs_bounds(dist);  // flat n*n array
+```
+
+### Methods
+
+| Method | Returns | Description |
+|---|---|---|
+| `sweep(ub, col_upper)` | `vector<int32_t>` | Trigger A: edge indices fixable to 0 |
+| `sweep_nodes(col_upper, y_offset)` | `vector<int32_t>` | Node variable indices fixable to 0 (after sweep) |
+| `propagate_fixed_edge(e, ub, col_upper)` | `vector<int32_t>` | Trigger B: edges fixable to 0 given edge e=1 |
+| `set_all_pairs_bounds(dist)` | void | Enable stronger all-pairs Trigger B |
+
+## HiGHS Integration
+
+The HiGHS propagator uses the same algorithmic logic as `BoundPropagator` but is
+implemented as an inline lambda in `HiGHSBridge::install_propagator()` for
+performance (avoids vector allocations in the hot path). It interacts directly
+with HiGHS's `HighsDomain` for bound changes.
 
 ## Labeling Bounds
 
@@ -75,6 +121,29 @@ just neighbors). For each candidate edge (u, v), tests 8 orientations combining:
 Each orientation computes: `lb = d[start->...->endpoint1] + cost + d[endpoint2->...->finish] + correction`.
 
 Disabled by default — benchmarks show negligible gain over neighbor-only scan.
+
+## Testing
+
+The BoundPropagator is covered by 11 C++ tests (`[propagator]` tag) and 5 Python tests:
+
+| Test | Description |
+|---|---|
+| Sweep fixes expensive edges | Trigger A eliminates cost=100 edge with tight UB |
+| Sweep with loose UB | Confirms no fixings with very large UB |
+| Sweep skips already-fixed edges | Pre-fixed edges not reported again |
+| Sweep on s-t path problem | Path-mode Trigger A with bidirectional bounds |
+| sweep_nodes fixes isolated nodes | Nodes with all incident edges fixed to 0 |
+| sweep_nodes no fixings when edges open | All edges open → no node fixings |
+| propagate_fixed_edge (neighbor-only) | Trigger B eliminates expensive neighbor |
+| propagate_fixed_edge (all-pairs) | Trigger B with all-pairs bounds eliminates distant edges |
+| propagate_fixed_edge loose UB | Confirms no chain fixings with large UB |
+| has_all_pairs_bounds initially false | Verifies default state |
+| Accessor correctness | fwd_bounds, bwd_bounds, correction values |
+
+```bash
+./build/rcspp_algo_tests [propagator]       # All BoundPropagator tests
+./build/rcspp_algo_tests [propagator][path] # Path-mode propagator tests
+```
 
 ## HiGHS Integration
 

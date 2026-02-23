@@ -5,7 +5,7 @@ File: `src/heuristic/primal_heuristic.h` (header-only)
 ## Purpose
 
 Two heuristic components:
-1. **Initial solution** (`build_initial_solution`): runs before MIP solve on the complete graph, provides an initial feasible solution to HiGHS via `setSolution()`
+1. **Initial solution** (`build_initial_solution`): runs before MIP solve on the complete graph, provides an initial feasible solution to HiGHS via `setSolution()`. Solver-independent — can be used standalone or fed to any MIP solver as a warm start.
 2. **LP-guided callback** (`lp_guided_heuristic`): runs during MIP solve via `kCallbackMipUserSolution`, builds reduced graphs from LP relaxation values and runs construction + local search on them
 
 ## Algorithm
@@ -67,28 +67,40 @@ All strategies: source/target always active.
 
 ### Parallel restarts (TBB)
 
-Multiple workers run construction + local search concurrently:
-- Each worker picks the next strategy (round-robin) and ordering
-- First round per strategy: LP-weighted ordering (sort by `y_lp` descending, break ties by profit/demand ratio)
-- Subsequent rounds: random shuffles within each strategy
-- All workers share a best-known solution (mutex-protected)
-- Workers run until a time budget expires
+The initial heuristic supports two modes, controlled by the `deterministic` solver option (default: `true`):
 
-Initial heuristic budget: `min(500ms, num_nodes * 10ms)`.
-LP-guided callback budget: 20ms per invocation (configurable).
+**Deterministic mode** (default):
+- Pre-builds all orderings upfront: 3 deterministic + random shuffles with seeds `0, 1, 2, ...`
+- Runs all restarts via `tbb::parallel_for` over the fixed set
+- Best solution selected by iterating results in index order (deterministic tiebreaking)
+- Restart count: `clamp(num_nodes, 20, 200)`
+- Identical results across runs on any hardware
 
-## Integration
+**Opportunistic mode** (`--deterministic false`):
+- Multiple TBB workers race with `std::random_device` seeds
+- Workers run until a time budget expires: `min(500ms, num_nodes * 10ms)`
+- May find better bounds on fast multi-core hardware
+- Results vary between runs
 
-### Initial solution (pre-solve)
-
-In `Model::solve()` (model.cpp):
+## Standalone Usage
 
 ```cpp
-auto warm_start = heuristic::build_initial_solution(problem_, budget_ms);
-HighsSolution start;
-start.value_valid = true;
-start.col_value = std::move(warm_start.col_values);
-highs.setSolution(start);
+#include "heuristic/primal_heuristic.h"
+
+// Deterministic (default): fixed restart count, reproducible
+auto warm_start = heuristic::build_initial_solution(problem_, num_restarts);
+
+// Opportunistic: time-based, non-deterministic
+auto warm_start = heuristic::build_initial_solution(problem_, num_restarts, budget_ms);
+
+// warm_start.objective = travel_cost - collected_profit
+// warm_start.col_values = solution vector (edges + nodes)
+```
+
+Python:
+```python
+from rcspp_bac import build_warm_start
+warm = build_warm_start(prob, time_budget_ms=500.0)
 ```
 
 ### LP-guided callback (during solve)
@@ -103,8 +115,33 @@ Registered via `HiGHSBridge::install_heuristic_callback()`:
 The callback skips the initial `kExternalMipSolutionQueryOriginAfterSetup` query (pre-solve heuristic already ran). Rate-limited to once per 200 B&B nodes to avoid overhead on hard instances.
 
 The solution vector has size `num_edges + num_nodes`:
-- `sol[e] = 1` for edges in the route
-- `sol[m + v] = 1` for visited nodes (including source/target)
+- `col_values[e] = 1` for edges in the route
+- `col_values[m + v] = 1` for visited nodes (including source/target)
+
+## Testing
+
+6 C++ tests (`[heuristic]` tag) and 5 Python tests verify:
+- Tour produces a valid closed loop with correct degree (degree 2 at all visited nodes)
+- Path produces a valid open path (degree 1 at source/target, degree 2 at intermediates)
+- Total demand of visited nodes respects vehicle capacity
+- Source/target y-variables are set to 1
+- Edge count equals visited-node count minus 1 (path) or equals visited-node count (tour)
+- Objective is finite
+
+```bash
+./build/rcspp_algo_tests [heuristic]
+```
+
+## HiGHS Integration
+
+In `Model::solve()` (model.cpp), the warm start is fed to HiGHS:
+
+```cpp
+HighsSolution start;
+start.value_valid = true;
+start.col_value = std::move(warm.col_values);
+highs.setSolution(start);
+```
 
 ### CLI options
 

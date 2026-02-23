@@ -8,47 +8,57 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include(cmake/CompilerFlags.cmake)
-include(cmake/FetchHiGHS.cmake)
 
 # TBB — system package
 find_package(TBB REQUIRED)
 
-# ---------- separator library (solver-independent) ----------
-add_library(rcspp_sep
+# ============================================================
+# rcspp_algorithms — solver-independent library
+# Separators, core types, heuristic, preprocessing, propagation.
+# No MIP solver dependency (only TBB).
+# ============================================================
+add_library(rcspp_algorithms
+    src/core/problem.cpp
+    src/core/io.cpp
     src/sep/sec_separator.cpp
     src/sep/rci_separator.cpp
     src/sep/multistar_separator.cpp
     src/sep/comb_separator.cpp
     src/sep/rglm_separator.cpp
+    src/sep/separation_oracle.cpp
+    src/preprocess/bound_propagator.cpp
 )
-target_include_directories(rcspp_sep PUBLIC src)
-target_link_libraries(rcspp_sep PUBLIC TBB::tbb)
-rcspp_set_compiler_flags(rcspp_sep)
+target_include_directories(rcspp_algorithms PUBLIC src)
+target_link_libraries(rcspp_algorithms PUBLIC TBB::tbb)
+rcspp_set_compiler_flags(rcspp_algorithms)
 
-# ---------- core library ----------
-add_library(rcspp_core
-    src/core/problem.cpp
-    src/core/io.cpp
-)
-target_include_directories(rcspp_core PUBLIC src)
-target_link_libraries(rcspp_core PUBLIC)
-rcspp_set_compiler_flags(rcspp_core)
+# Backward-compat aliases so existing targets still link
+add_library(rcspp_sep ALIAS rcspp_algorithms)
+add_library(rcspp_core ALIAS rcspp_algorithms)
 
-# ---------- model library (HiGHS integration) ----------
-add_library(rcspp_model
-    src/model/model.cpp
-    src/model/highs_bridge.cpp
-)
-target_include_directories(rcspp_model PUBLIC src)
-# HiGHS internal headers (mip/HighsUserSeparator.h) are PRIVATE in the highs target,
-# so we need to add them explicitly for our cutpool callback integration.
-target_include_directories(rcspp_model PRIVATE ${highs_SOURCE_DIR}/highs)
-target_link_libraries(rcspp_model PUBLIC rcspp_core rcspp_sep highs)
-rcspp_set_compiler_flags(rcspp_model)
+# ============================================================
+# HiGHS integration (optional)
+# ============================================================
+option(RCSPP_BUILD_HIGHS "Build HiGHS MIP solver integration" ON)
 
-# ---------- CLI ----------
-add_executable(rcspp-solve src/cli/main.cpp)
-target_link_libraries(rcspp-solve PRIVATE rcspp_model)
+if(RCSPP_BUILD_HIGHS)
+    include(cmake/FetchHiGHS.cmake)
+
+    add_library(rcspp_model
+        src/model/model.cpp
+        src/model/highs_bridge.cpp
+    )
+    target_include_directories(rcspp_model PUBLIC src)
+    # HiGHS internal headers (mip/HighsUserSeparator.h) are PRIVATE in the highs target,
+    # so we need to add them explicitly for our cutpool callback integration.
+    target_include_directories(rcspp_model PRIVATE ${highs_SOURCE_DIR}/highs)
+    target_link_libraries(rcspp_model PUBLIC rcspp_algorithms highs)
+    rcspp_set_compiler_flags(rcspp_model)
+
+    # ---------- CLI ----------
+    add_executable(rcspp-solve src/cli/main.cpp)
+    target_link_libraries(rcspp-solve PRIVATE rcspp_model)
+endif()
 
 # ---------- Python bindings ----------
 option(RCSPP_BUILD_PYTHON "Build Python bindings" OFF)
@@ -69,21 +79,33 @@ if(RCSPP_BUILD_TESTS)
     include(CTest)
     include(Catch)
 
-    add_executable(rcspp_tests
+    # Standalone algorithm tests (no HiGHS needed)
+    add_executable(rcspp_algo_tests
         tests/test_max_flow.cpp
         tests/test_separators.cpp
-        tests/test_model.cpp
-        tests/test_optimal.cpp
-        tests/test_propagator.cpp
+        tests/test_oracle.cpp
     )
-    target_link_libraries(rcspp_tests PRIVATE rcspp_model Catch2::Catch2WithMain)
-    catch_discover_tests(rcspp_tests)
+    target_link_libraries(rcspp_algo_tests PRIVATE rcspp_algorithms Catch2::Catch2WithMain)
+    catch_discover_tests(rcspp_algo_tests)
 
-    # Benchmarks
-    add_executable(bench_separators bench/bench_separators.cpp)
-    target_link_libraries(bench_separators PRIVATE rcspp_model Catch2::Catch2WithMain)
-    rcspp_set_compiler_flags(bench_separators)
+    if(RCSPP_BUILD_HIGHS)
+        # HiGHS integration tests (only solver-dependent tests)
+        add_executable(rcspp_tests
+            tests/test_model.cpp
+            tests/test_optimal.cpp
+            tests/test_propagator.cpp
+            tests/test_thread_local.cpp
+        )
+        target_include_directories(rcspp_tests PRIVATE ${highs_SOURCE_DIR}/highs)
+        target_link_libraries(rcspp_tests PRIVATE rcspp_model Catch2::Catch2WithMain)
+        catch_discover_tests(rcspp_tests)
 
-    add_executable(test_formulation tests/test_formulation.cpp)
-    target_link_libraries(test_formulation PRIVATE rcspp_model)
+        # Instance integration tests
+        add_executable(test_instances tests/test_instances.cpp)
+        target_link_libraries(test_instances PRIVATE rcspp_model Catch2::Catch2WithMain)
+        rcspp_set_compiler_flags(test_instances)
+
+        add_executable(test_formulation tests/test_formulation.cpp)
+        target_link_libraries(test_formulation PRIVATE rcspp_model)
+    endif()
 endif()
