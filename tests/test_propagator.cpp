@@ -156,7 +156,7 @@ TEST_CASE("All-pairs and default produce same objective", "[propagator][all_pair
 }
 
 TEST_CASE("Propagator on larger instance B-n45-k6-54", "[propagator][slow]") {
-    auto r = solve_instance("bench/instances/spprclib/B-n45-k6-54.sppcc",
+    auto r = solve_instance("benchmarks/instances/spprclib/B-n45-k6-54.sppcc",
                             {{"time_limit", "60"}});
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
@@ -164,7 +164,7 @@ TEST_CASE("Propagator on larger instance B-n45-k6-54", "[propagator][slow]") {
 
 TEST_CASE("All-pairs on larger instance B-n45-k6-54",
           "[propagator][all_pairs][slow]") {
-    auto r = solve_instance("bench/instances/spprclib/B-n45-k6-54.sppcc",
+    auto r = solve_instance("benchmarks/instances/spprclib/B-n45-k6-54.sppcc",
                             {{"time_limit", "60"},
                              {"all_pairs_propagation", "true"}});
     REQUIRE(r.is_optimal());

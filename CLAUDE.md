@@ -3,6 +3,7 @@
 ## Git Workflow
 
 - **Never commit directly to main.** Always create a feature branch, push, and open a PR.
+- **If user says "commit" while on main**: create a feature branch, commit there, push, and open a PR automatically.
 - **Linear history only.** Merge PRs with squash or rebase (no merge commits).
 - **No force-push to main.**
 
@@ -71,9 +72,10 @@ src/preprocess/  — BoundPropagator, demand-reachability, edge elimination via 
 src/heuristic/   — Warm-start construction + local search
 src/model/       — HiGHS integration (Model, HiGHSBridge, propagator) [optional]
 src/cli/         — CLI tool (rcspp-solve) [requires HiGHS]
-src/util/        — Utilities (Timer)
+src/util/        — Utilities (Logger, Timer)
 python/          — nanobind Python bindings
 tests/           — Catch2 tests + Python tests
+benchmarks/      — Benchmark instances, scripts, and results
 docs/            — Algorithm documentation
 ```
 
@@ -100,3 +102,31 @@ When `source != target`, it uses an open path formulation:
 ## Namespace
 
 All code under `rcspp::` namespace, separators under `rcspp::sep::`, heuristics under `rcspp::heuristic::`, preprocessing under `rcspp::preprocess::`.
+
+## Agent Coordination
+
+The roadmap (docs/ROADMAP.md) defines work units with IDs like `2.3`,
+`3.8`, `5.1`. Each work unit maps to a branch name (e.g., `3.1-tune-separation-tol`).
+
+**Before suggesting or starting any work unit:**
+1. Check open branches: `git branch -a`
+2. Check open PRs: `gh pr list`
+3. Check for running agents on this machine (background tasks, worktrees)
+4. Never start a work unit that another agent has an open branch or PR for
+5. Prefer the lowest-numbered unblocked, unclaimed work unit
+
+## Fullgate
+
+When the user says **"fullgate"**, run this sequence in order. Each step can also be invoked individually by name:
+
+1. **Feature branch** — create one if not already on a feature branch
+2. **Create PR** — if no PR exists for the current branch
+3. **Sync main** — pull latest main and merge into the current feature branch, resolve conflicts
+4. **Tests** — check if new/updated tests are needed and add them
+5. **Update docs** — update README.md and docs as needed
+6. **Push & update PR**
+7. **Review** — thoroughly review the PR (code quality, correctness, style, tests, performance)
+8. **Build** — `cmake --build build -j$(nproc)`
+9. **Test** — `./build/rcspp_tests`
+10. **Push & update PR** again with any fixes
+11. **Finalize** — if nothing more to do: squash-merge the PR, delete feature branch (local + remote), pull main, switch to main
