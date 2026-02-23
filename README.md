@@ -116,7 +116,7 @@ Node profits and demands are read from the same format (see `src/core/io.cpp` fo
 src/core/        Problem definition, IO (TSPLIB & numeric), Dinitz max-flow, Gomory-Hu tree
 src/sep/         Cut separators (SEC, RCI, Multistar, RGLM, Comb)
 src/model/       HiGHS MIP integration (separators, propagator, callbacks)
-src/util/        Utilities (Timer)
+src/util/        Utilities (Logger, Timer)
 src/heuristic/   Warm-start construction + local search
 src/preprocess/  Demand-reachability and edge elimination
 src/cli/         Command-line solver

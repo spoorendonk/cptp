@@ -49,7 +49,7 @@ src/sep/         — Solver-independent separators (SEC, RCI, Multistar, RGLM, C
 src/model/       — HiGHS integration (Model, HiGHSBridge, propagator)
 src/heuristic/   — Warm-start construction + local search
 src/cli/         — CLI tool (rcspp-solve)
-src/util/        — Utilities (Timer)
+src/util/        — Utilities (Logger, Timer)
 python/          — nanobind Python bindings
 tests/           — Catch2 tests + instance integration tests
 benchmarks/      — Benchmark instances, scripts, and results
@@ -79,6 +79,9 @@ When `source != target`, it uses an open path formulation:
 All code under `rcspp::` namespace, separators under `rcspp::sep::`, heuristics under `rcspp::heuristic::`, preprocessing under `rcspp::preprocess::`.
 
 ## Agent Coordination
+
+The roadmap (docs/ROADMAP.md) defines work units with IDs like `2.3`,
+`3.8`, `5.1`. Each work unit maps to a branch name (e.g., `3.1-tune-separation-tol`).
 
 **Before suggesting or starting any work unit:**
 1. Check open branches: `git branch -a`
