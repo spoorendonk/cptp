@@ -61,7 +61,20 @@ cmake --build build -j$(nproc)
 ./build/rcspp-solve <instance> [--source <node>] [--target <node>] [--<highs_option> <value> ...]
 ```
 
-Accepts TSPLIB (`.vrp`, `.sppcc`) and numeric (`.txt`) instance formats. All options beyond `--source`/`--target` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
+Accepts TSPLIB (`.vrp`, `.sppcc`) and numeric (`.txt`) instance formats. All options beyond `--source`/`--target`/`--branch_hyper` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
+
+#### Hyperplane branching
+
+The `--branch_hyper` option enables dynamic constraint branching, which adds/removes LP constraint rows during the branch-and-bound search. Modes:
+
+| Mode | Description |
+|------|-------------|
+| `off` (default) | Standard variable branching only |
+| `pairs` | Ryan-Foster pairs: branch on `y_i + y_j` for nearest-neighbor node pairs |
+| `clusters` | Cluster demand: branch on `sum(d_i * y_i)` for small node clusters |
+| `demand` | Global demand: branch on total demand `sum(d_i * y_i)` |
+| `cardinality` | Cardinality: branch on `sum(y_i)` (number of visited nodes) |
+| `all` | All of the above combined |
 
 When `source != target`, the solver uses an open s-t path formulation (degree 1 at source/target, degree 2 at intermediates). When `source == target` (default), the standard tour formulation is used.
 
@@ -69,7 +82,7 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 
 ```bash
 # Tour (closed loop from depot)
-./build/rcspp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
+./build/rcspp-solve benchmarks/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
 
 # s-t path (source/target read from file)
 ./build/rcspp-solve tests/data/tiny4_path.txt
@@ -79,6 +92,9 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 
 # Suppress HiGHS log output
 ./build/rcspp-solve tests/data/tiny4.txt --output_flag false
+
+# Hyperplane branching (Ryan-Foster pairs)
+./build/rcspp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --branch_hyper pairs
 ```
 
 ### Instance formats
@@ -116,12 +132,13 @@ Node profits and demands are read from the same format (see `src/core/io.cpp` fo
 src/core/        Problem definition, IO (TSPLIB & numeric), Dinitz max-flow, Gomory-Hu tree
 src/sep/         Cut separators (SEC, RCI, Multistar, RGLM, Comb)
 src/model/       HiGHS MIP integration (separators, propagator, callbacks)
-src/util/        Utilities (Timer)
+src/util/        Utilities (Logger, Timer)
 src/heuristic/   Warm-start construction + local search
 src/preprocess/  Demand-reachability and edge elimination
 src/cli/         Command-line solver
 python/          nanobind Python bindings
 tests/           Catch2 unit and regression tests
+benchmarks/      Benchmark instances, scripts, and results
 docs/            Algorithm documentation
 ```
 

@@ -38,6 +38,7 @@ class HiGHSBridge {
 
     int32_t x_offset() const { return 0; }
     int32_t y_offset() const { return num_edges_; }
+    int32_t num_nodes() const { return num_nodes_; }
 
     /// Set separation skip interval: separate every N-th callback invocation.
     /// 1 = every round (default), 2 = every other round, etc.

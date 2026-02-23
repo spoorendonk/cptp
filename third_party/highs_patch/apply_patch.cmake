@@ -175,3 +175,246 @@ if(_found3 EQUAL -1)
 else()
     message(STATUS "HighsSearch.cpp propagator patch already applied, skipping")
 endif()
+
+# ── 4a. Patch HighsLpRelaxation.h: add kBranching origin + methods ──
+file(READ "${MIP_DIR}/HighsLpRelaxation.h" LPRELAX_H)
+
+string(FIND "${LPRELAX_H}" "kBranching" _found_lprelax_h)
+if(_found_lprelax_h EQUAL -1)
+    # Add kBranching to the Origin enum (match the full enum context to avoid
+    # accidentally replacing kCutPool in factory methods)
+    string(REPLACE
+      "      kCutPool,\n    };"
+      "      kCutPool,\n      kBranching,\n    };"
+      LPRELAX_H "${LPRELAX_H}")
+
+    # Add static factory method branching() after model() factory
+    string(REPLACE
+      "static LpRow model(HighsInt index) { return LpRow{kModel, index, 0}; }"
+      "static LpRow model(HighsInt index) { return LpRow{kModel, index, 0}; }\n    static LpRow branching() { return LpRow{kBranching, -1, 0}; }"
+      LPRELAX_H "${LPRELAX_H}")
+
+    # Add method declarations after removeObsoleteRows (unique, appears once)
+    string(REPLACE
+      "void removeObsoleteRows(bool notifyPool = true);"
+      "void removeObsoleteRows(bool notifyPool = true);\n\n  HighsInt addBranchingRow(HighsInt nnz, const HighsInt* inds,\n                            const double* vals, double lo, double hi);\n\n  void removeLastBranchingRow();"
+      LPRELAX_H "${LPRELAX_H}")
+
+    file(WRITE "${MIP_DIR}/HighsLpRelaxation.h" "${LPRELAX_H}")
+    message(STATUS "Applied kBranching patch to HighsLpRelaxation.h")
+else()
+    message(STATUS "HighsLpRelaxation.h kBranching patch already applied, skipping")
+endif()
+
+# ── 4b. Patch HighsLpRelaxation.cpp: implement addBranchingRow/removeLastBranchingRow ──
+file(READ "${MIP_DIR}/HighsLpRelaxation.cpp" LPRELAX_CPP)
+
+string(FIND "${LPRELAX_CPP}" "addBranchingRow" _found_lprelax_cpp)
+if(_found_lprelax_cpp EQUAL -1)
+    # Handle kBranching in get(): return len=0 (branching rows have no cut/model data)
+    string(REPLACE
+      "  switch (origin) {\n    case kCutPool:\n      mipsolver.mipdata_->cutpool.getCut(index, len, inds, vals);\n      break;\n    case kModel:\n      mipsolver.mipdata_->getRow(index, len, inds, vals);\n  };"
+      "  switch (origin) {\n    case kCutPool:\n      mipsolver.mipdata_->cutpool.getCut(index, len, inds, vals);\n      break;\n    case kModel:\n      mipsolver.mipdata_->getRow(index, len, inds, vals);\n      break;\n    case kBranching:\n      len = 0; inds = nullptr; vals = nullptr;\n      break;\n  };"
+      LPRELAX_CPP "${LPRELAX_CPP}")
+
+    # Handle kBranching in getRowLen(): return 0
+    string(REPLACE
+      "  switch (origin) {\n    case kCutPool:\n      return mipsolver.mipdata_->cutpool.getRowLength(index);\n    case kModel:\n      return mipsolver.mipdata_->ARstart_[index + 1] -\n             mipsolver.mipdata_->ARstart_[index];\n  };"
+      "  switch (origin) {\n    case kCutPool:\n      return mipsolver.mipdata_->cutpool.getRowLength(index);\n    case kModel:\n      return mipsolver.mipdata_->ARstart_[index + 1] -\n             mipsolver.mipdata_->ARstart_[index];\n    case kBranching:\n      return 0;\n  };"
+      LPRELAX_CPP "${LPRELAX_CPP}")
+
+    # Handle kBranching in isIntegral(): return false
+    string(REPLACE
+      "  switch (origin) {\n    case kCutPool:\n      return mipsolver.mipdata_->cutpool.cutIsIntegral(index);\n    case kModel:\n      return (mipsolver.mipdata_->rowintegral[index] != 0);\n  };"
+      "  switch (origin) {\n    case kCutPool:\n      return mipsolver.mipdata_->cutpool.cutIsIntegral(index);\n    case kModel:\n      return (mipsolver.mipdata_->rowintegral[index] != 0);\n    case kBranching:\n      return false;\n  };"
+      LPRELAX_CPP "${LPRELAX_CPP}")
+
+    # Handle kBranching in getMaxAbsVal(): return 0
+    string(REPLACE
+      "  switch (origin) {\n    case kCutPool:\n      return mipsolver.mipdata_->cutpool.getMaxAbsCutCoef(index);\n    case kModel:\n      return mipsolver.mipdata_->maxAbsRowCoef[index];\n  };"
+      "  switch (origin) {\n    case kCutPool:\n      return mipsolver.mipdata_->cutpool.getMaxAbsCutCoef(index);\n    case kModel:\n      return mipsolver.mipdata_->maxAbsRowCoef[index];\n    case kBranching:\n      return 0.0;\n  };"
+      LPRELAX_CPP "${LPRELAX_CPP}")
+
+    # Handle kBranching in slackLower(): return row lower bound
+    string(REPLACE
+      "  switch (lprows[row].origin) {\n    case LpRow::kCutPool:\n      return mipsolver.mipdata_->domain.getMinCutActivity(\n          mipsolver.mipdata_->cutpool, lprows[row].index);\n    case LpRow::kModel:"
+      "  switch (lprows[row].origin) {\n    case LpRow::kBranching:\n      return rowLower(row);\n    case LpRow::kCutPool:\n      return mipsolver.mipdata_->domain.getMinCutActivity(\n          mipsolver.mipdata_->cutpool, lprows[row].index);\n    case LpRow::kModel:"
+      LPRELAX_CPP "${LPRELAX_CPP}")
+
+    # Handle kBranching in slackUpper(): return rowupper
+    string(REPLACE
+      "  switch (lprows[row].origin) {\n    case LpRow::kCutPool:\n      return rowupper;\n    case LpRow::kModel:"
+      "  switch (lprows[row].origin) {\n    case LpRow::kBranching:\n      return rowupper;\n    case LpRow::kCutPool:\n      return rowupper;\n    case LpRow::kModel:"
+      LPRELAX_CPP "${LPRELAX_CPP}")
+
+    # Append addBranchingRow and removeLastBranchingRow implementations at the end
+    string(APPEND LPRELAX_CPP "
+// ── Dynamic branching rows ──
+
+HighsInt HighsLpRelaxation::addBranchingRow(
+    HighsInt nnz, const HighsInt* inds, const double* vals,
+    double lo, double hi) {
+  status = Status::kNotSet;
+  currentbasisstored = false;
+  basischeckpoint.reset();
+  HighsInt row = lprows.size();
+  lprows.push_back(LpRow::branching());
+  lpsolver.addRow(lo, hi, nnz, inds, vals);
+  return row;
+}
+
+void HighsLpRelaxation::removeLastBranchingRow() {
+  for (HighsInt i = (HighsInt)lprows.size() - 1; i >= 0; --i) {
+    if (lprows[i].origin == LpRow::Origin::kBranching) {
+      lpsolver.deleteRows(i, i);
+      lprows.erase(lprows.begin() + i);
+      status = Status::kNotSet;
+      currentbasisstored = false;
+      basischeckpoint.reset();
+      return;
+    }
+  }
+}
+")
+
+    file(WRITE "${MIP_DIR}/HighsLpRelaxation.cpp" "${LPRELAX_CPP}")
+    message(STATUS "Applied addBranchingRow/removeLastBranchingRow patch to HighsLpRelaxation.cpp")
+else()
+    message(STATUS "HighsLpRelaxation.cpp branching row patch already applied, skipping")
+endif()
+
+# ── 5a. Patch HighsSearch.h: add hp_stack_pos and hp_data_idx to NodeData ──
+file(READ "${MIP_DIR}/HighsSearch.h" SEARCH_H)
+
+string(FIND "${SEARCH_H}" "hp_stack_pos" _found_search_h)
+if(_found_search_h EQUAL -1)
+    # Add fields to NodeData struct, after domgchgStackPos
+    string(REPLACE
+      "HighsInt domgchgStackPos;"
+      "HighsInt domgchgStackPos;\n    HighsInt hp_stack_pos = 0;\n    HighsInt hp_data_idx = -1;"
+      SEARCH_H "${SEARCH_H}")
+
+    # Add include for HighsUserSeparator
+    string(REPLACE
+      "#include \"mip/HighsSearch.h\""
+      "#include \"mip/HighsSearch.h\""
+      SEARCH_H "${SEARCH_H}")
+
+    file(WRITE "${MIP_DIR}/HighsSearch.h" "${SEARCH_H}")
+    message(STATUS "Applied hp_stack_pos/hp_data_idx patch to HighsSearch.h")
+else()
+    message(STATUS "HighsSearch.h hyperplane fields already applied, skipping")
+endif()
+
+# ── 5b. Patch HighsSearch.cpp: hyperplane branching in branch() ──
+file(READ "${MIP_DIR}/HighsSearch.cpp" SEARCH_CONTENT)
+
+string(FIND "${SEARCH_CONTENT}" "HighsUserSeparator" _found_search)
+if(_found_search EQUAL -1)
+    # Add includes
+    string(REPLACE
+      "#include \"mip/HighsSearch.h\""
+      "#include \"mip/HighsSearch.h\"\n#include \"mip/HighsUserSeparator.h\""
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # Insert hyperplane candidate evaluation + dynamic row branching
+    # before normal child creation.
+    string(REPLACE
+      "  // finally open a new node with the branching decision added\n  // and remember that we have one open subtree left\n  HighsInt domchgPos = localdom.getDomainChangeStack().size();\n\n  bool passStabilizerToChildNode =\n      orbitsValidInChildNode(currnode.branchingdecision);\n  localdom.changeBound(currnode.branchingdecision);\n  currnode.opensubtrees = 1;\n  nodestack.emplace_back(\n      std::max(childLb, currnode.lower_bound), currnode.estimate,\n      currnode.nodeBasis,\n      passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n  nodestack.back().domgchgStackPos = domchgPos;\n\n  return NodeResult::kBranched;"
+      "  // Hyperplane branching: evaluate candidates vs variable branching\n  const auto& branchCb = HighsUserSeparator::getBranchingCallback();\n  if (branchCb && !mipsolver.submip) {\n    auto candidates = branchCb(mipsolver);\n    if (!candidates.empty()) {\n      // Use pseudocost estimates for var_score (comparable with HP scoring).\n      // SB-based childLb/other_child_lb are only meaningful when minreliable > 0.\n      double var_score = 0.0;\n      if (currnode.branchingdecision.column >= 0) {\n        double vd = pseudocost.getPseudocostDown(\n            currnode.branchingdecision.column, currnode.branching_point);\n        double vu = pseudocost.getPseudocostUp(\n            currnode.branchingdecision.column, currnode.branching_point);\n        var_score = std::min(vd, vu) * std::max(vd, vu);\n      }\n\n      int winner = HighsUserSeparator::evaluateCandidates(\n          candidates, var_score, mipsolver, (int)getCurrentDepth());\n      if (winner >= 0) {\n        auto& cand = candidates[winner];\n        const auto& sol = lp->getSolution().col_value;\n        double lhs = 0.0;\n        for (int j = 0; j < (int)cand.indices.size(); ++j)\n          lhs += cand.values[j] * sol[cand.indices[j]];\n\n        // Store hyperplane data for flip\n        HighsInt data_idx = HighsUserSeparator::allocHyperplaneData();\n        auto& data = HighsUserSeparator::getHyperplaneData(data_idx);\n        data.indices = cand.indices;\n        data.values = cand.values;\n        data.branch_value = lhs;\n        currnode.hp_data_idx = data_idx;\n\n        // Add branching row (down branch: lhs <= floor)\n        HighsInt hpPos = HighsUserSeparator::stackSize();\n        HighsUserSeparator::pushBranching(\n            mipsolver.mipdata_->lp, data,\n            -kHighsInf, std::floor(lhs));\n\n        // Push no-op domain marker so backtrack() has a kBranching sentinel\n        HighsInt domchgPos = localdom.getDomainChangeStack().size();\n        localdom.changeBound({localdom.col_lower_[currnode.branchingdecision.column],\n          currnode.branchingdecision.column, HighsBoundType::kLower});\n        currnode.opensubtrees = 1;\n        nodestack.emplace_back(\n            currnode.lower_bound, currnode.estimate,\n            currnode.nodeBasis, nullptr);\n        nodestack.back().domgchgStackPos = domchgPos;\n        nodestack.back().hp_stack_pos = hpPos;\n\n        return NodeResult::kBranched;\n      }\n    }\n  }\n\n  // finally open a new node with the branching decision added\n  // and remember that we have one open subtree left\n  HighsInt domchgPos = localdom.getDomainChangeStack().size();\n\n  bool passStabilizerToChildNode =\n      orbitsValidInChildNode(currnode.branchingdecision);\n  localdom.changeBound(currnode.branchingdecision);\n  currnode.opensubtrees = 1;\n  nodestack.emplace_back(\n      std::max(childLb, currnode.lower_bound), currnode.estimate,\n      currnode.nodeBasis,\n      passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n  nodestack.back().domgchgStackPos = domchgPos;\n  nodestack.back().hp_stack_pos = HighsUserSeparator::stackSize();\n\n  return NodeResult::kBranched;"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5c. Patch backtrack pop_back + localdom.backtrack(): restore branching rows ──
+    # Pattern in HiGHS v1.13.1 has #ifndef NDEBUG around the backtrack() return value.
+    # We match the exact pattern: nodestack.pop_back() followed by #ifndef block.
+    # This pattern appears 3 times (backtrack, backtrackPlunge, backtrackUntilDepth).
+    string(REPLACE
+      "      nodestack.pop_back();\n#ifndef NDEBUG\n      HighsDomainChange branchchg =\n#endif\n          localdom.backtrack();"
+      "      HighsInt hpPos_pop = nodestack.back().hp_stack_pos;\n      nodestack.pop_back();\n#ifndef NDEBUG\n      HighsDomainChange branchchg =\n#endif\n          localdom.backtrack();\n      HighsUserSeparator::restoreBranching(mipsolver.mipdata_->lp, hpPos_pop);"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # backtrackUntilDepth has a slightly different pattern (4-space indent)
+    string(REPLACE
+      "    nodestack.pop_back();\n\n#ifndef NDEBUG\n    HighsDomainChange branchchg =\n#endif\n        localdom.backtrack();"
+      "    HighsInt hpPos_pop = nodestack.back().hp_stack_pos;\n    nodestack.pop_back();\n\n#ifndef NDEBUG\n    HighsDomainChange branchchg =\n#endif\n        localdom.backtrack();\n    HighsUserSeparator::restoreBranching(mipsolver.mipdata_->lp, hpPos_pop);"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5d. Patch flip sections in backtrack() and backtrackPlunge() ──
+    # When hp_data_idx >= 0, we skip the branchingdecision flip, push a no-op
+    # marker, and add the up-branch hyperplane row.
+    # This pattern appears twice (backtrack + backtrackPlunge) with 4-space indent.
+    string(REPLACE
+      "    size_t numChangedCols = localdom.getChangedCols().size();\n    bool passStabilizerToChildNode =\n        orbitsValidInChildNode(currnode.branchingdecision);\n    localdom.changeBound(currnode.branchingdecision);"
+      "    size_t numChangedCols = localdom.getChangedCols().size();\n    HighsInt hpPos_flip = HighsUserSeparator::stackSize();\n    if (currnode.hp_data_idx >= 0) {\n      // Hyperplane flip: push no-op marker + up-branch row\n      auto& flipData = HighsUserSeparator::getHyperplaneData(currnode.hp_data_idx);\n      localdom.changeBound({localdom.col_lower_[currnode.branchingdecision.column],\n          currnode.branchingdecision.column, HighsBoundType::kLower});\n      HighsUserSeparator::pushBranching(\n          mipsolver.mipdata_->lp, flipData,\n          std::ceil(flipData.branch_value), kHighsInf);\n    } else {\n      localdom.changeBound(currnode.branchingdecision);\n    }\n    bool passStabilizerToChildNode =\n        (currnode.hp_data_idx < 0) && orbitsValidInChildNode(currnode.branchingdecision);"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # backtrackPlunge has HighsInt instead of size_t for numChangedCols
+    string(REPLACE
+      "    HighsInt numChangedCols = localdom.getChangedCols().size();\n    bool passStabilizerToChildNode =\n        orbitsValidInChildNode(currnode.branchingdecision);\n    localdom.changeBound(currnode.branchingdecision);"
+      "    HighsInt numChangedCols = localdom.getChangedCols().size();\n    HighsInt hpPos_flip = HighsUserSeparator::stackSize();\n    if (currnode.hp_data_idx >= 0) {\n      auto& flipData = HighsUserSeparator::getHyperplaneData(currnode.hp_data_idx);\n      localdom.changeBound({localdom.col_lower_[currnode.branchingdecision.column],\n          currnode.branchingdecision.column, HighsBoundType::kLower});\n      HighsUserSeparator::pushBranching(\n          mipsolver.mipdata_->lp, flipData,\n          std::ceil(flipData.branch_value), kHighsInf);\n    } else {\n      localdom.changeBound(currnode.branchingdecision);\n    }\n    bool passStabilizerToChildNode =\n        (currnode.hp_data_idx < 0) && orbitsValidInChildNode(currnode.branchingdecision);"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5e. Patch flip in backtrackUntilDepth() ──
+    # This one has 2-space indent.
+    string(REPLACE
+      "  HighsInt domchgPos = localdom.getDomainChangeStack().size();\n  bool passStabilizerToChildNode =\n      orbitsValidInChildNode(currnode.branchingdecision);\n  localdom.changeBound(currnode.branchingdecision);\n  nodestack.emplace_back(\n      currnode.lower_bound, currnode.estimate, currnode.nodeBasis,\n      passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n\n  lp->flushDomain(localdom);\n  nodestack.back().domgchgStackPos = domchgPos;"
+      "  HighsInt domchgPos = localdom.getDomainChangeStack().size();\n  HighsInt hpPos_flip = HighsUserSeparator::stackSize();\n  if (currnode.hp_data_idx >= 0) {\n    auto& flipData = HighsUserSeparator::getHyperplaneData(currnode.hp_data_idx);\n    localdom.changeBound({localdom.col_lower_[currnode.branchingdecision.column],\n          currnode.branchingdecision.column, HighsBoundType::kLower});\n    HighsUserSeparator::pushBranching(\n        mipsolver.mipdata_->lp, flipData,\n        std::ceil(flipData.branch_value), kHighsInf);\n  } else {\n    localdom.changeBound(currnode.branchingdecision);\n  }\n  bool passStabilizerToChildNode =\n      (currnode.hp_data_idx < 0) && orbitsValidInChildNode(currnode.branchingdecision);\n  nodestack.emplace_back(\n      currnode.lower_bound, currnode.estimate, currnode.nodeBasis,\n      passStabilizerToChildNode ? currnode.stabilizerOrbits : nullptr);\n\n  lp->flushDomain(localdom);\n  nodestack.back().domgchgStackPos = domchgPos;\n  nodestack.back().hp_stack_pos = hpPos_flip;"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5f. Set hp_stack_pos on flip child in backtrack() and backtrackPlunge() ──
+    # After the flip's emplace_back, set hp_stack_pos. The pattern ends with:
+    #   lp->flushDomain(localdom);
+    #   nodestack.back().domgchgStackPos = domchgPos;
+    #   break;
+    # This appears in both backtrack() and backtrackPlunge().
+    string(REPLACE
+      "    lp->flushDomain(localdom);\n    nodestack.back().domgchgStackPos = domchgPos;\n    break;"
+      "    lp->flushDomain(localdom);\n    nodestack.back().domgchgStackPos = domchgPos;\n    nodestack.back().hp_stack_pos = hpPos_flip;\n    break;"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5g. Restore branching rows when flip child is pruned or queued ──
+    # When the flip child is pruned (infeasible/cutoff) or sent to the node queue,
+    # localdom.backtrack() is called but branching rows must also be removed.
+    # The prune pattern is: "localdom.backtrack();\n      localdom.clearChangedCols(numChangedCols);\n      if (countTreeWeight)"
+    # This appears in backtrack() and backtrackPlunge().
+    string(REPLACE
+      "      localdom.backtrack();\n      localdom.clearChangedCols(numChangedCols);\n      if (countTreeWeight) treeweight += std::ldexp(1.0, -getCurrentDepth());\n      continue;"
+      "      HighsUserSeparator::restoreBranching(mipsolver.mipdata_->lp, hpPos_flip);\n      localdom.backtrack();\n      localdom.clearChangedCols(numChangedCols);\n      if (countTreeWeight) treeweight += std::ldexp(1.0, -getCurrentDepth());\n      continue;"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5h. Prevent hyperplane-branched nodes from going to the node queue ──
+    # The node queue stores only domain changes, not LP branching rows.
+    # Also add a guard AFTER the ancestor score loop since it can override nodeToQueue.
+    string(REPLACE
+      "    bool nodeToQueue = nodelb > mipsolver.mipdata_->optimality_limit;\n    // we check if switching"
+      "    bool nodeToQueue = nodelb > mipsolver.mipdata_->optimality_limit;\n    if (currnode.hp_data_idx >= 0) nodeToQueue = false;  // hyperplane nodes can't be queued\n    // we check if switching"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # Add a second guard right before the nodeToQueue block
+    string(REPLACE
+      "    if (nodeToQueue) {\n      // if (!mipsolver.submip) printf(\"node goes to queue\\n\");"
+      "    if (currnode.hp_data_idx >= 0) nodeToQueue = false;  // guard after ancestor score check\n    if (nodeToQueue) {\n      // if (!mipsolver.submip) printf(\"node goes to queue\\n\");"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # ── 5i. Suppress debug asserts for hyperplane branches ──
+    # The asserts check branchchg matches branchingdecision. For hyperplane branches
+    # the domain change is a no-op marker, not the branchingdecision.
+    # Guard with hp_data_idx check.
+
+    # Pattern in backtrack() and backtrackPlunge() (6-space indent, multi-line assert)
+    string(REPLACE
+      "      assert(\n          (branchchg.boundtype == HighsBoundType::kLower &&\n           branchchg.boundval >= nodestack.back().branchingdecision.boundval) ||\n          (branchchg.boundtype == HighsBoundType::kUpper &&\n           branchchg.boundval <= nodestack.back().branchingdecision.boundval));\n      assert(branchchg.boundtype ==\n             nodestack.back().branchingdecision.boundtype);\n      assert(branchchg.column == nodestack.back().branchingdecision.column);"
+      "      if (nodestack.back().hp_data_idx < 0) {\n      assert(\n          (branchchg.boundtype == HighsBoundType::kLower &&\n           branchchg.boundval >= nodestack.back().branchingdecision.boundval) ||\n          (branchchg.boundtype == HighsBoundType::kUpper &&\n           branchchg.boundval <= nodestack.back().branchingdecision.boundval));\n      assert(branchchg.boundtype ==\n             nodestack.back().branchingdecision.boundtype);\n      assert(branchchg.column == nodestack.back().branchingdecision.column);\n      }"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    # Pattern in backtrackUntilDepth() (4-space indent, single-line asserts)
+    string(REPLACE
+      "    assert(\n        (branchchg.boundtype == HighsBoundType::kLower &&\n         branchchg.boundval >= nodestack.back().branchingdecision.boundval) ||\n        (branchchg.boundtype == HighsBoundType::kUpper &&\n         branchchg.boundval <= nodestack.back().branchingdecision.boundval));\n    assert(branchchg.boundtype == nodestack.back().branchingdecision.boundtype);\n    assert(branchchg.column == nodestack.back().branchingdecision.column);"
+      "    if (nodestack.back().hp_data_idx < 0) {\n    assert(\n        (branchchg.boundtype == HighsBoundType::kLower &&\n         branchchg.boundval >= nodestack.back().branchingdecision.boundval) ||\n        (branchchg.boundtype == HighsBoundType::kUpper &&\n         branchchg.boundval <= nodestack.back().branchingdecision.boundval));\n    assert(branchchg.boundtype == nodestack.back().branchingdecision.boundtype);\n    assert(branchchg.column == nodestack.back().branchingdecision.column);\n    }"
+      SEARCH_CONTENT "${SEARCH_CONTENT}")
+
+    file(WRITE "${MIP_DIR}/HighsSearch.cpp" "${SEARCH_CONTENT}")
+    message(STATUS "Applied hyperplane branching patch to HighsSearch.cpp")
+else()
+    message(STATUS "HighsSearch.cpp hyperplane patch already applied, skipping")
+endif()
