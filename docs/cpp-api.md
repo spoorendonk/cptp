@@ -91,3 +91,19 @@ auto result = model.solve({{"time_limit", "120"}});
 | `separator_stats` | `map<string, SeparatorStats>` | Per-separator statistics |
 
 Methods: `has_solution()`, `is_optimal()`.
+
+## Solver Options
+
+Custom options intercepted before forwarding to HiGHS:
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `deterministic` | bool | `true` | Deterministic warm-start (fixed restarts, deterministic seeds). Set `false` for opportunistic mode (time-based, random seeds, may find better bounds). |
+| `separation_interval` | int | `1` | Separate every N nodes |
+| `max_cuts_per_separator` | int | `3` | Top-k cuts per separator per round |
+| `separation_tol` | double | `1e-6` | Fractional tolerance for separation |
+| `all_pairs_propagation` | bool | `false` | All-pairs labeling for stronger propagation |
+| `enable_rglm` | bool | `false` | Enable RGLM separator |
+| `submip_separation` | bool | `true` | SEC separation in sub-MIPs |
+
+All other options are forwarded to HiGHS (e.g. `time_limit`, `threads`).

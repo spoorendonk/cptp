@@ -356,10 +356,11 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     }
 
     // Sort by violation descending — most violated first.
-    std::sort(results.begin(), results.end(),
-              [](const CutResult& a, const CutResult& b) {
-                  return a.violation > b.violation;
-              });
+    // stable_sort preserves deterministic input order for equal violations.
+    std::stable_sort(results.begin(), results.end(),
+                     [](const CutResult& a, const CutResult& b) {
+                         return a.violation > b.violation;
+                     });
 
     // Cap output: keep at most max_cuts per round. This avoids flooding
     // the LP with weak cuts that slow down the simplex.

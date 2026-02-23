@@ -8,8 +8,10 @@
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <thread>
 #include <vector>
 
+#include <tbb/parallel_for.h>
 #include <tbb/task_group.h>
 
 #include "core/problem.h"
@@ -279,19 +281,19 @@ struct WarmStartResult {
 };
 
 /// Build a warm-start solution via parallel randomized construction + local search.
-/// time_budget_ms: how long to spend on restarts (default 1000ms).
+/// num_restarts: total number of restarts (including 3 deterministic orderings).
+/// time_budget_ms: when > 0, use opportunistic (non-deterministic) time-based
+///     restarts instead of a fixed count — allows more restarts on fast hardware.
 /// Returns solution vector + objective value.
 inline WarmStartResult build_warm_start(const Problem& prob,
-                                        double time_budget_ms = 1000.0) {
+                                        int num_restarts = 50,
+                                        double time_budget_ms = 0.0) {
     const auto& g = prob.graph();
     const int32_t n = prob.num_nodes();
     const int32_t m = prob.num_edges();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
     const double Q = prob.capacity();
-
-    auto deadline = std::chrono::steady_clock::now()
-                  + std::chrono::microseconds(static_cast<int64_t>(time_budget_ms * 1000));
 
     // Build candidate list (exclude source and target)
     std::vector<int32_t> customers;
@@ -306,7 +308,7 @@ inline WarmStartResult build_warm_start(const Problem& prob,
     // Order 1: profit/demand ratio (descending)
     {
         auto order = customers;
-        std::sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
+        std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
             double ra = prob.demand(a) > 0 ? prob.profit(a) / prob.demand(a)
                                            : prob.profit(a);
             double rb = prob.demand(b) > 0 ? prob.profit(b) / prob.demand(b)
@@ -318,7 +320,7 @@ inline WarmStartResult build_warm_start(const Problem& prob,
     // Order 2: profit (descending)
     {
         auto order = customers;
-        std::sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
+        std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
             return prob.profit(a) > prob.profit(b);
         });
         fixed_orders.push_back(std::move(order));
@@ -326,54 +328,87 @@ inline WarmStartResult build_warm_start(const Problem& prob,
     // Order 3: cheapest from source
     {
         auto order = customers;
-        std::sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
+        std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
             return detail::edge_cost(prob, source, a)
                  < detail::edge_cost(prob, source, b);
         });
         fixed_orders.push_back(std::move(order));
     }
 
-    // Shared best solution
-    std::mutex best_mtx;
     std::vector<int32_t> best_tour;
     double best_obj = std::numeric_limits<double>::max();
-    std::atomic<int> next_restart{0};
 
-    auto worker = [&]() {
-        std::mt19937 rng(std::random_device{}());
+    if (time_budget_ms > 0.0) {
+        // --- Opportunistic mode: time-based workers, non-deterministic seeds ---
+        auto deadline = std::chrono::steady_clock::now()
+                      + std::chrono::microseconds(
+                            static_cast<int64_t>(time_budget_ms * 1000));
 
-        while (std::chrono::steady_clock::now() < deadline) {
-            int r = next_restart.fetch_add(1, std::memory_order_relaxed);
+        std::mutex best_mtx;
+        std::atomic<int> next_restart{0};
 
-            std::vector<int32_t> order;
-            if (r < static_cast<int>(fixed_orders.size())) {
-                order = fixed_orders[r];
-            } else {
-                order = customers;
-                std::shuffle(order.begin(), order.end(), rng);
-            }
-
-            auto [tour, obj] = detail::single_restart(prob, customers, order);
-
-            if (obj < best_obj) {
-                std::lock_guard lock(best_mtx);
+        auto worker = [&]() {
+            std::mt19937 rng(std::random_device{}());
+            while (std::chrono::steady_clock::now() < deadline) {
+                int r = next_restart.fetch_add(1, std::memory_order_relaxed);
+                std::vector<int32_t> order;
+                if (r < static_cast<int>(fixed_orders.size())) {
+                    order = fixed_orders[r];
+                } else {
+                    order = customers;
+                    std::shuffle(order.begin(), order.end(), rng);
+                }
+                auto [tour, obj] = detail::single_restart(prob, customers, order);
                 if (obj < best_obj) {
-                    best_obj = obj;
-                    best_tour = std::move(tour);
+                    std::lock_guard lock(best_mtx);
+                    if (obj < best_obj) {
+                        best_obj = obj;
+                        best_tour = std::move(tour);
+                    }
                 }
             }
+        };
+
+        unsigned hw = std::thread::hardware_concurrency();
+        unsigned num_workers = std::max(1u, hw);
+        {
+            tbb::task_group tg;
+            for (unsigned i = 0; i < num_workers; ++i)
+                tg.run(worker);
+            tg.wait();
         }
-    };
+    } else {
+        // --- Deterministic mode: fixed restarts, deterministic seeds ---
+        const int num_fixed = static_cast<int>(fixed_orders.size());
+        const int num_random = std::max(0, num_restarts - num_fixed);
+        fixed_orders.reserve(num_fixed + num_random);
+        for (int r = 0; r < num_random; ++r) {
+            std::mt19937 rng(static_cast<uint32_t>(r));
+            auto order = customers;
+            std::shuffle(order.begin(), order.end(), rng);
+            fixed_orders.push_back(std::move(order));
+        }
 
-    // Launch parallel workers
-    unsigned hw = std::thread::hardware_concurrency();
-    unsigned num_workers = std::max(1u, hw);
+        const int total_restarts = static_cast<int>(fixed_orders.size());
 
-    {
-        tbb::task_group tg;
-        for (unsigned i = 0; i < num_workers; ++i)
-            tg.run(worker);
-        tg.wait();
+        struct RestartResult {
+            std::vector<int32_t> tour;
+            double obj;
+        };
+        std::vector<RestartResult> results(total_restarts);
+
+        tbb::parallel_for(0, total_restarts, [&](int i) {
+            auto [tour, obj] = detail::single_restart(
+                prob, customers, fixed_orders[i]);
+            results[i] = {std::move(tour), obj};
+        });
+
+        for (int i = 0; i < total_restarts; ++i) {
+            if (results[i].obj < best_obj) {
+                best_obj = results[i].obj;
+                best_tour = std::move(results[i].tour);
+            }
+        }
     }
 
     // --- Convert best tour to MIP solution vector ---

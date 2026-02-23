@@ -118,6 +118,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool submip_separation = true;
     std::string branch_hyper = "off";
     bool output_flag = true;
+    bool deterministic = true;
     for (const auto& [key, value] : options) {
         if (key == "separation_interval") {
             separation_interval = std::stoi(value);
@@ -141,6 +142,10 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "submip_separation") {
             submip_separation = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "deterministic") {
+            deterministic = (value == "true" || value == "1");
             continue;
         }
         if (key == "branch_hyper") {
@@ -186,9 +191,10 @@ SolveResult Model::solve(const SolverOptions& options) {
         Timer preproc_timer;
 
         if (all_pairs_propagation) {
-            // All-pairs labeling: uncapped warm-start budget so it fills
-            // the parallel slot (all-pairs typically takes longer).
-            double budget_ms = std::max(10.0, static_cast<double>(n) * 10.0);
+            // All-pairs labeling runs in a parallel slot alongside warm-start.
+            int num_restarts = std::clamp(n, 20, 200);
+            double budget_ms = deterministic ? 0.0
+                : std::max(10.0, static_cast<double>(n) * 10.0);
             constexpr double inf = std::numeric_limits<double>::infinity();
             all_pairs.assign(static_cast<size_t>(n) * n, inf);
 
@@ -201,7 +207,8 @@ SolveResult Model::solve(const SolverOptions& options) {
                 });
             });
             tg.run([&] {
-                warm_start = heuristic::build_warm_start(problem_, budget_ms);
+                warm_start = heuristic::build_warm_start(
+                    problem_, num_restarts, budget_ms);
             });
             tg.wait();
 
@@ -217,9 +224,11 @@ SolveResult Model::solve(const SolverOptions& options) {
                     all_pairs.begin() + static_cast<ptrdiff_t>(target) * n + n);
             }
         } else {
-            // Default: depot-only labeling with capped warm-start budget
-            double budget_ms = std::min(500.0, std::max(10.0,
-                static_cast<double>(n) * 10.0));
+            // Default: depot-only labeling with warm-start
+            int num_restarts = std::clamp(n, 20, 200);
+            double budget_ms = deterministic ? 0.0
+                : std::min(500.0, std::max(10.0,
+                    static_cast<double>(n) * 10.0));
 
             tbb::task_group tg;
             tg.run([&] {
@@ -231,7 +240,8 @@ SolveResult Model::solve(const SolverOptions& options) {
                 });
             }
             tg.run([&] {
-                warm_start = heuristic::build_warm_start(problem_, budget_ms);
+                warm_start = heuristic::build_warm_start(
+                    problem_, num_restarts, budget_ms);
             });
             tg.wait();
 

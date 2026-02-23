@@ -97,7 +97,7 @@ Parallel construction + local search heuristic using Intel TBB. See [warm-start-
 
 **Local search**: 2-opt, or-opt (1/2/3 chains), node drop, node add with first-improvement.
 
-**Parallelism**: Multiple TBB workers run independent construction+search with a shared best solution. Time budget: `min(500ms, num_nodes * 10ms)`.
+**Parallelism**: By default (deterministic mode), all restarts are pre-built with deterministic seeds and executed via `tbb::parallel_for`, giving identical results across runs. With `--deterministic false`, the solver uses time-based workers with random seeds for potentially better bounds on fast hardware.
 
 ## References
 
