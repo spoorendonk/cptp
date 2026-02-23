@@ -16,10 +16,16 @@ nanobind_add_module(rcspp_python
     NB_STATIC
 )
 set_target_properties(rcspp_python PROPERTIES OUTPUT_NAME "_rcspp_bac")
-target_link_libraries(rcspp_python PRIVATE rcspp_model)
-target_include_directories(rcspp_python PRIVATE
-    ${highs_SOURCE_DIR}/src
-    ${highs_BINARY_DIR}
-)
+
+if(RCSPP_BUILD_HIGHS)
+    target_link_libraries(rcspp_python PRIVATE rcspp_model)
+    target_compile_definitions(rcspp_python PRIVATE RCSPP_HAS_HIGHS)
+    target_include_directories(rcspp_python PRIVATE
+        ${highs_SOURCE_DIR}/src
+        ${highs_BINARY_DIR}
+    )
+else()
+    target_link_libraries(rcspp_python PRIVATE rcspp_algorithms)
+endif()
 
 install(TARGETS rcspp_python LIBRARY DESTINATION rcspp_bac)
