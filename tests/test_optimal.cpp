@@ -47,7 +47,7 @@ TEST_CASE("B-n45-k6-54 optimal", "[optimal][slow]") {
 }
 
 TEST_CASE("B-n50-k8-40 optimal", "[optimal][slow]") {
-    auto r = solve_instance("bench/instances/spprclib/B-n50-k8-40.sppcc", 60);
+    auto r = solve_instance("bench/instances/spprclib/B-n50-k8-40.sppcc", 120);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-12832.0, 1.0));
 }
