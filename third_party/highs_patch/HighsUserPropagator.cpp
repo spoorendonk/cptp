@@ -14,6 +14,10 @@ void HighsUserPropagator::clearCallback() {
   callback_ = nullptr;
 }
 
+bool HighsUserPropagator::hasCallback() {
+  return static_cast<bool>(callback_);
+}
+
 void HighsUserPropagator::propagate(HighsDomain& domain,
                                     const HighsMipSolver& mipsolver,
                                     const HighsLpRelaxation& lp) {

@@ -65,16 +65,21 @@ TEST_CASE("Separator: feasibility check is invoked and respected",
 
 // ─── Propagator callback lifecycle ───
 
-TEST_CASE("Propagator: clearCallback leaves no callback", "[thread_local][propagator]") {
+TEST_CASE("Propagator: hasCallback is false initially", "[thread_local][propagator]") {
     HighsUserPropagator::clearCallback();
-    // propagate() with no callback should be a no-op (not crash)
-    // We can't call propagate without real HiGHS objects, but we can verify
-    // set/clear works
+    REQUIRE_FALSE(HighsUserPropagator::hasCallback());
+}
+
+TEST_CASE("Propagator: setCallback / hasCallback / clearCallback", "[thread_local][propagator]") {
+    HighsUserPropagator::clearCallback();
+    REQUIRE_FALSE(HighsUserPropagator::hasCallback());
+
     HighsUserPropagator::setCallback(
         [](HighsDomain&, const HighsMipSolver&, const HighsLpRelaxation&) {});
+    REQUIRE(HighsUserPropagator::hasCallback());
+
     HighsUserPropagator::clearCallback();
-    // No crash = pass
-    REQUIRE(true);
+    REQUIRE_FALSE(HighsUserPropagator::hasCallback());
 }
 
 // ─── Thread-local isolation ───
@@ -85,6 +90,10 @@ TEST_CASE("Separator: callbacks are thread-local isolated",
 
     // Barrier so both threads register callbacks before either checks
     std::barrier sync(2);
+    std::atomic<bool> a_initially_empty{false};
+    std::atomic<bool> b_initially_empty{false};
+    std::atomic<bool> a_has_after_set{false};
+    std::atomic<bool> b_has_after_set{false};
     std::atomic<bool> thread_a_ok{false};
     std::atomic<bool> thread_b_ok{false};
 
@@ -94,7 +103,7 @@ TEST_CASE("Separator: callbacks are thread-local isolated",
 
     std::thread thread_a([&] {
         // Initially no callback on this thread
-        REQUIRE_FALSE(HighsUserSeparator::hasCallback());
+        a_initially_empty = !HighsUserSeparator::hasCallback();
 
         HighsUserSeparator::setCallback(
             [&](const HighsLpRelaxation&, HighsCutPool&, const HighsMipSolver&) {
@@ -109,7 +118,7 @@ TEST_CASE("Separator: callbacks are thread-local isolated",
         sync.arrive_and_wait();  // both threads have verified
 
         // Thread A should still have its callback
-        REQUIRE(HighsUserSeparator::hasCallback());
+        a_has_after_set = HighsUserSeparator::hasCallback();
 
         // Invoke feasibility check — should use A's lambda
         HighsUserSeparator::isFeasible({});
@@ -120,7 +129,7 @@ TEST_CASE("Separator: callbacks are thread-local isolated",
 
     std::thread thread_b([&] {
         // Initially no callback on this thread (thread-local!)
-        REQUIRE_FALSE(HighsUserSeparator::hasCallback());
+        b_initially_empty = !HighsUserSeparator::hasCallback();
 
         HighsUserSeparator::setCallback(
             [&](const HighsLpRelaxation&, HighsCutPool&, const HighsMipSolver&) {
@@ -135,7 +144,7 @@ TEST_CASE("Separator: callbacks are thread-local isolated",
         sync.arrive_and_wait();  // both threads have verified
 
         // Thread B should still have its callback
-        REQUIRE(HighsUserSeparator::hasCallback());
+        b_has_after_set = HighsUserSeparator::hasCallback();
 
         // Invoke feasibility check — should use B's lambda (returns false)
         bool result = HighsUserSeparator::isFeasible({});
@@ -147,6 +156,10 @@ TEST_CASE("Separator: callbacks are thread-local isolated",
     thread_a.join();
     thread_b.join();
 
+    REQUIRE(a_initially_empty.load());
+    REQUIRE(b_initially_empty.load());
+    REQUIRE(a_has_after_set.load());
+    REQUIRE(b_has_after_set.load());
     REQUIRE(thread_a_ok.load());
     REQUIRE(thread_b_ok.load());
     // Cross-contamination check: A's callback was never called by B and vice versa
@@ -187,26 +200,25 @@ TEST_CASE("Propagator: callbacks are thread-local isolated",
           "[thread_local][propagator]") {
     std::barrier sync(2);
     std::atomic<bool> a_has{false};
-    std::atomic<bool> b_has{false};
+    std::atomic<bool> b_not_has{false};
 
     std::thread thread_a([&] {
         HighsUserPropagator::clearCallback();
         HighsUserPropagator::setCallback(
             [](HighsDomain&, const HighsMipSolver&, const HighsLpRelaxation&) {});
-        sync.arrive_and_wait();
-        a_has = true;  // A has callback
-        sync.arrive_and_wait();
+        sync.arrive_and_wait();  // both threads ready
+        a_has = HighsUserPropagator::hasCallback();
+        sync.arrive_and_wait();  // both threads verified
         HighsUserPropagator::clearCallback();
     });
 
     std::thread thread_b([&] {
         HighsUserPropagator::clearCallback();
         // B does NOT set a callback
-        sync.arrive_and_wait();
-        sync.arrive_and_wait();
-        // B should not see A's callback — no API to check directly,
-        // but clearCallback should not crash
-        b_has = false;
+        sync.arrive_and_wait();  // both threads ready
+        // B should not see A's callback
+        b_not_has = !HighsUserPropagator::hasCallback();
+        sync.arrive_and_wait();  // both threads verified
         HighsUserPropagator::clearCallback();
     });
 
@@ -214,7 +226,36 @@ TEST_CASE("Propagator: callbacks are thread-local isolated",
     thread_b.join();
 
     REQUIRE(a_has.load());
-    REQUIRE_FALSE(b_has.load());
+    REQUIRE(b_not_has.load());
+}
+
+TEST_CASE("Propagator: clearCallback on one thread does not affect another",
+          "[thread_local][propagator]") {
+    std::barrier sync(2);
+    std::atomic<bool> b_still_has{false};
+
+    std::thread thread_a([&] {
+        HighsUserPropagator::setCallback(
+            [](HighsDomain&, const HighsMipSolver&, const HighsLpRelaxation&) {});
+        sync.arrive_and_wait();  // both set
+        HighsUserPropagator::clearCallback();
+        sync.arrive_and_wait();  // A cleared
+    });
+
+    std::thread thread_b([&] {
+        HighsUserPropagator::setCallback(
+            [](HighsDomain&, const HighsMipSolver&, const HighsLpRelaxation&) {});
+        sync.arrive_and_wait();  // both set
+        sync.arrive_and_wait();  // A cleared
+        // B's callback should still be active
+        b_still_has = HighsUserPropagator::hasCallback();
+        HighsUserPropagator::clearCallback();
+    });
+
+    thread_a.join();
+    thread_b.join();
+
+    REQUIRE(b_still_has.load());
 }
 
 // ─── Integration: concurrent Model::solve ───
@@ -225,7 +266,7 @@ static const rcspp::SolverOptions quiet = {
 };
 
 TEST_CASE("Concurrent Model::solve on different threads",
-          "[thread_local][integration]") {
+          "[thread_local][integration][slow]") {
     // Two threads solve the same instance concurrently.
     // With the old mutex-based global callbacks, this would either deadlock
     // or produce wrong results. With thread_local, both should succeed.
@@ -251,7 +292,7 @@ TEST_CASE("Concurrent Model::solve on different threads",
 }
 
 TEST_CASE("Concurrent Model::solve with different instances",
-          "[thread_local][integration]") {
+          "[thread_local][integration][slow]") {
     // Thread A solves a tour, thread B solves a path.
     std::atomic<bool> ok_tour{false};
     std::atomic<bool> ok_path{false};

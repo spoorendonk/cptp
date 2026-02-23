@@ -24,6 +24,9 @@ class HighsUserPropagator {
   /// Clear the thread-local callback.
   static void clearCallback();
 
+  /// Check if a propagator callback is registered on this thread.
+  static bool hasCallback();
+
   /// Run the propagator callback (called from HighsSearch.cpp).
   static void propagate(HighsDomain& domain,
                         const HighsMipSolver& mipsolver,
