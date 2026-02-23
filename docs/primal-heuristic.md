@@ -50,18 +50,18 @@ For the LP-guided callback, construction and local search operate on a **reduced
 Three reduction strategies are used concurrently:
 
 **Strategy A: LP-value threshold**
-- Include edges with `x_e > 0.1` and all edges incident to nodes with `y_i > 0.5`
-- Simple, preserves edges the LP uses + neighborhood around visited nodes
+- Include edges with `x_e > 0.1` + edges between pairs of nodes with `y_i > 0.5`
+- Simple, focuses on the LP support subgraph
 
-**Strategy B: RINS-style agreement**
-- Include edges where LP and incumbent agree: both `> 0.5` or both `< 0.5`
+**Strategy B: RINS-style**
+- Include edges from incumbent (`x_e > 0.5`) OR fractional LP (`x_e > 0.1`)
 - Falls back to Strategy A when no incumbent exists
-- Searches near where LP and best solution agree
+- Searches in the union of incumbent and LP relaxation neighborhoods
 
 **Strategy C: Neighborhood expansion**
-- Seed: edges with `x_e > 0.3`
-- Expand 1-hop: add all edges incident to any node touched by seed edges
-- Gives a connected neighborhood around the LP support
+- Seed nodes: endpoints of edges with `x_e > 0.3`
+- Include seed edges + all edges between pairs of active nodes
+- Focuses on the connected neighborhood around the LP support
 
 All strategies: source/target always active.
 
@@ -100,7 +100,7 @@ Registered via `HiGHSBridge::install_heuristic_callback()`:
 3. If improved solution found: `data_in->user_has_solution = true; data_in->user_solution = result`
 4. HiGHS validates via `solutionFeasible()` + our SEC feasibility check in `addIncumbent()`
 
-The callback skips the initial `kExternalMipSolutionQueryOriginAfterSetup` query (pre-solve heuristic already ran).
+The callback skips the initial `kExternalMipSolutionQueryOriginAfterSetup` query (pre-solve heuristic already ran). Rate-limited to once per 200 B&B nodes to avoid overhead on hard instances.
 
 The solution vector has size `num_edges + num_nodes`:
 - `sol[e] = 1` for edges in the route
@@ -110,6 +110,7 @@ The solution vector has size `num_edges + num_nodes`:
 
 - `--heuristic_callback true/false` (default: true) — enable/disable LP-guided callback
 - `--heuristic_budget_ms N` (default: 20) — time budget per callback invocation in ms
+- `--heuristic_strategy N` (default: 0) — 0=all strategies, 1=LP-threshold, 2=RINS, 3=neighborhood
 
 ## Performance
 
