@@ -194,9 +194,21 @@ See [C++ API](docs/cpp-api.md) and [Python API](docs/python-api.md) for full doc
 ## Tests
 
 ```bash
-./build/rcspp_algo_tests   # algorithm tests (no HiGHS needed)
-./build/rcspp_tests        # integration tests (requires HiGHS)
+./build/rcspp_algo_tests                    # 57 C++ algorithm tests (no HiGHS needed)
+./build/rcspp_tests                         # 26 C++ integration tests (requires HiGHS)
+pytest tests/python/test_algorithms.py      # 33 Python algorithm tests (no HiGHS needed)
+pytest tests/python/test_solver.py          # Python solver tests (requires HiGHS)
 ```
+
+The algorithm tests (`rcspp_algo_tests`) cover all solver-independent components:
+- **SeparationOracle**: cut generation, feasibility checks, offset handling, cut limits, tour and path modes
+- **Individual separators**: SEC, RCI, Multistar, Comb, RGLM — both violation detection and correctness
+- **BoundPropagator**: Trigger A sweep, Trigger B chain fixings, all-pairs bounds, path mode
+- **Preprocessing**: demand reachability, edge elimination, labeling bounds
+- **Warm-start heuristic**: tour/path construction, degree/capacity consistency
+- **Core**: Dinitz max-flow, Gomory-Hu tree, Problem accessors, IO parsing
+
+Python algorithm tests mirror the C++ coverage for the `rcspp_bac` package bindings.
 
 ## Project Structure
 

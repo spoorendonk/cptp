@@ -150,6 +150,34 @@ auto eliminated = rcspp::preprocess::edge_elimination(
     prob, fwd, bwd, upper_bound, correction);
 ```
 
+### Testing the Algorithm API
+
+The standalone algorithm API is tested by `rcspp_algo_tests` (57 Catch2 tests, no HiGHS required):
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DRCSPP_BUILD_HIGHS=OFF
+cmake --build build -j$(nproc)
+./build/rcspp_algo_tests
+```
+
+Tests cover:
+- **SeparationOracle** (13 tests): cut generation on violated/feasible solutions, path mode, non-zero offsets, cut struct validation, max-cuts limits, cumulative separator addition
+- **Individual separators** (11 tests): SEC (tour + path, target-in-S handling), RCI, Multistar, Comb, RGLM, separator name accessors
+- **BoundPropagator** (11 tests): Trigger A sweep, Trigger B chain fixings, all-pairs bounds, path mode, sweep_nodes, edge skipping, accessor correctness
+- **Preprocessing** (8 tests): demand reachability (tour + path), edge elimination, labeling bounds
+- **Warm-start heuristic** (6 tests): tour/path construction, degree/capacity consistency
+- **Core** (5 tests): Dinitz max-flow, Gomory-Hu tree, Problem accessors, IO parsing
+
+Run individual test tags:
+
+```bash
+./build/rcspp_algo_tests [oracle]       # SeparationOracle tests
+./build/rcspp_algo_tests [propagator]   # BoundPropagator tests
+./build/rcspp_algo_tests [sec]          # SEC separator tests
+./build/rcspp_algo_tests [path]         # s-t path mode tests
+./build/rcspp_algo_tests [heuristic]    # Warm-start tests
+```
+
 ## Solver API (requires HiGHS)
 
 ### Solving a Tour (closed loop)

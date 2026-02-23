@@ -175,6 +175,32 @@ prob.demands        # ndarray[float64]
 prob.graph_edges()  # ndarray[int32] shape (m, 2)
 ```
 
+### Testing the Algorithm API
+
+The algorithm bindings are tested by 33 pytest tests in `tests/python/test_algorithms.py` (no HiGHS required):
+
+```bash
+pip install -e .
+pytest tests/python/test_algorithms.py -v
+```
+
+Tests cover:
+- **SeparationOracle** (9 tests): violated cuts, feasible solutions, `is_feasible`, max-cuts limiting, individual separator addition, cut attributes, path mode (violated/feasible/infeasible), no-separator edge case, non-zero offsets
+- **BoundPropagator** (5 tests): Trigger A sweep, Trigger B chain fixings, all-pairs bounds, path mode, loose UB edge case
+- **Preprocessing** (5 tests): forward/backward labeling, edge elimination (tour + path), labeling symmetry
+- **Warm-start** (5 tests): tour/path construction, capacity validation, finite objective
+- **Problem** (6 tests): tour/path properties, numpy array accessors, graph_edges shape
+- **IO** (2 tests): `load()` for tour and path instances
+- **Module** (1 test): `has_highs` attribute
+
+Run with tags:
+
+```bash
+pytest tests/python/test_algorithms.py -v -k "Oracle"       # SeparationOracle
+pytest tests/python/test_algorithms.py -v -k "Propagator"   # BoundPropagator
+pytest tests/python/test_algorithms.py -v -k "Path"         # Path mode tests
+```
+
 ## Solver API (requires HiGHS)
 
 ### Quick Start with `solve()`

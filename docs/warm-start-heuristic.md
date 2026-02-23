@@ -75,6 +75,20 @@ The solution vector has size `num_edges + num_nodes`:
 - `col_values[e] = 1` for edges in the route
 - `col_values[m + v] = 1` for visited nodes (including source/target)
 
+## Testing
+
+6 C++ tests (`[heuristic]` tag) and 5 Python tests verify:
+- Tour produces a valid closed loop with correct degree (degree 2 at all visited nodes)
+- Path produces a valid open path (degree 1 at source/target, degree 2 at intermediates)
+- Total demand of visited nodes respects vehicle capacity
+- Source/target y-variables are set to 1
+- Edge count equals visited-node count minus 1 (path) or equals visited-node count (tour)
+- Objective is finite
+
+```bash
+./build/rcspp_algo_tests [heuristic]
+```
+
 ## HiGHS Integration
 
 In `Model::solve()` (model.cpp), the warm start is fed to HiGHS:

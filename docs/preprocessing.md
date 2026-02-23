@@ -38,3 +38,22 @@ Lower bound computation:
 For each edge, if the lower bound exceeds the warm-start upper bound, the edge
 variable is fixed to zero before the MIP is built. The same labeling bounds are
 reused by the [domain propagator](domain-propagator.md) during branch-and-bound.
+
+## Testing
+
+8 C++ tests (`[preprocess]` tag) and 5 Python tests cover:
+
+| Test | Description |
+|---|---|
+| Demand reachability: tour round-trip | All nodes reachable with sufficient capacity |
+| Demand reachability: tour eliminates | High-demand node unreachable |
+| Demand reachability: path bidirectional | Source+target Dijkstra for s-t path |
+| Demand reachability: path eliminates | High-demand node on tight-capacity path |
+| Demand reachability: large capacity | All nodes reachable with very large Q |
+| Edge elimination: tour | Expensive edge eliminated with tight UB |
+| Edge elimination: path | Bidirectional labeling on s-t path |
+| Edge elimination: infinite UB | No edges eliminated |
+
+```bash
+./build/rcspp_algo_tests [preprocess]
+```

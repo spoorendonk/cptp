@@ -33,10 +33,22 @@ pip install .
 ## Test
 
 ```bash
-./build/rcspp_algo_tests                         # algorithm tests (no HiGHS needed)
-./build/rcspp_tests                              # integration tests (requires HiGHS)
+./build/rcspp_algo_tests                         # 57 algorithm tests (no HiGHS needed)
+./build/rcspp_tests                              # 26 integration tests (requires HiGHS)
+pytest tests/python/test_algorithms.py           # 33 Python algorithm tests
+pytest tests/python/test_solver.py               # Python solver tests (requires HiGHS)
 ./build/rcspp-solve tests/data/tiny4.txt         # CLI
 ```
+
+Test structure:
+- `tests/test_max_flow.cpp` — Dinitz max-flow, Gomory-Hu tree (5 tests)
+- `tests/test_separators.cpp` — Individual separators (SEC, RCI, Multistar, Comb, RGLM), preprocessing, warm-start heuristic (29 tests)
+- `tests/test_oracle.cpp` — SeparationOracle, BoundPropagator pluggable API (23 tests)
+- `tests/test_model.cpp` — Model API, solver integration [requires HiGHS]
+- `tests/test_optimal.cpp` — Known-optimal instances from SPPRCLIB [requires HiGHS]
+- `tests/test_propagator.cpp` — Labeling, edge elimination, propagator integration [requires HiGHS]
+- `tests/python/test_algorithms.py` — Python bindings for algorithms (33 tests, no HiGHS)
+- `tests/python/test_solver.py` — Python solver API [requires HiGHS]
 
 ## Dependencies
 

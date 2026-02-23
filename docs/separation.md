@@ -348,6 +348,29 @@ Each `Cut` returned by `separate()`:
 | `rhs` | `double` | Right-hand side (<= form) |
 | `violation` | `double` | Violation amount |
 
+### Testing
+
+The SeparationOracle and individual separators are covered by 24 C++ tests (`[oracle]`, `[sec]`, `[rci]`, `[multistar]`, `[comb]`, `[rglm]`, `[separator]` tags) and 9 Python tests:
+
+| Component | Tests | Coverage |
+|---|---|---|
+| SeparationOracle | 13 C++ + 9 Python | Tour/path cuts, feasibility, offsets, limits, no-separator edge case, cut struct validation |
+| SEC separator | 7 C++ | Violated/feasible (tour + path), target-in-S rhs handling, multi-disconnected |
+| RCI separator | 2 C++ | Basic + high-demand fractional solution |
+| Multistar | 1 C++ | Basic execution |
+| Comb | 1 C++ | Basic execution |
+| RGLM | 1 C++ | Basic execution |
+
+```bash
+./build/rcspp_algo_tests [oracle]     # SeparationOracle tests
+./build/rcspp_algo_tests [sec]        # SEC separator
+./build/rcspp_algo_tests [rci]        # RCI separator
+./build/rcspp_algo_tests [multistar]  # Multistar
+./build/rcspp_algo_tests [comb]       # Comb
+./build/rcspp_algo_tests [rglm]       # RGLM
+./build/rcspp_algo_tests [separator]  # Separator name() accessors
+```
+
 ## Cut Management (HiGHS)
 
 Managed by `HiGHSBridge::install_separators()` (`src/model/highs_bridge.cpp`).

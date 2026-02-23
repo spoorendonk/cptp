@@ -122,6 +122,29 @@ Each orientation computes: `lb = d[start->...->endpoint1] + cost + d[endpoint2->
 
 Disabled by default — benchmarks show negligible gain over neighbor-only scan.
 
+## Testing
+
+The BoundPropagator is covered by 11 C++ tests (`[propagator]` tag) and 5 Python tests:
+
+| Test | Description |
+|---|---|
+| Sweep fixes expensive edges | Trigger A eliminates cost=100 edge with tight UB |
+| Sweep with loose UB | Confirms no fixings with very large UB |
+| Sweep skips already-fixed edges | Pre-fixed edges not reported again |
+| Sweep on s-t path problem | Path-mode Trigger A with bidirectional bounds |
+| sweep_nodes fixes isolated nodes | Nodes with all incident edges fixed to 0 |
+| sweep_nodes no fixings when edges open | All edges open → no node fixings |
+| propagate_fixed_edge (neighbor-only) | Trigger B eliminates expensive neighbor |
+| propagate_fixed_edge (all-pairs) | Trigger B with all-pairs bounds eliminates distant edges |
+| propagate_fixed_edge loose UB | Confirms no chain fixings with large UB |
+| has_all_pairs_bounds initially false | Verifies default state |
+| Accessor correctness | fwd_bounds, bwd_bounds, correction values |
+
+```bash
+./build/rcspp_algo_tests [propagator]       # All BoundPropagator tests
+./build/rcspp_algo_tests [propagator][path] # Path-mode propagator tests
+```
+
 ## HiGHS Integration
 
 ### Patching
