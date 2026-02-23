@@ -52,6 +52,14 @@ void HiGHSBridge::build_formulation() {
     std::vector<double> col_lower(total_vars, 0.0);
     std::vector<double> col_upper(total_vars, 1.0);
 
+    // Tour mode: depot-incident edges allow x_e ∈ {0,1,2} to permit 2-node tours
+    // (Jepsen et al. 2014, standard CPTP/CVRP formulation)
+    if (prob_.is_tour()) {
+        for (auto e : graph.incident_edges(prob_.source())) {
+            col_upper[e] = 2.0;
+        }
+    }
+
     // Fix source and target y variables to 1 via bounds
     col_lower[m + prob_.source()] = 1.0;
     col_lower[m + prob_.target()] = 1.0;
