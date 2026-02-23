@@ -269,9 +269,22 @@ See [full benchmark results](benchmarks.md) for per-instance details with timing
 
 ---
 
-## Use Case: CVRP Column Generation
+## Applications
 
-The primary application is as a **pricing solver in branch-and-price** for the Capacitated Vehicle Routing Problem (CVRP).
+The solver handles any problem on a symmetric graph with a single resource,
+optional vertices, and **negative-cost edges** (equivalently, vertex profits
+that can exceed nearby travel costs, creating negative-cost cycles).
+
+Vertex profits and edge-resource budgets are interchangeable with the native
+formulation via node splitting --- see [Applications](applications.md) for
+encoding details.
+
+| Application | Profits from | Resource |
+|---|---|---|
+| **VRP column generation** | Master LP dual values | Vehicle capacity |
+| **Prize-Collecting TSP** | Customer prizes | Penalty budget or prize target |
+| **Orienteering** | Location scores | Distance / time budget |
+| **Drone inspection** | Information value per site | Battery / flight time |
 
 ```mermaid
 flowchart LR
@@ -286,9 +299,9 @@ flowchart LR
     style R fill:#f59e0b,stroke:#d97706,color:#fff
 ```
 
-In column generation, the master LP produces dual values that become vertex profits in the pricing problem. Because duals can create **negative-cost cycles**, the pricing solver must find **elementary** shortest paths --- exactly the problem this solver addresses.
-
-Standard approaches use dynamic-programming labeling algorithms. This solver provides a **branch-and-cut alternative** following [Jepsen et al. (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X), revisited by [Paro (2022)](https://github.com/dparo/master-thesis) with modern open-source MIP solvers.
+With directed-graph and multiple-resource extensions, the solver would additionally
+cover asymmetric PCTSP, VRPTW pricing (capacity + time), and EV routing.
+See [Applications](applications.md) for the full picture.
 
 ---
 
