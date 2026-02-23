@@ -427,8 +427,6 @@ SolveResult Model::solve(const SolverOptions& options) {
 
         // Disable HiGHS strong branching (we do our own)
         highs.setOptionValue("mip_pscost_minreliable", 0);
-
-        std::cerr << "Hyperplane branching: mode=" << branch_hyper << "\n";
     }
 
     bridge.install_separators();

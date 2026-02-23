@@ -218,3 +218,40 @@ TEST_CASE("Model: submip_separation=true produces valid result", "[model]") {
     REQUIRE(result.has_solution());
     REQUIRE(result.objective < 0.0);
 }
+
+TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][branching]") {
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+
+    // Get reference solution with branching off
+    double ref_obj;
+    {
+        rcspp::Model model;
+        model.set_graph(4, edges, costs);
+        model.set_depot(0);
+        model.set_profits(profits);
+        model.add_capacity_resource(demands, 10.0);
+        auto result = model.solve(quiet);
+        REQUIRE(result.has_solution());
+        ref_obj = result.objective;
+    }
+
+    for (const char* mode : {"pairs", "clusters", "demand", "cardinality", "all"}) {
+        SECTION(std::string("mode=") + mode) {
+            rcspp::Model model;
+            model.set_graph(4, edges, costs);
+            model.set_depot(0);
+            model.set_profits(profits);
+            model.add_capacity_resource(demands, 10.0);
+            auto opts = quiet;
+            opts.push_back({"branch_hyper", mode});
+            auto result = model.solve(opts);
+            REQUIRE(result.has_solution());
+            REQUIRE_THAT(result.objective, WithinAbs(ref_obj, 1.0));
+        }
+    }
+}
