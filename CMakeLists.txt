@@ -75,7 +75,9 @@ if(RCSPP_BUILD_TESTS)
         tests/test_model.cpp
         tests/test_optimal.cpp
         tests/test_propagator.cpp
+        tests/test_thread_local.cpp
     )
+    target_include_directories(rcspp_tests PRIVATE ${highs_SOURCE_DIR}/highs)
     target_link_libraries(rcspp_tests PRIVATE rcspp_model Catch2::Catch2WithMain)
     catch_discover_tests(rcspp_tests)
 
