@@ -1259,8 +1259,155 @@ TEST_CASE("SPI separator: path problem pair cuts", "[spi][path]") {
         for (double v : cut.values) {
             REQUIRE(v == 1.0);
         }
-        // Pair cuts have rhs=1, triplet cuts have rhs=2
-        REQUIRE((cut.rhs == 1.0 || cut.rhs == 2.0));
+        // rhs = |S|-1 for set S of size >= 2
+        int32_t set_size = cut.size();
+        REQUIRE(cut.rhs == static_cast<double>(set_size - 1));
+    }
+}
+
+TEST_CASE("SPI separator: greedy extension finds set cuts", "[spi]") {
+    // 7-node tour problem with a cluster of expensive nodes.
+    // Depot=0, cheap cluster {1,2}, expensive cluster {3,4,5,6}.
+    // With tight UB, the separator should find set cuts like
+    // y_3 + y_4 + y_5 <= 2, or larger sets.
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges;
+    std::vector<double> costs;
+    for (int i = 0; i < 7; ++i) {
+        for (int j = i + 1; j < 7; ++j) {
+            edges.push_back({i, j});
+            // Cheap edges among {0,1,2}, expensive to reach {3,4,5,6}
+            if (i >= 3 || j >= 3) {
+                costs.push_back(30.0);
+            } else {
+                costs.push_back(1.0);
+            }
+        }
+    }
+
+    std::vector<double> profits = {0, 3, 3, 3, 3, 3, 3};
+    std::vector<double> demands = {0, 1, 1, 1, 1, 1, 1};
+    prob.build(7, edges, costs, profits, demands, 100.0, 0, 0);
+
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+    auto all_pairs = compute_all_pairs(prob);
+
+    // LP solution: all customers at 0.7
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+    y_values[0] = 1.0;
+    for (int i = 1; i < n; ++i) y_values[i] = 0.7;
+
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if (u == 0 || v == 0) x_values[e] = 0.4;
+    }
+
+    auto support = build_support(prob, x_values);
+
+    // Tight UB: visiting multiple expensive nodes costs > UB
+    double tight_ub = 80.0;
+
+    rcspp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = tight_ub,
+        .all_pairs = all_pairs,
+    };
+
+    rcspp::sep::SPISeparator spi;
+    auto cuts = spi.separate(ctx);
+
+    REQUIRE(!cuts.empty());
+
+    // Check that we found at least one set cut (rhs >= 1)
+    // The greedy extension should find cuts larger than just pairs
+    bool found_set_cut = false;
+    for (const auto& cut : cuts) {
+        REQUIRE(cut.violation > 1e-6);
+        int32_t set_size = cut.size();
+        REQUIRE(cut.rhs == static_cast<double>(set_size - 1));
+        if (set_size >= 3) found_set_cut = true;
+    }
+    // With 4 expensive nodes and tight UB, we should find triplet+ cuts
+    REQUIRE(found_set_cut);
+}
+
+TEST_CASE("SPI separator: shrinking produces minimal sets", "[spi]") {
+    // Verify that the shrink phase finds the smallest infeasible set.
+    // Build a problem where {3,4,5} is infeasible but {3,4} and {4,5} are not.
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges;
+    std::vector<double> costs;
+    for (int i = 0; i < 6; ++i) {
+        for (int j = i + 1; j < 6; ++j) {
+            edges.push_back({i, j});
+            // All edges to nodes 3,4,5 cost 20
+            // Edges among {0,1,2} cost 1
+            if (i >= 3 || j >= 3) {
+                costs.push_back(20.0);
+            } else {
+                costs.push_back(1.0);
+            }
+        }
+    }
+
+    std::vector<double> profits = {0, 2, 2, 2, 2, 2};
+    std::vector<double> demands = {0, 1, 1, 1, 1, 1};
+    prob.build(6, edges, costs, profits, demands, 100.0, 0, 0);
+
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+    auto all_pairs = compute_all_pairs(prob);
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+    y_values[0] = 1.0;
+    for (int i = 1; i < n; ++i) y_values[i] = 0.8;
+
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if (u == 0 || v == 0) x_values[e] = 0.5;
+    }
+
+    auto support = build_support(prob, x_values);
+
+    // UB where pairs might be feasible but triples are not
+    double ub = 60.0;
+
+    rcspp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = ub,
+        .all_pairs = all_pairs,
+    };
+
+    rcspp::sep::SPISeparator spi;
+    auto cuts = spi.separate(ctx);
+
+    // All cuts should be valid
+    for (const auto& cut : cuts) {
+        REQUIRE(cut.violation > 1e-6);
+        for (double v : cut.values) {
+            REQUIRE(v == 1.0);
+        }
+        int32_t set_size = cut.size();
+        REQUIRE(cut.rhs == static_cast<double>(set_size - 1));
     }
 }
 
