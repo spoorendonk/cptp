@@ -128,4 +128,4 @@ cmake --build build -j$(nproc)
 ./build/rcspp-solve bench/instances/roberti/E-n76-k8_b.vrp --time_limit 300
 ```
 
-Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are in [`bench/progress.csv`](../bench/progress.csv).
+Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are in [`bench/progress.csv`](https://github.com/spoorendonk/rcspp-bac/blob/main/bench/progress.csv).
