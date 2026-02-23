@@ -2,7 +2,7 @@
 
 ## Problem
 
-The **Capacitated Profitable Trip Problem (CPTP)** is a variant of the Traveling Salesman Problem where:
+The solver targets a variant of the **Resource Constrained Shortest Path Problem (RCSPP)** with vertex profits and optional vertices:
 
 - A vehicle starts at a **source** and ends at a **target** node
 - Each customer has a **profit** (reward for visiting), a **demand** (capacity consumed), and a **cost** (travel distance)
@@ -10,6 +10,8 @@ The **Capacitated Profitable Trip Problem (CPTP)** is a variant of the Traveling
 - The objective is to minimize `travel_cost - collected_profit`, i.e., find a route that balances short routes with high-value customers
 
 Not all customers need to be visited -- the solver decides which subset maximizes net benefit.
+
+The tour special case (source == target) corresponds to the **Capacitated Profitable Tour Problem (CPTP)** of Jepsen et al. (2014).
 
 The solver supports two modes:
 - **Tour** (source == target): closed loop from a depot, as in the original CPTP formulation
@@ -40,7 +42,7 @@ Load instance
     |
     v
 Preprocessing (parallel via TBB)
-    |-- Forward labeling (ESPPRC bounds from source)
+    |-- Forward labeling (bounds from source)
     |-- Backward labeling (bounds from target; same as forward for tour)
     '-- Warm-start heuristic (greedy + local search)
     |
@@ -53,7 +55,8 @@ Build MIP formulation
     v
 Install HiGHS callbacks
     |-- User separator   --> separation.md
-    |-- Feasibility check (SEC on incumbents)
+    |-- Feasibility check (SEC on incumbents, with sub-MIP column mapping)
+    |-- Sub-MIP root SEC separation (column mapping via undoPrimal)
     '-- Domain propagator --> domain-propagator.md
     |
     v
@@ -68,39 +71,23 @@ Orchestrated by `Model::solve()` in `src/model/model.cpp`.
 ## Cut Separation
 
 Five families of cutting planes are separated dynamically: SEC, RCI, Multistar/GLM,
-RGLM, and Comb. All cuts use CPTP-valid formulations (Jepsen et al. 2014) that
-account for optional nodes. A shared Gomory-Hu tree avoids redundant max-flow
-computation.
+RGLM, and Comb. All cuts use formulations valid for RCSPP with optional vertices,
+originally developed for the CPTP (Jepsen et al. 2014). A shared Gomory-Hu tree
+avoids redundant max-flow computation.
 
 See [separation.md](separation.md) for full details.
 
 ## Domain Propagator
 
-A custom propagator injected into HiGHS via `HighsUserPropagator`. Uses ESPPRC
-labeling bounds to fix edge variables to zero when the upper bound tightens or
-edges are fixed by branching.
+A custom propagator injected into HiGHS via `HighsUserPropagator`. Uses labeling
+bounds to fix edge variables to zero when the upper bound tightens or edges are
+fixed by branching.
 
 See [domain-propagator.md](domain-propagator.md) for full details.
 
 ## Preprocessing
 
-### Demand-Reachability
-
-- **Tour**: Dijkstra from depot; eliminates nodes where `2 * min_demand_path(depot, v) - demand(v) > Q` (round-trip check)
-- **Path**: Dijkstra from both source and target; eliminates nodes where `dist_source(v) + dist_target(v) - demand(v) > Q` (one-way check)
-
-### Edge Elimination
-
-ESPPRC-style forward labeling with:
-- Net cost tracking (edge costs minus collected profits)
-- Demand accumulation with capacity check
-- 2-cycle elimination (no immediate return to predecessor)
-- Label dominance to control enumeration
-
-- **Tour**: labeling from depot; lb(u,v) = f[u] + c(u,v) + f[v] + profit(depot)
-- **Path**: labeling from both source and target; lb(u,v) = min(f_s[u] + c(u,v) + f_t[v], f_s[v] + c(u,v) + f_t[u])
-
-For each edge, if the lower bound exceeds the warm-start upper bound, the edge variable is fixed to zero.
+Demand-reachability filtering and labeling-based edge elimination. See [preprocessing.md](preprocessing.md) for full details.
 
 ## Warm-Start Heuristic
 
@@ -119,4 +106,3 @@ Parallel construction + local search heuristic using Intel TBB. See [warm-start-
 - Gusfield, D. (1990). Very simple methods for all pairs network flow analysis. *SIAM Journal on Computing*, 19(1), 143-155.
 - SPPRCLIB: Benchmark instance library for shortest path problems with resource constraints. https://or.rwth-aachen.de/spprclib
 - HiGHS: High-performance open-source linear and mixed-integer programming solver. https://highs.dev
-- PathWyse: Exact solver for resource-constrained shortest path problems (used for solution verification).

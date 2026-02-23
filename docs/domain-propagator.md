@@ -6,8 +6,8 @@ File: `src/model/highs_bridge.cpp` (install_propagator method)
 
 A custom domain propagator injected into HiGHS via the `HighsUserPropagator` patch.
 Runs inside `HighsSearch.cpp` after HiGHS's built-in reduced-cost fixing
-(`HighsRedcostFixing`). Uses ESPPRC-style labeling bounds to fix edge variables
-to zero when no improving tour can use that edge.
+(`HighsRedcostFixing`). Uses labeling bounds to fix edge variables to zero when
+no improving tour can use that edge.
 
 ## Labeling Bounds
 
@@ -15,7 +15,7 @@ Computed during preprocessing (`src/preprocess/edge_elimination.h`) and passed
 to the propagator at setup time.
 
 **Forward labeling** `labeling_from(prob, root)`:
-- ESPPRC-style label-correcting algorithm from a given root node
+- Label-correcting algorithm from a given root node
 - Label state: (net_cost, demand, predecessor)
 - Net cost = sum(edge_costs) - sum(profits) along path
 - Seed: f[root] = -profit(root), demand = demand(root)

@@ -8,9 +8,9 @@ Five families of cutting planes are separated dynamically via HiGHS MIP callback
 All separators implement `rcspp::sep::Separator` and receive a `SeparationContext`
 containing the LP relaxation solution, problem data, and a shared Gomory-Hu tree.
 
-All cuts use CPTP-valid formulations from Jepsen et al. (2014) that account for
-optional nodes (y variables). Standard CVRP cuts are **invalid** for CPTP because
-they assume all nodes are visited.
+All cuts use formulations valid for RCSPP with optional vertices (y variables),
+originally developed for the CPTP (Jepsen et al. 2014). Standard CVRP cuts are
+**invalid** here because they assume all nodes are visited.
 
 ## Gomory-Hu Tree
 
@@ -40,7 +40,7 @@ Two query methods:
 File: `src/sep/sec_separator.cpp`
 
 For each customer t with y_t > tol, query the Gomory-Hu tree min-cut between
-depot and t. The CPTP-valid SEC requires:
+depot and t. The SEC requires:
 
 ```
 x(delta(S)) >= 2 * y_t
@@ -68,6 +68,25 @@ heuristics (feasibility pump, rounding, sub-MIPs). Any integer solution with
 a violated SEC is rejected. This uses tight tolerance (1e-6) vs the looser
 fractional tolerance (default 0.1).
 
+### Sub-MIP feasibility and separation
+
+HiGHS primal heuristics (RENS, RINS) solve sub-MIPs that inherit our callbacks
+but run their own presolve, which remaps columns. Two mechanisms handle this:
+
+1. **Feasibility check with column mapping**: In `addIncumbent()`, sub-MIP
+   solutions are expanded from reduced to original column space via
+   `postSolveStack.undoPrimal()` before the SEC feasibility check. Without this,
+   ~20-42% of sub-MIP incumbents violate SEC and corrupt the upper bound.
+
+2. **Root-node SEC separation**: At the sub-MIP root node (`num_nodes == 0`),
+   the LP solution is expanded to original space, SEC separation runs, and
+   resulting cuts are translated back to reduced space. An inverse column map
+   (`orig_to_reduced`) maps cut indices; eliminated columns have their fixed
+   values subtracted from the cut RHS. Only SEC runs in sub-MIPs -- other
+   separators are skipped to minimize overhead.
+
+Sub-MIP separation is controlled by `--submip_separation true/false` (default: true).
+
 ## Rounded Capacity Inequalities (RCI)
 
 File: `src/sep/rci_separator.cpp`
@@ -77,7 +96,7 @@ For a set S of customers with total demand d(S), define:
 - Q_r = d(S) mod Q  (skip if Q_r = 0)
 - k = ceil(d(S) / Q)  (skip if k <= 1)
 
-The CPTP-valid RCI in >= form:
+The RCI in >= form:
 
 ```
 x(delta(S)) - (2/Q_r) * sum(q_i * y_i, i in S) >= 2 * (k - d(S)/Q_r)
@@ -118,7 +137,7 @@ HiGHSBridge).
 
 File: `src/sep/multistar_separator.cpp`
 
-The CPTP-valid GLM inequality (Jepsen et al. eq 17) for a set S:
+The GLM inequality (Jepsen et al. eq 17) for a set S:
 
 ```
 sum_{e in delta(S)} (1 - 2*q_{t(e)}/Q) * x_e - (2/Q) * sum_{i in S} q_i * y_i >= 0
@@ -256,9 +275,9 @@ Implements a BFS-based heuristic for comb separation (Jepsen et al. eq 13):
    shared inside/outside nodes. Require >= 3 teeth, odd count.
 4. **Violation check**: x(E(H)) + sum(x_{tooth}) - sum_{j in H}(y_j) - sum(y_{outside}) > (t-1)/2.
 
-**Status**: Currently active but produces very few cuts in practice. The CPTP
-formulation requires y-variable corrections not implemented in the standard CVRP
-comb form. The dparo reference implementation also omits comb for CPTP.
+**Status**: Currently active but produces very few cuts in practice. The
+formulation requires y-variable corrections not present in the standard CVRP
+comb form.
 
 ## Cut Management
 
@@ -279,6 +298,7 @@ Managed by `HiGHSBridge::install_separators()` (`src/model/highs_bridge.cpp`).
 | separation_tol | `--separation_tol X` | 0.1 | Fractional violation threshold |
 | separation_interval | `--separation_interval N` | 1 | Run separation every N-th callback (amortization) |
 | enable_rglm | `--enable_rglm true` | false | Enable RGLM separator |
+| submip_separation | `--submip_separation true` | true | SEC separation at sub-MIP root node |
 
 ### Tolerances
 
