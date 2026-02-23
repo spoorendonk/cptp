@@ -45,24 +45,34 @@ First-improvement strategy: accept the first improving move found, restart the p
 
 ### Parallel restarts (TBB)
 
-Multiple workers run construction + local search concurrently:
-- Each worker picks the next ordering (deterministic first, then random shuffles)
-- All workers share a best-known solution (mutex-protected)
-- Workers run until a time budget expires
+The heuristic supports two modes, controlled by the `deterministic` solver option (default: `true`):
 
-Time budget: `min(500ms, num_nodes * 10ms)`
-- 4 nodes: 40ms
-- 45 nodes: 450ms
-- 50+ nodes: 500ms
+**Deterministic mode** (default):
+- Pre-builds all orderings upfront: 3 deterministic + random shuffles with seeds `0, 1, 2, ...`
+- Runs all restarts via `tbb::parallel_for` over the fixed set
+- Best solution selected by iterating results in index order (deterministic tiebreaking)
+- Restart count: `clamp(num_nodes, 20, 200)`
+- Identical results across runs on any hardware
+
+**Opportunistic mode** (`--deterministic false`):
+- Multiple TBB workers race with `std::random_device` seeds
+- Workers run until a time budget expires: `min(500ms, num_nodes * 10ms)`
+- May find better bounds on fast multi-core hardware
+- Results vary between runs
 
 ## Standalone Usage
 
 ```cpp
 #include "heuristic/warm_start.h"
 
-auto warm = rcspp::heuristic::build_warm_start(prob, /*budget_ms=*/500.0);
-// warm.objective  = travel_cost - collected_profit
-// warm.col_values = solution vector (edges + nodes)
+// Deterministic (default): fixed restart count, reproducible
+auto warm_start = heuristic::build_warm_start(problem_, num_restarts);
+
+// Opportunistic: time-based, non-deterministic
+auto warm_start = heuristic::build_warm_start(problem_, num_restarts, budget_ms);
+
+// warm_start.objective = travel_cost - collected_profit
+// warm_start.col_values = solution vector (edges + nodes)
 ```
 
 Python:

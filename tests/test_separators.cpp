@@ -581,7 +581,7 @@ TEST_CASE("Edge elimination: path uses bidirectional labeling", "[preprocess][pa
 
 TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
     auto prob = make_small_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_warm_start(prob, 50);
 
     // Should produce a valid solution
     REQUIRE(result.objective < std::numeric_limits<double>::max());
@@ -594,7 +594,7 @@ TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
 
 TEST_CASE("Warm-start: path produces valid open path", "[heuristic][path]") {
     auto prob = make_small_path_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_warm_start(prob, 50);
 
     REQUIRE(result.objective < std::numeric_limits<double>::max());
 
@@ -963,5 +963,41 @@ TEST_CASE("Demand reachability: large capacity makes all reachable", "[preproces
     for (int32_t v = 0; v < big_cap.num_nodes(); ++v) {
         REQUIRE(reachable[v]);
     }
+}
+
+// =====================================================================
+// Determinism
+// =====================================================================
+
+TEST_CASE("Warm-start: deterministic mode produces identical results", "[heuristic][determinism]") {
+    auto prob = make_small_problem();
+
+    auto r1 = rcspp::heuristic::build_warm_start(prob, 50);
+    auto r2 = rcspp::heuristic::build_warm_start(prob, 50);
+
+    REQUIRE(r1.objective == r2.objective);
+    REQUIRE(r1.col_values == r2.col_values);
+}
+
+TEST_CASE("Warm-start: deterministic path produces identical results", "[heuristic][determinism][path]") {
+    auto prob = make_small_path_problem();
+
+    auto r1 = rcspp::heuristic::build_warm_start(prob, 50);
+    auto r2 = rcspp::heuristic::build_warm_start(prob, 50);
+
+    REQUIRE(r1.objective == r2.objective);
+    REQUIRE(r1.col_values == r2.col_values);
+}
+
+TEST_CASE("Warm-start: opportunistic mode produces valid solution", "[heuristic]") {
+    auto prob = make_small_problem();
+
+    // time_budget_ms > 0 triggers opportunistic (non-deterministic) mode
+    auto result = rcspp::heuristic::build_warm_start(prob, 50, 100.0);
+
+    REQUIRE(result.objective < std::numeric_limits<double>::max());
+    REQUIRE(result.col_values.size() ==
+            static_cast<size_t>(prob.num_edges() + prob.num_nodes()));
+    REQUIRE(result.col_values[prob.num_edges() + prob.source()] == 1.0);
 }
 
