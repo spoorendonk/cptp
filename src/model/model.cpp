@@ -266,6 +266,15 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.build_formulation();
 
     // Hyperplane branching: dynamic constraint branching
+    static constexpr std::string_view valid_modes[] = {
+        "off", "pairs", "clusters", "demand", "cardinality", "all"
+    };
+    if (std::find(std::begin(valid_modes), std::end(valid_modes), branch_hyper)
+            == std::end(valid_modes)) {
+        logger_.log("Warning: unknown branch_hyper mode '{}', using 'off'",
+                    branch_hyper);
+        branch_hyper = "off";
+    }
     if (branch_hyper != "off") {
         const int32_t n = bridge.num_nodes();
         const int32_t y_off = bridge.y_offset();
@@ -299,7 +308,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                     // Deduplicate: only add (min, max) pairs
                     int32_t lo = std::min(i, best_j);
                     int32_t hi = std::max(i, best_j);
-                    if (!paired[lo] || !paired[hi]) {
+                    if (!paired[lo] && !paired[hi]) {
                         rf_pairs.push_back({lo, hi});
                         paired[lo] = true;
                         paired[hi] = true;
@@ -359,7 +368,8 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
 
         HighsUserSeparator::setBranchingCallback(
-            [y_off, n, demands = std::move(demands), branch_hyper,
+            [y_off, n, source = problem_.source(),
+             demands = std::move(demands), branch_hyper,
              rf_pairs = std::move(rf_pairs),
              clusters = std::move(clusters)](
                 const HighsMipSolver& mipsolver)
@@ -406,6 +416,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                     HighsUserSeparator::HyperplaneCandidate c;
                     c.name = "demand";
                     for (int32_t i = 0; i < n; ++i) {
+                        if (i == source) continue;  // skip depot
                         if (demands[i] > 0) {
                             c.indices.push_back(y_off + i);
                             c.values.push_back(demands[i]);
@@ -417,6 +428,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                     HighsUserSeparator::HyperplaneCandidate c;
                     c.name = "cardinality";
                     for (int32_t i = 0; i < n; ++i) {
+                        if (i == source) continue;  // skip depot
                         c.indices.push_back(y_off + i);
                         c.values.push_back(1.0);
                     }
@@ -424,9 +436,6 @@ SolveResult Model::solve(const SolverOptions& options) {
                 }
                 return result;
             });
-
-        // Disable HiGHS strong branching (we do our own)
-        highs.setOptionValue("mip_pscost_minreliable", 0);
     }
 
     bridge.install_separators();
@@ -444,6 +453,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     highs.run();
+
+    // Clear static callbacks/state to avoid leaking between solves
+    HighsUserSeparator::clearCallback();
 
     auto result = bridge.extract_result();
     result.time_seconds = timer.elapsed_seconds();
