@@ -124,7 +124,7 @@ parallel preprocessing phase:
 tbb::task_group
 ├─ forward_labeling(problem, source)    → fwd_bounds
 ├─ backward_labeling(problem, target)   → bwd_bounds  (same as fwd for tour)
-└─ build_warm_start(problem, budget)    → warm_start solution
+└─ build_initial_solution(problem, budget)    → initial solution
 ```
 
 These bounds serve double duty:

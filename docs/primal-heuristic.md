@@ -1,11 +1,12 @@
-# Warm-Start Heuristic
+# Primal Heuristic
 
-File: `src/heuristic/warm_start.h` (header-only)
+File: `src/heuristic/primal_heuristic.h` (header-only)
 
 ## Purpose
 
-Provides an initial feasible solution to HiGHS via `setSolution()` before MIP solving.
-A good primal bound prunes more of the B&B tree early.
+Two heuristic components:
+1. **Initial solution** (`build_initial_solution`): runs before MIP solve on the complete graph, provides an initial feasible solution to HiGHS via `setSolution()`
+2. **LP-guided callback** (`lp_guided_heuristic`): runs during MIP solve via `kCallbackMipUserSolution`, builds reduced graphs from LP relaxation values and runs construction + local search on them
 
 ## Algorithm
 
@@ -42,36 +43,73 @@ After construction, run improving moves until no improvement found (max 200 iter
 
 First-improvement strategy: accept the first improving move found, restart the pass.
 
+### Reduced graph
+
+For the LP-guided callback, construction and local search operate on a **reduced graph** — a subset of the original problem's edges and nodes, selected based on LP relaxation values. The `edge_active` mask is threaded through `find_edge`, `edge_cost`, `greedy_insert`, and `local_search`; inactive edges return cost=infinity and are skipped.
+
+Three reduction strategies are used concurrently:
+
+**Strategy A: LP-value threshold**
+- Include edges with `x_e > 0.1` and all edges incident to nodes with `y_i > 0.5`
+- Simple, preserves edges the LP uses + neighborhood around visited nodes
+
+**Strategy B: RINS-style agreement**
+- Include edges where LP and incumbent agree: both `> 0.5` or both `< 0.5`
+- Falls back to Strategy A when no incumbent exists
+- Searches near where LP and best solution agree
+
+**Strategy C: Neighborhood expansion**
+- Seed: edges with `x_e > 0.3`
+- Expand 1-hop: add all edges incident to any node touched by seed edges
+- Gives a connected neighborhood around the LP support
+
+All strategies: source/target always active.
+
 ### Parallel restarts (TBB)
 
 Multiple workers run construction + local search concurrently:
-- Each worker picks the next ordering (deterministic first, then random shuffles)
+- Each worker picks the next strategy (round-robin) and ordering
+- First round per strategy: LP-weighted ordering (sort by `y_lp` descending, break ties by profit/demand ratio)
+- Subsequent rounds: random shuffles within each strategy
 - All workers share a best-known solution (mutex-protected)
 - Workers run until a time budget expires
 
-Time budget: `min(500ms, num_nodes * 10ms)`
-- 4 nodes: 40ms
-- 45 nodes: 450ms
-- 50+ nodes: 500ms
+Initial heuristic budget: `min(500ms, num_nodes * 10ms)`.
+LP-guided callback budget: 20ms per invocation (configurable).
 
 ## Integration
+
+### Initial solution (pre-solve)
 
 In `Model::solve()` (model.cpp):
 
 ```cpp
-auto warm_start = heuristic::build_warm_start(problem_, budget_ms);
-// warm_start.objective = travel_cost - collected_profit
-// warm_start.col_values = solution vector (edges + nodes)
-
+auto warm_start = heuristic::build_initial_solution(problem_, budget_ms);
 HighsSolution start;
 start.value_valid = true;
 start.col_value = std::move(warm_start.col_values);
 highs.setSolution(start);
 ```
 
+### LP-guided callback (during solve)
+
+Registered via `HiGHSBridge::install_heuristic_callback()`:
+
+1. Separator callback caches LP relaxation values (`x_vals`, `y_vals`) under a mutex
+2. `kCallbackMipUserSolution` callback reads cached LP values, builds reduced graphs, runs heuristic
+3. If improved solution found: `data_in->user_has_solution = true; data_in->user_solution = result`
+4. HiGHS validates via `solutionFeasible()` + our SEC feasibility check in `addIncumbent()`
+
+The callback skips the initial `kExternalMipSolutionQueryOriginAfterSetup` query (pre-solve heuristic already ran).
+
 The solution vector has size `num_edges + num_nodes`:
 - `sol[e] = 1` for edges in the route
 - `sol[m + v] = 1` for visited nodes (including source/target)
+
+### CLI options
+
+- `--heuristic_callback true/false` (default: true) — enable/disable LP-guided callback
+- `--heuristic_budget_ms N` (default: 20) — time budget per callback invocation in ms
 
 ## Performance
 

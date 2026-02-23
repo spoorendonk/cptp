@@ -7,7 +7,7 @@
 #include <tbb/task_group.h>
 #include <tbb/parallel_for.h>
 
-#include "heuristic/warm_start.h"
+#include "heuristic/primal_heuristic.h"
 #include "preprocess/edge_elimination.h"
 #include "sep/sec_separator.h"
 #include "sep/rci_separator.h"
@@ -111,6 +111,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool all_pairs_propagation = false;
     bool enable_rglm = false;
     bool submip_separation = true;
+    bool heuristic_callback = true;
+    double heuristic_budget_ms = 20.0;
+    int heuristic_strategy = 0;
     for (const auto& [key, value] : options) {
         if (key == "separation_interval") {
             separation_interval = std::stoi(value);
@@ -136,6 +139,18 @@ SolveResult Model::solve(const SolverOptions& options) {
             submip_separation = (value == "true" || value == "1");
             continue;
         }
+        if (key == "heuristic_callback") {
+            heuristic_callback = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "heuristic_budget_ms") {
+            heuristic_budget_ms = std::stod(value);
+            continue;
+        }
+        if (key == "heuristic_strategy") {
+            heuristic_strategy = std::stoi(value);
+            continue;
+        }
         auto status = highs.setOptionValue(key, value);
         if (status != HighsStatus::kOk) {
             std::cerr << "Warning: HiGHS rejected option " << key
@@ -143,10 +158,10 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
-    // Run preprocessing and warm-start in parallel:
+    // Run preprocessing and initial heuristic in parallel:
     // - forward_labeling (source = depot)
     // - backward_labeling (target = depot, same as forward for undirected)
-    // - build_warm_start
+    // - build_initial_solution
     const int32_t source = problem_.source();
     const int32_t target = problem_.target();
     // correction = profit(source) when s == t (tour: depot profit double-subtracted)
@@ -155,7 +170,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     const int32_t n = problem_.num_nodes();
     std::vector<double> fwd_bounds, bwd_bounds;
     std::vector<double> all_pairs;
-    heuristic::WarmStartResult warm_start;
+    heuristic::HeuristicResult warm_start;
     double warm_start_ub = std::numeric_limits<double>::infinity();
 
     {
@@ -177,7 +192,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                 });
             });
             tg.run([&] {
-                warm_start = heuristic::build_warm_start(problem_, budget_ms);
+                warm_start = heuristic::build_initial_solution(problem_, budget_ms);
             });
             tg.wait();
 
@@ -207,7 +222,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                 });
             }
             tg.run([&] {
-                warm_start = heuristic::build_warm_start(problem_, budget_ms);
+                warm_start = heuristic::build_initial_solution(problem_, budget_ms);
             });
             tg.wait();
 
@@ -242,8 +257,12 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.build_formulation();
     bridge.install_separators();
     bridge.install_propagator();
+    bridge.set_heuristic_callback(heuristic_callback);
+    bridge.set_heuristic_budget_ms(heuristic_budget_ms);
+    bridge.set_heuristic_strategy(heuristic_strategy);
+    bridge.install_heuristic_callback();
 
-    // Pass warm-start solution to HiGHS
+    // Pass initial solution to HiGHS
     {
         HighsSolution start;
         start.value_valid = true;

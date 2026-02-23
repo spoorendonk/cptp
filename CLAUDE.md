@@ -46,7 +46,7 @@ src/core/        — Problem definition, IO parsers (TSPLIB, numeric .txt), Dini
 src/preprocess/  — Demand-reachability and edge elimination via capacity-aware labeling
 src/sep/         — Solver-independent separators (SEC, RCI, Multistar, RGLM, Comb)
 src/model/       — HiGHS integration (Model, HiGHSBridge, propagator)
-src/heuristic/   — Warm-start construction + local search
+src/heuristic/   — Primal heuristics (initial solution + LP-guided callback)
 src/cli/         — CLI tool (rcspp-solve)
 src/util/        — Utilities (Timer)
 python/          — nanobind Python bindings
@@ -62,7 +62,8 @@ docs/            — Algorithm documentation
 - `rcspp::sep::Separator` — Base class for cut separators
 - `rcspp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow (path-aware)
 - `rcspp::gomory_hu_tree` — Gusfield's algorithm, shared across separators
-- `rcspp::heuristic::build_warm_start` — Parallel greedy + local search heuristic
+- `rcspp::heuristic::build_initial_solution` — Pre-solve greedy + local search heuristic
+- `rcspp::heuristic::lp_guided_heuristic` — LP-guided callback heuristic (reduced graph)
 
 ## Tour vs s-t path
 

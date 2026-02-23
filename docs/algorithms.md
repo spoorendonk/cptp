@@ -44,7 +44,7 @@ Load instance
 Preprocessing (parallel via TBB)
     |-- Forward labeling (bounds from source)
     |-- Backward labeling (bounds from target; same as forward for tour)
-    '-- Warm-start heuristic (greedy + local search)
+    '-- Initial heuristic (greedy + local search)
     |
     v
 Build MIP formulation
@@ -57,7 +57,8 @@ Install HiGHS callbacks
     |-- User separator   --> separation.md
     |-- Feasibility check (SEC on incumbents, with sub-MIP column mapping)
     |-- Sub-MIP root SEC separation (column mapping via undoPrimal)
-    '-- Domain propagator --> domain-propagator.md
+    |-- Domain propagator --> domain-propagator.md
+    '-- LP-guided heuristic callback --> primal-heuristic.md
     |
     v
 HiGHS MIP solve
@@ -89,15 +90,17 @@ See [domain-propagator.md](domain-propagator.md) for full details.
 
 Demand-reachability filtering and labeling-based edge elimination. See [preprocessing.md](preprocessing.md) for full details.
 
-## Warm-Start Heuristic
+## Primal Heuristic
 
-Parallel construction + local search heuristic using Intel TBB. See [warm-start-heuristic.md](warm-start-heuristic.md) for full details.
+Parallel construction + local search heuristic using Intel TBB. See [primal-heuristic.md](primal-heuristic.md) for full details.
 
-**Construction**: Greedy cheapest-insertion with three deterministic orderings (profit/demand ratio, absolute profit, distance from source) plus random restarts. For paths, the initial route is `[source, target]` (open); for tours, `[depot, depot]` (closed).
+**Initial solution** (`build_initial_solution`): Greedy cheapest-insertion with three deterministic orderings (profit/demand ratio, absolute profit, distance from source) plus random restarts on the complete graph. Time budget: `min(500ms, num_nodes * 10ms)`.
+
+**LP-guided callback** (`lp_guided_heuristic`): During MIP solve, builds reduced graphs from LP relaxation values using three strategies (LP-value threshold, RINS-style agreement, neighborhood expansion) and runs construction + local search on each. Registered via `kCallbackMipUserSolution`. Time budget: 20ms per invocation.
 
 **Local search**: 2-opt, or-opt (1/2/3 chains), node drop, node add with first-improvement.
 
-**Parallelism**: Multiple TBB workers run independent construction+search with a shared best solution. Time budget: `min(500ms, num_nodes * 10ms)`.
+**Parallelism**: Multiple TBB workers run independent construction+search with a shared best solution.
 
 ## References
 

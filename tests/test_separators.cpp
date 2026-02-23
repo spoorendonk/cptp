@@ -5,7 +5,7 @@
 #include "core/gomory_hu.h"
 #include "core/io.h"
 #include "core/problem.h"
-#include "heuristic/warm_start.h"
+#include "heuristic/primal_heuristic.h"
 #include "preprocess/edge_elimination.h"
 #include "preprocess/reachability.h"
 #include "sep/sec_separator.h"
@@ -576,9 +576,9 @@ TEST_CASE("Edge elimination: path uses bidirectional labeling", "[preprocess][pa
 // Warm-start heuristic
 // =====================================================================
 
-TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
+TEST_CASE("Primal heuristic: tour produces closed loop", "[heuristic]") {
     auto prob = make_small_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_initial_solution(prob, 50.0);
 
     // Should produce a valid solution
     REQUIRE(result.objective < std::numeric_limits<double>::max());
@@ -589,9 +589,9 @@ TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
     REQUIRE(result.col_values[prob.num_edges() + prob.source()] == 1.0);
 }
 
-TEST_CASE("Warm-start: path produces valid open path", "[heuristic][path]") {
+TEST_CASE("Primal heuristic: path produces valid open path", "[heuristic][path]") {
     auto prob = make_small_path_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_initial_solution(prob, 50.0);
 
     REQUIRE(result.objective < std::numeric_limits<double>::max());
 
