@@ -322,7 +322,7 @@ struct HeuristicResult {
 // ─── Graph reduction strategies ───────────────────────────────────────────
 
 /// Strategy A: LP-value threshold.
-/// Include edges with x_e > threshold and all edges incident to nodes with y_i > node_threshold.
+/// Include edges with x_e > threshold + edges between pairs of nodes with y_i > node_threshold.
 inline ReducedGraph reduce_lp_threshold(const Problem& prob,
                                         std::span<const double> x_lp,
                                         std::span<const double> y_lp,
@@ -373,7 +373,7 @@ inline ReducedGraph reduce_rins(const Problem& prob,
     const int32_t n = prob.num_nodes();
 
     // Fall back to Strategy A if no incumbent
-    if (incumbent.empty()) {
+    if (incumbent.empty() || static_cast<int>(incumbent.size()) < m + n) {
         return reduce_lp_threshold(prob, x_lp, y_lp);
     }
 
@@ -574,6 +574,8 @@ inline HeuristicResult lp_guided_heuristic(
     std::vector<const ReducedGraph*> strategies;
     for (auto& g : graphs) strategies.push_back(&g);
     const int num_strategies = static_cast<int>(strategies.size());
+    if (num_strategies == 0)
+        return {{}, std::numeric_limits<double>::max()};
 
     // Build customer lists per strategy (only active nodes)
     std::vector<std::vector<int32_t>> strategy_customers(num_strategies);
