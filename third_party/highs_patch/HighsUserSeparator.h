@@ -14,11 +14,10 @@
 #include "mip/HighsMipSolver.h"
 
 /// User-defined separator injected into HiGHS's separation loop.
-/// Uses a singleton callback registry so the callback can be set from
-/// outside HiGHS before calling run().
+/// Uses thread-local callback storage so multiple Highs instances can
+/// run concurrently on different threads without interfering.
 ///
-/// The static members are defined in HighsUserSeparator.cpp (part of libhighs)
-/// to ensure a single definition across the entire program.
+/// Thread-local variables are defined in HighsUserSeparator.cpp.
 class HighsUserSeparator : public HighsSeparator {
  public:
   using Callback = std::function<void(const HighsLpRelaxation& lpRelaxation,
@@ -95,13 +94,13 @@ class HighsUserSeparator : public HighsSeparator {
                           HighsTransformedLp& /*transLp*/,
                           HighsCutPool& cutpool) override;
 
-  /// Set the global user separator callback. Call before Highs::run().
+  /// Set the thread-local user separator callback. Call before Highs::run().
   static void setCallback(Callback cb);
 
-  /// Set the global solution feasibility check. Call before Highs::run().
+  /// Set the thread-local solution feasibility check. Call before Highs::run().
   static void setFeasibilityCheck(FeasibilityCheck cb);
 
-  /// Clear all global callbacks.
+  /// Clear all thread-local callbacks.
   static void clearCallback();
 
   /// Set the global branching callback. Call before Highs::run().
@@ -123,7 +122,7 @@ class HighsUserSeparator : public HighsSeparator {
   /// Returns true if no check is registered or if the solution passes.
   static bool isFeasible(const std::vector<double>& sol);
 
-  /// 3-tier evaluation pipeline: dual pre-score → pseudocost → sequential SB.
+  /// 3-tier evaluation pipeline: dual pre-score -> pseudocost -> sequential SB.
   /// Returns index of winning candidate, or -1 if variable branching wins.
   static int evaluateCandidates(
       std::vector<HyperplaneCandidate>& candidates,
@@ -131,7 +130,7 @@ class HighsUserSeparator : public HighsSeparator {
       const HighsMipSolver& mipsolver,
       int depth);
 
-  // ── Hyperplane branching stack/pool management ──
+  // -- Hyperplane branching stack/pool management --
 
   /// Allocate a new HyperplaneData entry in the pool. Returns its index.
   static HighsInt allocHyperplaneData();
@@ -157,8 +156,7 @@ class HighsUserSeparator : public HighsSeparator {
   static void clearStack();
 
  private:
-  static Callback callback_;
-  static FeasibilityCheck feasibility_check_;
+  // callback_ and feasibility_check_ are thread_local in HighsUserSeparator.cpp
   static BranchingCallback branching_callback_;
   static StrongBranchConfig strong_branch_config_;
   static std::mutex mutex_;

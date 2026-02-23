@@ -6,9 +6,14 @@
 #include <cmath>
 #include <numeric>
 
-// Static member definitions — single copy linked into libhighs.
-HighsUserSeparator::Callback HighsUserSeparator::callback_;
-HighsUserSeparator::FeasibilityCheck HighsUserSeparator::feasibility_check_;
+// Thread-local callback storage — each thread gets its own copy,
+// enabling concurrent Highs instances on different threads.
+namespace {
+thread_local HighsUserSeparator::Callback callback_;
+thread_local HighsUserSeparator::FeasibilityCheck feasibility_check_;
+}  // namespace
+
+// Static member definitions for branching/hyperplane features.
 HighsUserSeparator::BranchingCallback HighsUserSeparator::branching_callback_;
 HighsUserSeparator::StrongBranchConfig HighsUserSeparator::strong_branch_config_;
 std::mutex HighsUserSeparator::mutex_;
@@ -22,24 +27,20 @@ void HighsUserSeparator::separateLpSolution(
     HighsLpAggregator& /*lpAggregator*/,
     HighsTransformedLp& /*transLp*/,
     HighsCutPool& cutpool) {
-  std::lock_guard<std::mutex> lock(mutex_);
   if (callback_) {
     callback_(lpRelaxation, cutpool, lpRelaxation.getMipSolver());
   }
 }
 
 void HighsUserSeparator::setCallback(Callback cb) {
-  std::lock_guard<std::mutex> lock(mutex_);
   callback_ = std::move(cb);
 }
 
 void HighsUserSeparator::setFeasibilityCheck(FeasibilityCheck cb) {
-  std::lock_guard<std::mutex> lock(mutex_);
   feasibility_check_ = std::move(cb);
 }
 
 void HighsUserSeparator::clearCallback() {
-  std::lock_guard<std::mutex> lock(mutex_);
   callback_ = nullptr;
   feasibility_check_ = nullptr;
   branching_callback_ = nullptr;
@@ -68,12 +69,10 @@ HighsUserSeparator::getStrongBranchConfig() {
 }
 
 bool HighsUserSeparator::hasCallback() {
-  std::lock_guard<std::mutex> lock(mutex_);
   return static_cast<bool>(callback_);
 }
 
 bool HighsUserSeparator::isFeasible(const std::vector<double>& sol) {
-  std::lock_guard<std::mutex> lock(mutex_);
   if (!feasibility_check_) return true;
   return feasibility_check_(sol);
 }
