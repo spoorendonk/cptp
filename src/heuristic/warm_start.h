@@ -100,9 +100,9 @@ inline void local_search(const Problem& prob,
                          double& remaining_cap,
                          int max_iter = 200) {
     const int32_t n = prob.num_nodes();
-    // Minimum tour size for node drop: tours need >= 4 (depot + 2 customers + depot),
-    // paths need >= 3 (source + 1 customer + target).
-    const int32_t min_drop_size = prob.is_tour() ? 5 : 4;
+    // Minimum tour size for node drop: tours need >= 3 (depot + 1 customer + depot,
+    // using x_e=2 on the depot edge), paths need >= 3 (source + 1 customer + target).
+    const int32_t min_drop_size = prob.is_tour() ? 4 : 4;
 
     for (int iter = 0; iter < max_iter; ++iter) {
         bool improved = false;
@@ -228,10 +228,10 @@ single_restart(const Problem& prob,
     greedy_insert(prob, tour, in_tour, remaining_cap, order);
 
     // Ensure enough customers for a valid solution.
-    // Tour needs ≥ 4 elements [depot, a, b, depot] (binary edges: can't use same edge twice).
+    // Tour needs ≥ 3 elements [depot, a, depot] (depot edges allow x_e=2).
     // Path needs ≥ 2 elements [source, target] (always valid, edge source→target).
-    int32_t min_valid_size = is_tour ? 4 : 2;
-    int32_t min_construction_size = is_tour ? 3 : 2;
+    int32_t min_valid_size = is_tour ? 3 : 2;
+    int32_t min_construction_size = is_tour ? 2 : 2;
 
     while (static_cast<int32_t>(tour.size()) <= min_construction_size && !customers.empty()) {
         double bd = std::numeric_limits<double>::max();
@@ -412,7 +412,7 @@ inline WarmStartResult build_warm_start(const Problem& prob,
     }
 
     // --- Convert best tour to MIP solution vector ---
-    int32_t min_valid_size = prob.is_tour() ? 4 : 2;
+    int32_t min_valid_size = prob.is_tour() ? 3 : 2;
     std::vector<double> sol(m + n, 0.0);
     sol[m + source] = 1.0;
     sol[m + target] = 1.0;
@@ -422,7 +422,7 @@ inline WarmStartResult build_warm_start(const Problem& prob,
             sol[m + best_tour[i]] = 1.0;
         for (size_t i = 0; i + 1 < best_tour.size(); ++i) {
             int32_t e = detail::find_edge(g, best_tour[i], best_tour[i + 1]);
-            if (e >= 0) sol[e] = 1.0;
+            if (e >= 0) sol[e] += 1.0;  // += to handle x_e=2 in 2-node tours
         }
     }
 
