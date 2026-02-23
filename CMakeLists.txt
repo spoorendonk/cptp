@@ -89,10 +89,8 @@ if(RCSPP_BUILD_TESTS)
     catch_discover_tests(rcspp_algo_tests)
 
     if(RCSPP_BUILD_HIGHS)
-        # Full integration tests (need HiGHS)
+        # HiGHS integration tests (only solver-dependent tests)
         add_executable(rcspp_tests
-            tests/test_max_flow.cpp
-            tests/test_separators.cpp
             tests/test_model.cpp
             tests/test_optimal.cpp
             tests/test_propagator.cpp

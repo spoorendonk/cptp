@@ -21,7 +21,7 @@ namespace rcspp::preprocess {
 /// Usage:
 ///   BoundPropagator prop(prob, fwd, bwd, correction);
 ///   auto edges = prop.sweep(upper_bound, col_upper);
-///   auto nodes = prop.sweep_nodes(col_upper, num_edges);
+///   auto nodes = prop.sweep_nodes(col_upper, y_offset);
 ///   auto chain = prop.propagate_fixed_edge(e, upper_bound, col_upper);
 class BoundPropagator {
  public:
@@ -44,9 +44,10 @@ class BoundPropagator {
 
     /// After a sweep, find nodes whose all incident edges are fixed to 0.
     /// col_upper covers edges [0, m) and nodes [m, m+n).
-    /// Returns node variable indices (m + i) that can be fixed to 0.
+    /// y_offset is the column offset for node variables (typically = num_edges).
+    /// Returns node variable indices (y_offset + i) that can be fixed to 0.
     std::vector<int32_t> sweep_nodes(std::span<const double> col_upper,
-                                     int32_t edge_offset) const;
+                                     int32_t y_offset) const;
 
     /// Trigger B: given edge e fixed to 1, return other edges that can be
     /// fixed to 0.  col_upper[e] is current upper bound of edge variable e.

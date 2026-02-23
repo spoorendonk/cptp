@@ -1,7 +1,6 @@
 #include "sep/separation_oracle.h"
 
 #include <algorithm>
-#include <chrono>
 #include <vector>
 
 #include <tbb/task_group.h>
@@ -38,7 +37,6 @@ std::vector<Cut> SeparationOracle::separate(
 
     const auto& graph = prob_.graph();
     const int32_t n = prob_.num_nodes();
-    const int32_t m = prob_.num_edges();
 
     // Build support graph from fractional LP values
     constexpr double graph_tol = 1e-6;

@@ -75,13 +75,13 @@ std::vector<int32_t> BoundPropagator::sweep(
 
 std::vector<int32_t> BoundPropagator::sweep_nodes(
     std::span<const double> col_upper,
-    int32_t edge_offset) const {
+    int32_t y_offset) const {
 
     const int32_t n = prob_.num_nodes();
     std::vector<int32_t> fixings;
 
     for (int32_t i = 0; i < n; ++i) {
-        if (col_upper[edge_offset + i] < 0.5) continue;
+        if (col_upper[y_offset + i] < 0.5) continue;
         bool all_fixed = true;
         for (const auto& [e, nb] : adjacency_[i]) {
             if (col_upper[e] > 0.5) {
@@ -90,7 +90,7 @@ std::vector<int32_t> BoundPropagator::sweep_nodes(
             }
         }
         if (all_fixed) {
-            fixings.push_back(edge_offset + i);
+            fixings.push_back(y_offset + i);
         }
     }
 
@@ -102,11 +102,6 @@ std::vector<int32_t> BoundPropagator::propagate_fixed_edge(
     double upper_bound,
     std::span<const double> col_upper) const {
 
-    const int32_t m = prob_.num_edges();
-    const int32_t n = prob_.num_nodes();
-    const auto& f = fwd_bounds_;
-    const auto& b = bwd_bounds_;
-
     int32_t a = prob_.graph().edge_source(edge);
     int32_t i = prob_.graph().edge_target(edge);
 
@@ -114,6 +109,8 @@ std::vector<int32_t> BoundPropagator::propagate_fixed_edge(
 
     if (!all_pairs_.empty()) {
         // All-pairs Trigger B: scan ALL unfixed edges
+        const int32_t m = prob_.num_edges();
+        const int32_t n = prob_.num_nodes();
         const int32_t depot = prob_.depot();
         const double d_depot_a = all_pairs_[depot * n + a];
         const double d_depot_i = all_pairs_[depot * n + i];
@@ -145,6 +142,8 @@ std::vector<int32_t> BoundPropagator::propagate_fixed_edge(
         }
     } else {
         // Fallback: neighbor-only scan (original Trigger B)
+        const auto& f = fwd_bounds_;
+        const auto& b = bwd_bounds_;
         double cost_a_to_i = f[a] + edge_costs_[edge] - profits_[i];
 
         for (const auto& [ej, j] : adjacency_[i]) {

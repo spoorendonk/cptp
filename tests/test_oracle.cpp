@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <limits>
+#include <memory>
 
 #include "core/problem.h"
 #include "preprocess/bound_propagator.h"
 #include "preprocess/edge_elimination.h"
+#include "sep/sec_separator.h"
 #include "sep/separation_oracle.h"
 
 namespace {
@@ -307,4 +309,100 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge (neighbor-only)", "[propagator]
         if (e == 3) fixes_expensive = true;
     }
     REQUIRE(fixes_expensive);
+}
+
+TEST_CASE("BoundPropagator: propagate_fixed_edge (all-pairs)", "[propagator]") {
+    // 4 nodes, tour. Same setup but with all-pairs bounds.
+    // The all-pairs path scans ALL edges (not just neighbors), so it should
+    // also eliminate the expensive edge {1,2} even though it's not adjacent
+    // to the fixed edge {0,3}.
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    // Make {1,2} very expensive — any tour through it costs >= 100
+    std::vector<double> costs = {1, 1, 1, 100, 1, 1};
+    std::vector<double> profits = {0, 0, 0, 0};
+    std::vector<double> demands = {0, 0, 0, 0};
+    prob.build(4, edges, costs, profits, demands, 1e18, 0, 0);
+
+    const int32_t n = prob.num_nodes();
+    const int32_t m = prob.num_edges();
+
+    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+
+    // Build all-pairs bounds: run forward labeling from each node
+    std::vector<double> all_pairs(n * n, std::numeric_limits<double>::max());
+    for (int32_t s = 0; s < n; ++s) {
+        auto bounds = rcspp::preprocess::forward_labeling(prob, s);
+        for (int32_t v = 0; v < n; ++v) {
+            all_pairs[s * n + v] = bounds[v];
+        }
+    }
+
+    rcspp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
+    prop.set_all_pairs_bounds(all_pairs);
+    REQUIRE(prop.has_all_pairs_bounds());
+
+    std::vector<double> col_upper(m, 1.0);
+
+    // Fix edge 2 ({0,3}) to 1. With tight UB=5, any tour through {0,3}
+    // AND {1,2} costs at least 100+... > 5, so {1,2} should be eliminated.
+    // This tests the all-pairs code path (edge {1,2} is NOT adjacent to {0,3}).
+    double upper_bound = 5.0;
+    auto fixings = prop.propagate_fixed_edge(2, upper_bound, col_upper);
+
+    bool fixes_expensive = false;
+    for (int32_t e : fixings) {
+        if (e == 3) fixes_expensive = true;  // edge {1,2}
+    }
+    REQUIRE(fixes_expensive);
+}
+
+// =====================================================================
+// SeparationOracle: accumulation behavior
+// =====================================================================
+
+TEST_CASE("SeparationOracle: add_default_separators is cumulative", "[oracle]") {
+    auto prob = make_small_problem();
+
+    rcspp::sep::SeparationOracle oracle(prob);
+    REQUIRE(oracle.separators().size() == 0);
+
+    oracle.add_default_separators();
+    REQUIRE(oracle.separators().size() == 4);
+
+    // Calling again adds another 4
+    oracle.add_default_separators();
+    REQUIRE(oracle.separators().size() == 8);
+}
+
+TEST_CASE("SeparationOracle: individual separator addition", "[oracle]") {
+    auto prob = make_small_problem();
+
+    rcspp::sep::SeparationOracle oracle(prob);
+    oracle.add_separator(std::make_unique<rcspp::sep::SECSeparator>());
+    REQUIRE(oracle.separators().size() == 1);
+
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    // Fractional solution with disconnected subtour — SEC alone should find cuts
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+    y_values[0] = 1.0;
+    y_values[1] = 0.5;
+    y_values[2] = 0.5;
+    y_values[3] = 0.5;
+
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if (u == 0 && v == 1) x_values[e] = 1.0;
+        if (u == 2 && v == 3) x_values[e] = 1.0;
+    }
+
+    auto cuts = oracle.separate(x_values, y_values, 0, m);
+    REQUIRE(!cuts.empty());
 }
