@@ -1,0 +1,5 @@
+build/
+.git/
+*.pdf
+docs/*.pdf
+benchmarks/results/

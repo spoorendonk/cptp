@@ -1,0 +1,89 @@
+name: LLM Code Analysis
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Analysis mode'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto     # Build+test, analyze only if failures/warnings
+          - review   # Always run LLM code review on recent changes
+
+concurrency:
+  group: llm-analysis
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Build analysis image
+        run: docker build -t rcspp-llm -f ci/Dockerfile .
+
+      - name: Run analysis
+        id: analysis
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/workspace" \
+            rcspp-llm "${{ github.event.inputs.mode }}" \
+            | tee analysis.log
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+          # Parse structured output from the container
+          if grep -q '^ISSUE_TITLE=' analysis.log; then
+            grep '^ISSUE_TITLE=' analysis.log | head -1 >> "$GITHUB_OUTPUT"
+            sed -n '/^ISSUE_BODY<<EOF$/,/^EOF$/{ /^ISSUE_BODY<<EOF$/d; /^EOF$/d; p; }' analysis.log > issue_body.md
+            echo "has_issue=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_issue=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open issue for errors
+        if: steps.analysis.outputs.has_issue == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const title = `${{ steps.analysis.outputs.ISSUE_TITLE }}`;
+            const body = fs.readFileSync('issue_body.md', 'utf8');
+
+            // Avoid duplicate issues
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'llm-analysis',
+              per_page: 20,
+            });
+            const dup = existing.find(i => i.title === title);
+            if (dup) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: dup.number,
+                body: `Updated analysis (${new Date().toISOString()}):\n\n${body}`,
+              });
+              console.log(`Updated existing issue #${dup.number}`);
+              return;
+            }
+
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['llm-analysis'],
+            });
+            console.log(`Created issue #${issue.number}`);
