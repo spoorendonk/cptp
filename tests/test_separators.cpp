@@ -1023,6 +1023,10 @@ std::vector<double> compute_all_pairs(const rcspp::Problem& prob) {
 
 /// Build a 5-node tour problem where nodes 3 and 4 are very expensive to
 /// visit together (long detour), making the pair {3,4} infeasible.
+///
+/// Zero profits: ensures labeling lower bounds are tight (no cycling benefit).
+/// d[0][3] = d[0][4] = 50 (direct edges), d[3][4] = 50.
+/// Pair {3,4} lb = 50 + 50 + 50 + 0 = 150.
 rcspp::Problem make_spi_tour_problem() {
     rcspp::Problem prob;
     // 5 nodes: depot=0, customers=1,2,3,4. Complete graph (10 edges).
@@ -1032,25 +1036,30 @@ rcspp::Problem make_spi_tour_problem() {
         for (int j = i + 1; j < 5; ++j) {
             edges.push_back({i, j});
             // Make edges to/from nodes 3 and 4 very expensive (50 each),
-            // but edges among {0,1,2} cheap (1 each).
+            // but edges among {0,1,2} cheap (5 each).
             if (i >= 3 || j >= 3) {
                 costs.push_back(50.0);
             } else {
-                costs.push_back(1.0);
+                costs.push_back(5.0);
             }
         }
     }
 
-    // Small profits so nodes are attractive but costs dominate
-    std::vector<double> profits = {0, 5, 5, 5, 5};
+    // Zero profits: labeling = pure shortest path (no cycling incentive)
+    std::vector<double> profits = {0, 0, 0, 0, 0};
     std::vector<double> demands = {0, 1, 1, 1, 1};
-    double capacity = 10.0;  // large enough for all
+    double capacity = 10.0;
 
     prob.build(5, edges, costs, profits, demands, capacity, 0, 0);
     return prob;
 }
 
-/// Build a 5-node path problem (source=0, target=4) with expensive node pair.
+/// Build a 5-node path problem (source=0, target=4) with expensive detours.
+///
+/// Zero profits, so labeling bounds are tight.
+/// Cheap path: 0→1→2→3→4 costs 5+5+5+5=20.
+/// Detour edges cost 50, so visiting e.g. node 1 AND node 3 via expensive
+/// edges has a clear lower bound.
 rcspp::Problem make_spi_path_problem() {
     rcspp::Problem prob;
     std::vector<rcspp::Edge> edges;
@@ -1058,17 +1067,16 @@ rcspp::Problem make_spi_path_problem() {
     for (int i = 0; i < 5; ++i) {
         for (int j = i + 1; j < 5; ++j) {
             edges.push_back({i, j});
-            if ((i == 2 && j == 3) || (i == 3 && j == 4)) {
-                costs.push_back(1.0);  // cheap path: 0-1-2, 2-3, 3-4
-            } else if (i == 0 || j == 0 || i == 1 || j == 1) {
-                costs.push_back(1.0);  // cheap near source
+            // Linear chain 0-1-2-3-4 is cheap (5 each), everything else expensive
+            if (j == i + 1) {
+                costs.push_back(5.0);
             } else {
                 costs.push_back(50.0);
             }
         }
     }
 
-    std::vector<double> profits = {0, 5, 5, 5, 0};
+    std::vector<double> profits = {0, 0, 0, 0, 0};
     std::vector<double> demands = {0, 1, 1, 1, 0};
     double capacity = 10.0;
 
@@ -1268,6 +1276,7 @@ TEST_CASE("SPI separator: path problem pair cuts", "[spi][path]") {
 TEST_CASE("SPI separator: greedy extension finds set cuts", "[spi]") {
     // 7-node tour problem with a cluster of expensive nodes.
     // Depot=0, cheap cluster {1,2}, expensive cluster {3,4,5,6}.
+    // Zero profits: labeling = pure shortest path (no cycling incentive).
     // With tight UB, the separator should find set cuts like
     // y_3 + y_4 + y_5 <= 2, or larger sets.
     rcspp::Problem prob;
@@ -1278,14 +1287,14 @@ TEST_CASE("SPI separator: greedy extension finds set cuts", "[spi]") {
             edges.push_back({i, j});
             // Cheap edges among {0,1,2}, expensive to reach {3,4,5,6}
             if (i >= 3 || j >= 3) {
-                costs.push_back(30.0);
+                costs.push_back(50.0);
             } else {
-                costs.push_back(1.0);
+                costs.push_back(5.0);
             }
         }
     }
 
-    std::vector<double> profits = {0, 3, 3, 3, 3, 3, 3};
+    std::vector<double> profits = {0, 0, 0, 0, 0, 0, 0};
     std::vector<double> demands = {0, 1, 1, 1, 1, 1, 1};
     prob.build(7, edges, costs, profits, demands, 100.0, 0, 0);
 
@@ -1343,24 +1352,24 @@ TEST_CASE("SPI separator: greedy extension finds set cuts", "[spi]") {
 
 TEST_CASE("SPI separator: shrinking produces minimal sets", "[spi]") {
     // Verify that the shrink phase finds the smallest infeasible set.
-    // Build a problem where {3,4,5} is infeasible but {3,4} and {4,5} are not.
+    // Zero profits: labeling = pure shortest path (no cycling incentive).
     rcspp::Problem prob;
     std::vector<rcspp::Edge> edges;
     std::vector<double> costs;
     for (int i = 0; i < 6; ++i) {
         for (int j = i + 1; j < 6; ++j) {
             edges.push_back({i, j});
-            // All edges to nodes 3,4,5 cost 20
-            // Edges among {0,1,2} cost 1
+            // All edges to nodes 3,4,5 cost 30
+            // Edges among {0,1,2} cost 5
             if (i >= 3 || j >= 3) {
-                costs.push_back(20.0);
+                costs.push_back(30.0);
             } else {
-                costs.push_back(1.0);
+                costs.push_back(5.0);
             }
         }
     }
 
-    std::vector<double> profits = {0, 2, 2, 2, 2, 2};
+    std::vector<double> profits = {0, 0, 0, 0, 0, 0};
     std::vector<double> demands = {0, 1, 1, 1, 1, 1};
     prob.build(6, edges, costs, profits, demands, 100.0, 0, 0);
 

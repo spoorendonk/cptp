@@ -149,13 +149,15 @@ void greedy_grow(const Problem& prob,
 /// Shrink an infeasible set to a minimal infeasible subset.
 /// Repeatedly removes the node whose removal keeps lb highest above ub,
 /// preferring to remove low-y nodes (which increases cut violation).
+/// Will not shrink below min_size.
 void greedy_shrink(const Problem& prob,
                    std::span<const double> all_pairs,
                    double ub,
                    std::vector<int32_t>& set,
-                   std::span<const double> y_values) {
+                   std::span<const double> y_values,
+                   size_t min_size = 2) {
     bool improved = true;
-    while (improved && set.size() > 2) {
+    while (improved && set.size() > min_size) {
         improved = false;
         double best_lb = -kInf;
         size_t best_idx = 0;
@@ -298,8 +300,9 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
 
         if (static_cast<int32_t>(set.size()) <= 2) continue;  // pair already emitted
 
-        // Shrink: remove nodes to find minimal infeasible subset
-        greedy_shrink(prob, ctx.all_pairs, ub, set, ctx.y_values);
+        // Shrink: remove nodes to find minimal infeasible subset.
+        // min_size=3: don't shrink back to pairs (already emitted in Phase 1).
+        greedy_shrink(prob, ctx.all_pairs, ub, set, ctx.y_values, /*min_size=*/3);
 
         // Compute violation
         double sum_y = 0.0;
