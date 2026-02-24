@@ -404,23 +404,35 @@ model.solve({"all_pairs_propagation": "true"})
 
 ### Benchmark
 
-Tested on 20 SPPRCLIB instances (60s time limit), comparing `--all_pairs_propagation true`
-(SPI ON) vs baseline (SPI OFF):
+Tested on 20 SPPRCLIB instances, comparing `--all_pairs_propagation true`
+(SPI ON) vs baseline (SPI OFF).
+
+**60s time limit** (20 instances):
 
 | Metric | Value |
 |---|---|
 | Wins ON / OFF / Tie | 2 / 0 / 18 |
 
-Key observations:
+- **A-n60-k9-57**: Gap 37.6% → 24.7%. Better objective (-1000 vs -724) and
+  tighter bound.
+- **E-n101-k14-158**: Gap 5.85% → 5.22%. Better objective (-2539 vs -2127).
+- **B-n78-k10-70**: 21% faster (22.1s vs 28.1s) at same optimal.
+- Easy instances (<30s): negligible overhead (<1s).
 
-- **A-n60-k9-57**: Gap 37.6% → 24.7% (best improvement). SPI found better objective
-  (-1000 vs -724) and tighter bound (-25660 vs -27926).
-- **E-n101-k14-158**: Gap 5.85% → 5.22%. Better objective (-2539 vs -2127) with more
-  nodes explored (1268 vs 755), suggesting SPI cuts help pruning.
-- **B-n78-k10-70**: 21% faster (22.1s vs 28.1s) at same optimal, fewer wasted nodes.
-- Most easy instances (solved in <30s) show negligible overhead (<1s).
-- Hard instances (M-class, timeout) show neutral gap — SPI preprocessing cost is
-  amortized but cuts don't yet dominate on large instances.
+**300s time limit** (5 hardest instances):
+
+| Instance | OFF gap | ON gap | Notes |
+|---|---|---|---|
+| A-n60-k9-57 | 0% | 0% | Both optimal; OFF 128s, ON 138s |
+| A-n80-k10-14 | 0% | 0% | Both optimal; OFF 58s, ON 67s |
+| **E-n101-k14-158** | **1.78%** | **0.91%** | **SPI halves the gap** (bound -9965 → -6845) |
+| M-n121-k7-260 | ~0% | ~0% | Both near-optimal |
+| M-n151-k12-15 | ~0% | ~0% | Both near-optimal |
+
+SPI provides the largest benefit on the hardest unsolved instance (E-n101-k14-158),
+nearly halving the remaining gap by tightening the bound while exploring 22% more
+nodes (8929 vs 7331). On instances that solve to optimality, SPI adds ~10-15%
+preprocessing overhead but does not change the outcome.
 
 Sweep script: `benchmarks/experiment_spi.sh [time_limit]`
 
