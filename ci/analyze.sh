@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Main CI analysis entrypoint.
 # Builds the project, captures warnings/errors, runs tests,
-# then feeds failures to the local LLM for analysis.
+# then starts the LLM server and feeds failures for analysis.
 # Outputs structured ISSUE_TITLE / ISSUE_BODY for the GitHub workflow.
 set -euo pipefail
 
@@ -12,28 +12,57 @@ MODE="${1:-auto}"  # auto | review
 
 echo "=== rcspp LLM analysis (mode: $MODE) ==="
 
-# ── Start llama.cpp server in background ─────────────────────────────
+# ── Build (no LLM server yet — avoid resource contention) ───────────
+BUILD_DIR="/tmp/rcspp-build"
+BUILD_LOG=$(mktemp)
+echo "Building project..."
+BUILD_OK=true
+if ! cmake -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee "$BUILD_LOG"; then
+    BUILD_OK=false
+elif ! cmake --build "$BUILD_DIR" -j"$(nproc)" 2>&1 | tee -a "$BUILD_LOG"; then
+    BUILD_OK=false
+fi
+
+# Extract unique warning/error lines (skip notes, includes, duplicates)
+WARNINGS=$(grep -E '(warning|error):' "$BUILD_LOG" \
+    | grep -v '^In file included' \
+    | grep -v ': note:' \
+    | grep -v 'declared here' \
+    | sort -u \
+    | head -30 || true)
+
+# ── Test ─────────────────────────────────────────────────────────────
+TEST_LOG=$(mktemp)
+TEST_OK=true
+if [ "$BUILD_OK" = true ]; then
+    echo "Running algorithm tests..."
+    if [ -f "$BUILD_DIR/rcspp_algo_tests" ]; then
+        "$BUILD_DIR/rcspp_algo_tests" --reporter compact 2>&1 | tee "$TEST_LOG" || TEST_OK=false
+    fi
+    if [ -f "$BUILD_DIR/rcspp_tests" ]; then
+        echo "Running integration tests..."
+        "$BUILD_DIR/rcspp_tests" --reporter compact 2>&1 | tee -a "$TEST_LOG" || TEST_OK=false
+    fi
+fi
+
+TEST_FAILURES=$(grep -E '(FAILED|ERROR)' "$TEST_LOG" | head -50 || true)
+
+# ── Decide if we need LLM ───────────────────────────────────────────
+if [ "$MODE" = "auto" ] && [ "$BUILD_OK" = true ] && [ "$TEST_OK" = true ] && [ -z "$WARNINGS" ]; then
+    echo "Build and tests passed cleanly. No issues found."
+    exit 0
+fi
+
+# ── Start llama.cpp server (after build/test free up resources) ──────
 echo "Starting llama.cpp server..."
 llama-server \
     --model "$MODEL_PATH" \
     --port "$LLAMA_PORT" \
     --ctx-size "$CONTEXT_SIZE" \
-    --threads "$(nproc)" \
+    --threads 2 \
     --log-disable \
     &
 LLAMA_PID=$!
-
-for i in $(seq 1 30); do
-    if curl -sf "http://localhost:${LLAMA_PORT}/health" > /dev/null 2>&1; then
-        echo "llama.cpp server ready."
-        break
-    fi
-    if [ "$i" -eq 30 ]; then
-        echo "ERROR: llama.cpp server failed to start" >&2
-        exit 1
-    fi
-    sleep 1
-done
 
 cleanup() {
     kill "$LLAMA_PID" 2>/dev/null || true
@@ -41,33 +70,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# ── Build ────────────────────────────────────────────────────────────
-BUILD_LOG=$(mktemp)
-echo "Building project..."
-BUILD_OK=true
-if ! cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee "$BUILD_LOG"; then
-    BUILD_OK=false
-elif ! cmake --build build -j"$(nproc)" 2>&1 | tee -a "$BUILD_LOG"; then
-    BUILD_OK=false
-fi
-
-WARNINGS=$(grep -iE '(warning|error):' "$BUILD_LOG" | head -100 || true)
-
-# ── Test ─────────────────────────────────────────────────────────────
-TEST_LOG=$(mktemp)
-TEST_OK=true
-if [ "$BUILD_OK" = true ]; then
-    echo "Running algorithm tests..."
-    if [ -f build/rcspp_algo_tests ]; then
-        ./build/rcspp_algo_tests --reporter compact 2>&1 | tee "$TEST_LOG" || TEST_OK=false
+for i in $(seq 1 60); do
+    if curl -sf "http://localhost:${LLAMA_PORT}/health" > /dev/null 2>&1; then
+        echo "llama.cpp server ready."
+        break
     fi
-    if [ -f build/rcspp_tests ]; then
-        echo "Running integration tests..."
-        ./build/rcspp_tests --reporter compact 2>&1 | tee -a "$TEST_LOG" || TEST_OK=false
+    if [ "$i" -eq 60 ]; then
+        echo "ERROR: llama.cpp server failed to start" >&2
+        exit 1
     fi
-fi
-
-TEST_FAILURES=$(grep -E '(FAILED|ERROR)' "$TEST_LOG" | head -50 || true)
+    sleep 1
+done
 
 # ── Analyze with LLM ────────────────────────────────────────────────
 ANALYSIS=$(mktemp)
@@ -88,15 +101,6 @@ elif [ "$TEST_OK" = false ]; then
 elif [ -n "$WARNINGS" ]; then
     ISSUE_TYPE="warnings"
     llm-review.sh warnings "$WARNINGS" "$LLAMA_PORT" > "$ANALYSIS"
-
-else
-    echo "Build and tests passed cleanly."
-    if [ "$MODE" = "auto" ]; then
-        echo "No issues found. Skipping LLM analysis."
-        exit 0
-    fi
-    ISSUE_TYPE="review"
-    llm-review.sh review "" "$LLAMA_PORT" > "$ANALYSIS"
 fi
 
 echo ""
