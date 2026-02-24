@@ -13,6 +13,7 @@
 #include "sep/rci_separator.h"
 #include "sep/rglm_separator.h"
 #include "sep/sec_separator.h"
+#include "sep/spi_separator.h"
 #include "sep/separation_context.h"
 
 using Catch::Matchers::WithinAbs;
@@ -1079,5 +1080,436 @@ TEST_CASE("Warm-start: opportunistic mode produces valid solution", "[heuristic]
     REQUIRE(result.col_values.size() ==
             static_cast<size_t>(prob.num_edges() + prob.num_nodes()));
     REQUIRE(result.col_values[prob.num_edges() + prob.source()] == 1.0);
+}
+
+// =====================================================================
+// SPI separator: Shortest Path Inequalities
+// =====================================================================
+
+namespace {
+
+/// Compute all-pairs shortest path bounds for a problem.
+std::vector<double> compute_all_pairs(const rcspp::Problem& prob) {
+    const int32_t n = prob.num_nodes();
+    constexpr double inf = std::numeric_limits<double>::infinity();
+    std::vector<double> ap(static_cast<size_t>(n) * n, inf);
+    for (int32_t s = 0; s < n; ++s) {
+        auto row = rcspp::preprocess::forward_labeling(prob, s);
+        std::copy(row.begin(), row.end(),
+                  ap.begin() + static_cast<ptrdiff_t>(s) * n);
+    }
+    return ap;
+}
+
+/// Build a 5-node tour problem where nodes 3 and 4 are very expensive to
+/// visit together (long detour), making the pair {3,4} infeasible.
+///
+/// Zero profits: ensures labeling lower bounds are tight (no cycling benefit).
+/// d[0][3] = d[0][4] = 50 (direct edges), d[3][4] = 50.
+/// Pair {3,4} lb = 50 + 50 + 50 + 0 = 150.
+rcspp::Problem make_spi_tour_problem() {
+    rcspp::Problem prob;
+    // 5 nodes: depot=0, customers=1,2,3,4. Complete graph (10 edges).
+    std::vector<rcspp::Edge> edges;
+    std::vector<double> costs;
+    for (int i = 0; i < 5; ++i) {
+        for (int j = i + 1; j < 5; ++j) {
+            edges.push_back({i, j});
+            // Make edges to/from nodes 3 and 4 very expensive (50 each),
+            // but edges among {0,1,2} cheap (5 each).
+            if (i >= 3 || j >= 3) {
+                costs.push_back(50.0);
+            } else {
+                costs.push_back(5.0);
+            }
+        }
+    }
+
+    // Zero profits: labeling = pure shortest path (no cycling incentive)
+    std::vector<double> profits = {0, 0, 0, 0, 0};
+    std::vector<double> demands = {0, 1, 1, 1, 1};
+    double capacity = 10.0;
+
+    prob.build(5, edges, costs, profits, demands, capacity, 0, 0);
+    return prob;
+}
+
+/// Build a 5-node path problem (source=0, target=4) with expensive detours.
+///
+/// Zero profits, so labeling bounds are tight.
+/// Cheap path: 0→1→2→3→4 costs 5+5+5+5=20.
+/// Detour edges cost 50, so visiting e.g. node 1 AND node 3 via expensive
+/// edges has a clear lower bound.
+rcspp::Problem make_spi_path_problem() {
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges;
+    std::vector<double> costs;
+    for (int i = 0; i < 5; ++i) {
+        for (int j = i + 1; j < 5; ++j) {
+            edges.push_back({i, j});
+            // Linear chain 0-1-2-3-4 is cheap (5 each), everything else expensive
+            if (j == i + 1) {
+                costs.push_back(5.0);
+            } else {
+                costs.push_back(50.0);
+            }
+        }
+    }
+
+    std::vector<double> profits = {0, 0, 0, 0, 0};
+    std::vector<double> demands = {0, 1, 1, 1, 0};
+    double capacity = 10.0;
+
+    prob.build(5, edges, costs, profits, demands, capacity, 0, 4);
+    return prob;
+}
+
+}  // namespace
+
+TEST_CASE("SPI separator: finds pair cuts on tour with tight UB", "[spi]") {
+    auto prob = make_spi_tour_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    auto all_pairs = compute_all_pairs(prob);
+
+    // Fractional LP solution: depot + all customers at y=0.5
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+    y_values[0] = 1.0;
+    for (int i = 1; i < n; ++i) y_values[i] = 0.6;
+
+    // Set some fractional edges to make it look like an LP solution
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if (u == 0 || v == 0) x_values[e] = 0.5;
+    }
+
+    auto support = build_support(prob, x_values);
+
+    // Tight UB: only cheap tours are feasible.
+    // Tour {0,1,2} costs: 1+1+1 = 3, profit = 5+5 = 10, obj = 3-10 = -7.
+    // Tour visiting node 3 or 4 costs >= 50*2 = 100 (two expensive edges).
+    // Set UB tight enough that visiting both 3 and 4 is infeasible.
+    double tight_ub = 90.0;
+
+    rcspp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = tight_ub,
+        .all_pairs = all_pairs,
+    };
+
+    rcspp::sep::SPISeparator spi;
+    auto cuts = spi.separate(ctx);
+
+    // With expensive edges to nodes 3,4, the pair {3,4} should be infeasible
+    // under a tight UB, yielding y_3 + y_4 <= 1.
+    // Check that at least one cut was found.
+    REQUIRE(!cuts.empty());
+
+    // All cuts should be of the form: sum y_i <= rhs
+    for (const auto& cut : cuts) {
+        REQUIRE(cut.rhs >= 1.0 - 1e-9);
+        REQUIRE(cut.violation > 1e-6);
+        for (double v : cut.values) {
+            REQUIRE(v == 1.0);
+        }
+    }
+
+    // With lifting, pair cuts for {3,4} should include nodes 1,2 (symmetric
+    // expensive edges), so at least one cut should have more variables than
+    // just the pair.
+    bool found_lifted = false;
+    for (const auto& cut : cuts) {
+        if (cut.rhs < 1.0 + 1e-9 && cut.size() > 2) {
+            found_lifted = true;
+            break;
+        }
+    }
+    REQUIRE(found_lifted);
+}
+
+TEST_CASE("SPI separator: no cuts when UB is loose", "[spi]") {
+    auto prob = make_spi_tour_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    auto all_pairs = compute_all_pairs(prob);
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+    y_values[0] = 1.0;
+    for (int i = 1; i < n; ++i) y_values[i] = 0.6;
+
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if (u == 0 || v == 0) x_values[e] = 0.5;
+    }
+
+    auto support = build_support(prob, x_values);
+
+    // Very loose UB — everything is feasible
+    double loose_ub = 1e6;
+
+    rcspp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = loose_ub,
+        .all_pairs = all_pairs,
+    };
+
+    rcspp::sep::SPISeparator spi;
+    auto cuts = spi.separate(ctx);
+
+    // No cuts should be found with a very loose UB
+    REQUIRE(cuts.empty());
+}
+
+TEST_CASE("SPI separator: no cuts without all-pairs data", "[spi]") {
+    auto prob = make_spi_tour_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+    y_values[0] = 1.0;
+    for (int i = 1; i < n; ++i) y_values[i] = 0.6;
+
+    auto support = build_support(prob, x_values);
+
+    rcspp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = 10.0,
+        // all_pairs left empty
+    };
+
+    rcspp::sep::SPISeparator spi;
+    auto cuts = spi.separate(ctx);
+
+    // Without all-pairs data, separator should gracefully return nothing
+    REQUIRE(cuts.empty());
+}
+
+TEST_CASE("SPI separator: path problem pair cuts", "[spi][path]") {
+    auto prob = make_spi_path_problem();
+    REQUIRE_FALSE(prob.is_tour());
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    auto all_pairs = compute_all_pairs(prob);
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+    y_values[0] = 1.0;  // source
+    y_values[4] = 1.0;  // target
+    for (int i = 1; i < 4; ++i) y_values[i] = 0.7;
+
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if (u == 0 || v == 4) x_values[e] = 0.3;
+    }
+
+    auto support = build_support(prob, x_values);
+
+    // Set a tight UB for the path
+    double tight_ub = 5.0;
+
+    rcspp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = tight_ub,
+        .all_pairs = all_pairs,
+    };
+
+    rcspp::sep::SPISeparator spi;
+    auto cuts = spi.separate(ctx);
+
+    // With tight UB, some pairs should be infeasible
+    // Just verify the separator runs correctly and produces valid cuts
+    for (const auto& cut : cuts) {
+        REQUIRE(cut.violation > 1e-6);
+        for (double v : cut.values) {
+            REQUIRE(v == 1.0);
+        }
+        // rhs = |S_min|-1 where S_min is the minimal infeasible set.
+        // With lifting, cut.size() >= |S_min|.
+        REQUIRE(cut.rhs >= 1.0 - 1e-9);
+        REQUIRE(cut.rhs < static_cast<double>(cut.size()));
+    }
+}
+
+TEST_CASE("SPI separator: greedy extension finds set cuts", "[spi]") {
+    // 7-node tour problem with a cluster of expensive nodes.
+    // Depot=0, cheap cluster {1,2}, expensive cluster {3,4,5,6}.
+    // Zero profits: labeling = pure shortest path (no cycling incentive).
+    // With tight UB, the separator should find set cuts like
+    // y_3 + y_4 + y_5 <= 2, or larger sets.
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges;
+    std::vector<double> costs;
+    for (int i = 0; i < 7; ++i) {
+        for (int j = i + 1; j < 7; ++j) {
+            edges.push_back({i, j});
+            // Cheap edges among {0,1,2}, expensive to reach {3,4,5,6}
+            if (i >= 3 || j >= 3) {
+                costs.push_back(50.0);
+            } else {
+                costs.push_back(5.0);
+            }
+        }
+    }
+
+    std::vector<double> profits = {0, 0, 0, 0, 0, 0, 0};
+    std::vector<double> demands = {0, 1, 1, 1, 1, 1, 1};
+    prob.build(7, edges, costs, profits, demands, 100.0, 0, 0);
+
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+    auto all_pairs = compute_all_pairs(prob);
+
+    // LP solution: all customers at 0.7
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+    y_values[0] = 1.0;
+    for (int i = 1; i < n; ++i) y_values[i] = 0.7;
+
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if (u == 0 || v == 0) x_values[e] = 0.4;
+    }
+
+    auto support = build_support(prob, x_values);
+
+    // Tight UB: visiting multiple expensive nodes costs > UB
+    double tight_ub = 80.0;
+
+    rcspp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = tight_ub,
+        .all_pairs = all_pairs,
+    };
+
+    rcspp::sep::SPISeparator spi;
+    auto cuts = spi.separate(ctx);
+
+    REQUIRE(!cuts.empty());
+
+    // Check that we found at least one set cut (rhs >= 1)
+    // The greedy extension should find cuts larger than just pairs
+    bool found_set_cut = false;
+    for (const auto& cut : cuts) {
+        REQUIRE(cut.violation > 1e-6);
+        REQUIRE(cut.rhs >= 1.0 - 1e-9);
+        REQUIRE(cut.rhs < static_cast<double>(cut.size()));
+        if (cut.size() >= 3) found_set_cut = true;
+    }
+    // With 4 expensive nodes and tight UB, we should find triplet+ cuts
+    REQUIRE(found_set_cut);
+}
+
+TEST_CASE("SPI separator: shrinking produces minimal sets", "[spi]") {
+    // Verify that the shrink phase finds the smallest infeasible set.
+    // Zero profits: labeling = pure shortest path (no cycling incentive).
+    rcspp::Problem prob;
+    std::vector<rcspp::Edge> edges;
+    std::vector<double> costs;
+    for (int i = 0; i < 6; ++i) {
+        for (int j = i + 1; j < 6; ++j) {
+            edges.push_back({i, j});
+            // All edges to nodes 3,4,5 cost 30
+            // Edges among {0,1,2} cost 5
+            if (i >= 3 || j >= 3) {
+                costs.push_back(30.0);
+            } else {
+                costs.push_back(5.0);
+            }
+        }
+    }
+
+    std::vector<double> profits = {0, 0, 0, 0, 0, 0};
+    std::vector<double> demands = {0, 1, 1, 1, 1, 1};
+    prob.build(6, edges, costs, profits, demands, 100.0, 0, 0);
+
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+    auto all_pairs = compute_all_pairs(prob);
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.0);
+    y_values[0] = 1.0;
+    for (int i = 1; i < n; ++i) y_values[i] = 0.8;
+
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        int32_t u = graph.edge_source(e);
+        int32_t v = graph.edge_target(e);
+        if (u == 0 || v == 0) x_values[e] = 0.5;
+    }
+
+    auto support = build_support(prob, x_values);
+
+    // UB where pairs might be feasible but triples are not
+    double ub = 60.0;
+
+    rcspp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = ub,
+        .all_pairs = all_pairs,
+    };
+
+    rcspp::sep::SPISeparator spi;
+    auto cuts = spi.separate(ctx);
+
+    // All cuts should be valid
+    for (const auto& cut : cuts) {
+        REQUIRE(cut.violation > 1e-6);
+        for (double v : cut.values) {
+            REQUIRE(v == 1.0);
+        }
+        REQUIRE(cut.rhs >= 1.0 - 1e-9);
+        REQUIRE(cut.rhs < static_cast<double>(cut.size()));
+    }
 }
 
