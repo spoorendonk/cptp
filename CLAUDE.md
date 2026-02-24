@@ -69,7 +69,7 @@ Two libraries:
 src/core/        — Problem definition, IO parsers (TSPLIB, numeric .txt), Dinitz max-flow, Gomory-Hu tree
 src/sep/         — Solver-independent separators (SEC, RCI, Multistar, RGLM, Comb) + SeparationOracle
 src/preprocess/  — BoundPropagator, demand-reachability, edge elimination via capacity-aware labeling
-src/heuristic/   — Warm-start construction + local search
+src/heuristic/   — Primal heuristics (initial solution + LP-guided callback)
 src/model/       — HiGHS integration (Model, HiGHSBridge, propagator) [optional]
 src/cli/         — CLI tool (rcspp-solve) [requires HiGHS]
 src/util/        — Utilities (Logger, Timer)
@@ -88,6 +88,8 @@ docs/            — Algorithm documentation
 - `rcspp::sep::Separator` — Base class for cut separators
 - `rcspp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow (path-aware)
 - `rcspp::gomory_hu_tree` — Gusfield's algorithm, shared across separators
+- `rcspp::heuristic::build_initial_solution` — Pre-solve greedy + local search heuristic
+- `rcspp::heuristic::lp_guided_heuristic` — LP-guided callback heuristic (reduced graph)
 - `rcspp::Model` — User-facing solver interface (HiGHS); `set_source()`/`set_target()` for paths, `set_depot()` for tours
 - `rcspp::HiGHSBridge` — Wires separators + domain propagator into HiGHS MIP
 

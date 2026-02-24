@@ -5,7 +5,7 @@
 #include "core/gomory_hu.h"
 #include "core/io.h"
 #include "core/problem.h"
-#include "heuristic/warm_start.h"
+#include "heuristic/primal_heuristic.h"
 #include "preprocess/edge_elimination.h"
 #include "preprocess/reachability.h"
 #include "sep/comb_separator.h"
@@ -579,9 +579,9 @@ TEST_CASE("Edge elimination: path uses bidirectional labeling", "[preprocess][pa
 // Warm-start heuristic
 // =====================================================================
 
-TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
+TEST_CASE("Primal heuristic: tour produces closed loop", "[heuristic]") {
     auto prob = make_small_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50);
+    auto result = rcspp::heuristic::build_initial_solution(prob, 50);
 
     // Should produce a valid solution
     REQUIRE(result.objective < std::numeric_limits<double>::max());
@@ -592,9 +592,9 @@ TEST_CASE("Warm-start: tour produces closed loop", "[heuristic]") {
     REQUIRE(result.col_values[prob.num_edges() + prob.source()] == 1.0);
 }
 
-TEST_CASE("Warm-start: path produces valid open path", "[heuristic][path]") {
+TEST_CASE("Primal heuristic: path produces valid open path", "[heuristic][path]") {
     auto prob = make_small_path_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50);
+    auto result = rcspp::heuristic::build_initial_solution(prob, 50);
 
     REQUIRE(result.objective < std::numeric_limits<double>::max());
 
@@ -614,6 +614,86 @@ TEST_CASE("Warm-start: path produces valid open path", "[heuristic][path]") {
     }
     // Path: #edges = #visited_nodes - 1 (open path, no closing edge)
     REQUIRE(active_edges == visited_nodes - 1);
+}
+
+TEST_CASE("LP-guided heuristic: reduces graph and finds solution", "[heuristic]") {
+    auto prob = make_small_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    // Build a fake LP relaxation: fractional values on some edges/nodes
+    std::vector<double> x_lp(m, 0.0);
+    std::vector<double> y_lp(n, 0.0);
+    for (auto e : prob.graph().edges()) {
+        x_lp[e] = 0.3;  // all edges fractional
+    }
+    for (int32_t i = 0; i < n; ++i) {
+        y_lp[i] = 0.6;  // all nodes active
+    }
+
+    // No incumbent
+    std::vector<double> incumbent;
+
+    // Strategy 0 (all), should find a feasible solution
+    auto result = rcspp::heuristic::lp_guided_heuristic(
+        prob, x_lp, y_lp, incumbent, 50.0, 0);
+
+    REQUIRE(result.objective < std::numeric_limits<double>::max());
+    REQUIRE(result.col_values.size() ==
+            static_cast<size_t>(m + n));
+    REQUIRE(result.col_values[m + prob.source()] == 1.0);
+}
+
+TEST_CASE("LP-guided heuristic: RINS with incumbent", "[heuristic]") {
+    auto prob = make_small_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    // Get an incumbent from build_initial_solution
+    auto initial = rcspp::heuristic::build_initial_solution(prob, 50);
+    REQUIRE(!initial.col_values.empty());
+
+    // Use the initial solution's edge/node values as LP relaxation
+    std::vector<double> x_lp(initial.col_values.begin(),
+                              initial.col_values.begin() + m);
+    std::vector<double> y_lp(initial.col_values.begin() + m,
+                              initial.col_values.begin() + m + n);
+
+    // RINS strategy (2) with incumbent
+    auto result = rcspp::heuristic::lp_guided_heuristic(
+        prob, x_lp, y_lp, initial.col_values, 50.0, 2);
+
+    REQUIRE(result.objective < std::numeric_limits<double>::max());
+    REQUIRE(result.col_values.size() ==
+            static_cast<size_t>(m + n));
+}
+
+TEST_CASE("Reduce strategies produce valid subgraphs", "[heuristic]") {
+    auto prob = make_small_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    std::vector<double> x_lp(m, 0.0);
+    std::vector<double> y_lp(n, 0.0);
+    // Set a few edges fractional
+    x_lp[0] = 0.5;
+    x_lp[1] = 0.3;
+    y_lp[0] = 0.8;
+    y_lp[1] = 0.7;
+
+    auto rg_thresh = rcspp::heuristic::reduce_lp_threshold(prob, x_lp, y_lp);
+    REQUIRE(rg_thresh.edge_active.size() == static_cast<size_t>(m));
+    REQUIRE(rg_thresh.node_active.size() == static_cast<size_t>(n));
+    // Source and target always active
+    REQUIRE(rg_thresh.node_active[prob.source()]);
+    REQUIRE(rg_thresh.node_active[prob.target()]);
+    // Fractional edges should be active
+    REQUIRE(rg_thresh.edge_active[0]);
+    REQUIRE(rg_thresh.edge_active[1]);
+
+    auto rg_nbhd = rcspp::heuristic::reduce_neighborhood(prob, x_lp, y_lp);
+    REQUIRE(rg_nbhd.edge_active.size() == static_cast<size_t>(m));
+    REQUIRE(rg_nbhd.node_active[prob.source()]);
 }
 
 // =====================================================================
@@ -883,7 +963,7 @@ TEST_CASE("Separator name() returns correct strings", "[separator]") {
 
 TEST_CASE("Warm-start: tour degree consistency", "[heuristic]") {
     auto prob = make_small_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_warm_start(prob, 50);
 
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
@@ -904,7 +984,7 @@ TEST_CASE("Warm-start: tour degree consistency", "[heuristic]") {
 
 TEST_CASE("Warm-start: path degree consistency", "[heuristic][path]") {
     auto prob = make_small_path_problem();
-    auto result = rcspp::heuristic::build_warm_start(prob, 50.0);
+    auto result = rcspp::heuristic::build_warm_start(prob, 50);
 
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();

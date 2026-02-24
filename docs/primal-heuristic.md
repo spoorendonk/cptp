@@ -1,12 +1,12 @@
-# Warm-Start Heuristic
+# Primal Heuristic
 
-File: `src/heuristic/warm_start.h` (header-only)
+File: `src/heuristic/primal_heuristic.h` (header-only)
 
 ## Purpose
 
-Provides an initial feasible solution via parallel randomized greedy construction
-and local search. Solver-independent — can be used standalone or fed to any MIP
-solver as a warm start.
+Two heuristic components:
+1. **Initial solution** (`build_initial_solution`): runs before MIP solve on the complete graph, provides an initial feasible solution to HiGHS via `setSolution()`. Solver-independent — can be used standalone or fed to any MIP solver as a warm start.
+2. **LP-guided callback** (`lp_guided_heuristic`): runs during MIP solve via `kCallbackMipUserSolution`, builds reduced graphs from LP relaxation values and runs construction + local search on them
 
 ## Algorithm
 
@@ -43,9 +43,31 @@ After construction, run improving moves until no improvement found (max 200 iter
 
 First-improvement strategy: accept the first improving move found, restart the pass.
 
+### Reduced graph
+
+For the LP-guided callback, construction and local search operate on a **reduced graph** — a subset of the original problem's edges and nodes, selected based on LP relaxation values. The `edge_active` mask is threaded through `find_edge`, `edge_cost`, `greedy_insert`, and `local_search`; inactive edges return cost=infinity and are skipped.
+
+Three reduction strategies are used concurrently:
+
+**Strategy A: LP-value threshold**
+- Include edges with `x_e > 0.1` + edges between pairs of nodes with `y_i > 0.5`
+- Simple, focuses on the LP support subgraph
+
+**Strategy B: RINS-style**
+- Include edges from incumbent (`x_e > 0.5`) OR fractional LP (`x_e > 0.1`)
+- Falls back to Strategy A when no incumbent exists
+- Searches in the union of incumbent and LP relaxation neighborhoods
+
+**Strategy C: Neighborhood expansion**
+- Seed nodes: endpoints of edges with `x_e > 0.3`
+- Include seed edges + all edges between pairs of active nodes
+- Focuses on the connected neighborhood around the LP support
+
+All strategies: source/target always active.
+
 ### Parallel restarts (TBB)
 
-The heuristic supports two modes, controlled by the `deterministic` solver option (default: `true`):
+The initial heuristic supports two modes, controlled by the `deterministic` solver option (default: `true`):
 
 **Deterministic mode** (default):
 - Pre-builds all orderings upfront: 3 deterministic + random shuffles with seeds `0, 1, 2, ...`
@@ -63,13 +85,13 @@ The heuristic supports two modes, controlled by the `deterministic` solver optio
 ## Standalone Usage
 
 ```cpp
-#include "heuristic/warm_start.h"
+#include "heuristic/primal_heuristic.h"
 
 // Deterministic (default): fixed restart count, reproducible
-auto warm_start = heuristic::build_warm_start(problem_, num_restarts);
+auto warm_start = heuristic::build_initial_solution(problem_, num_restarts);
 
 // Opportunistic: time-based, non-deterministic
-auto warm_start = heuristic::build_warm_start(problem_, num_restarts, budget_ms);
+auto warm_start = heuristic::build_initial_solution(problem_, num_restarts, budget_ms);
 
 // warm_start.objective = travel_cost - collected_profit
 // warm_start.col_values = solution vector (edges + nodes)
@@ -80,6 +102,17 @@ Python:
 from rcspp_bac import build_warm_start
 warm = build_warm_start(prob, time_budget_ms=500.0)
 ```
+
+### LP-guided callback (during solve)
+
+Registered via `HiGHSBridge::install_heuristic_callback()`:
+
+1. Separator callback caches LP relaxation values (`x_vals`, `y_vals`) under a mutex
+2. `kCallbackMipUserSolution` callback reads cached LP values, builds reduced graphs, runs heuristic
+3. If improved solution found: `data_in->user_has_solution = true; data_in->user_solution = result`
+4. HiGHS validates via `solutionFeasible()` + our SEC feasibility check in `addIncumbent()`
+
+The callback skips the initial `kExternalMipSolutionQueryOriginAfterSetup` query (pre-solve heuristic already ran). Rate-limited to once per 200 B&B nodes to avoid overhead on hard instances.
 
 The solution vector has size `num_edges + num_nodes`:
 - `col_values[e] = 1` for edges in the route
@@ -109,6 +142,12 @@ start.value_valid = true;
 start.col_value = std::move(warm.col_values);
 highs.setSolution(start);
 ```
+
+### CLI options
+
+- `--heuristic_callback true/false` (default: true) — enable/disable LP-guided callback
+- `--heuristic_budget_ms N` (default: 20) — time budget per callback invocation in ms
+- `--heuristic_strategy N` (default: 0) — 0=all strategies, 1=LP-threshold, 2=RINS, 3=neighborhood
 
 ## Performance
 
