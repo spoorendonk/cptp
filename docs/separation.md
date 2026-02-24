@@ -265,6 +265,161 @@ Implements a BFS-based heuristic for comb separation (Jepsen et al. eq 13):
 formulation requires y-variable corrections not present in the standard CVRP
 comb form.
 
+## Shortest Path Inequalities (SPI)
+
+File: `src/sep/spi_separator.h`, `src/sep/spi_separator.cpp`
+
+Derives cutting planes from the all-pairs shortest path lower bounds and the
+incumbent upper bound (UB). If the cheapest tour/path visiting every node in a
+set S has objective greater than UB, then at most |S|-1 of those nodes can be
+selected:
+
+```
+Σ_{i ∈ S} y_i ≤ |S| - 1
+```
+
+This is the RCSPP analogue of a knapsack cover inequality, where infeasibility
+comes from routing cost rather than demand.
+
+Enabled via `--all_pairs_propagation true` (disabled by default). Requires the
+all-pairs shortest path matrix, computed once during preprocessing.
+
+### Lower bound computation
+
+For a set S = {v₁, ..., v_k} of customer nodes, the lower bound on any
+tour/path visiting all of S is:
+
+```
+lb(S) = min_π [ d(s, π₁) + d(π₁, π₂) + ... + d(π_k, t) ] + correction + Σ profit(v)
+```
+
+where d(u,v) is the all-pairs shortest path cost from u to v (including
+intermediate profits), and the correction term accounts for junction-node
+profit double-counting:
+
+- **Tour** (source = target): correction = profit(depot)
+- **Path** (source ≠ target): correction = 0
+
+The minimization over permutations is computed exactly via **Held-Karp DP**
+in O(2^k · k²) time and O(2^k · k) space, limited to k ≤ 15 nodes
+(~3.7 MB working memory).
+
+### Separation algorithm
+
+Three phases:
+
+**Phase 1 — Pair enumeration.** For each pair of candidate nodes (i,j) with
+y_i + y_j > 1, compute lb({i,j}). If lb > UB, emit the pair cut. Candidates
+are sorted by y-value descending to focus on nodes the LP most wants to select.
+
+**Phase 2 — Greedy grow + shrink.** Starting from infeasible pairs (up to 50
+seeds, sorted by violation):
+
+1. **Grow**: Greedily add high-y candidates that maintain lb > UB. Stops at
+   k = 15 nodes.
+2. **Shrink**: Remove nodes one at a time, preferring removals that keep lb
+   highest above UB and have lowest y-value (maximizing violation). Stops at
+   size 3 (pairs already emitted in Phase 1).
+
+This finds minimal infeasible sets — removing any member makes the set feasible.
+Minimality gives the strongest cut: violation = Σy_v - (|S|-1), and removing
+any fractional node increases violation by (1-y_v) > 0.
+
+**Phase 3 — Extended cover lifting.** For each minimal infeasible set S, scan
+all nodes j ∉ S. Node j gets coefficient 1 in the cut if *replacing* every
+i ∈ S with j still yields lb > UB. This is the extended cover inequality: any
+node "at least as expensive" as every member of S can be added without changing
+the RHS.
+
+The lifted cut:
+```
+Σ_{i ∈ S} y_i + Σ_{j lifted} y_j ≤ |S| - 1
+```
+
+Lifting requires |S| calls to `compute_set_lb` per candidate node (one per
+swap), using the existing all-pairs matrix. No additional labeling is needed.
+
+### Complexity
+
+| Phase | Cost |
+|---|---|
+| Pair enumeration | O(c² · k²) where c = candidates, k = 2 |
+| Grow + shrink | O(seeds · candidates · 2^k · k²) |
+| Lifting | O(n · \|S\| · 2^{\|S\|} · \|S\|²) per cut |
+
+All phases index into the precomputed all-pairs matrix — no labeling calls
+during separation.
+
+### Usage
+
+CLI:
+```bash
+./build/rcspp-solve instance.sppcc --all_pairs_propagation true
+```
+
+C++ API:
+```cpp
+rcspp::SolverOptions opts = {{"all_pairs_propagation", "true"}};
+auto result = model.solve(opts);
+```
+
+Python:
+```python
+model.solve({"all_pairs_propagation": "true"})
+```
+
+### Testing
+
+7 C++ tests under the `[spi]` tag:
+
+| Test | Coverage |
+|---|---|
+| Pair cuts on tour | Infeasible pairs detected with tight UB |
+| Lifted pair cuts | Extended cover adds nodes beyond minimal set |
+| No cuts (loose UB) | Graceful empty return |
+| No cuts (missing data) | Graceful fallback without all-pairs matrix |
+| Path problem pairs | Correct profit correction for s-t path |
+| Greedy extension | Grow finds set cuts of size ≥ 3 |
+| Shrink minimality | Shrink phase finds smallest infeasible subsets |
+
+```bash
+./build/rcspp_algo_tests [spi]
+```
+
+### Benchmark
+
+Tested on 20 SPPRCLIB instances, comparing `--all_pairs_propagation true`
+(SPI ON) vs baseline (SPI OFF).
+
+**60s time limit** (20 instances):
+
+| Metric | Value |
+|---|---|
+| Wins ON / OFF / Tie | 2 / 0 / 18 |
+
+- **A-n60-k9-57**: Gap 37.6% → 24.7%. Better objective (-1000 vs -724) and
+  tighter bound.
+- **E-n101-k14-158**: Gap 5.85% → 5.22%. Better objective (-2539 vs -2127).
+- **B-n78-k10-70**: 21% faster (22.1s vs 28.1s) at same optimal.
+- Easy instances (<30s): negligible overhead (<1s).
+
+**300s time limit** (5 hardest instances):
+
+| Instance | OFF gap | ON gap | Notes |
+|---|---|---|---|
+| A-n60-k9-57 | 0% | 0% | Both optimal; OFF 128s, ON 138s |
+| A-n80-k10-14 | 0% | 0% | Both optimal; OFF 58s, ON 67s |
+| **E-n101-k14-158** | **1.78%** | **0.91%** | **SPI halves the gap** (bound -9965 → -6845) |
+| M-n121-k7-260 | ~0% | ~0% | Both near-optimal |
+| M-n151-k12-15 | ~0% | ~0% | Both near-optimal |
+
+SPI provides the largest benefit on the hardest unsolved instance (E-n101-k14-158),
+nearly halving the remaining gap by tightening the bound while exploring 22% more
+nodes (8929 vs 7331). On instances that solve to optimality, SPI adds ~10-15%
+preprocessing overhead but does not change the outcome.
+
+Sweep script: `benchmarks/experiment_spi.sh [time_limit]`
+
 ## SeparationOracle (solver-independent)
 
 File: `src/sep/separation_oracle.h`, `src/sep/separation_oracle.cpp`
@@ -334,7 +489,7 @@ Each `Cut` returned by `separate()`:
 
 ### Testing
 
-The SeparationOracle and individual separators are covered by 24 C++ tests (`[oracle]`, `[sec]`, `[rci]`, `[multistar]`, `[comb]`, `[rglm]`, `[separator]` tags) and 9 Python tests:
+The SeparationOracle and individual separators are covered by 31 C++ tests (`[oracle]`, `[sec]`, `[rci]`, `[multistar]`, `[comb]`, `[rglm]`, `[spi]`, `[separator]` tags) and 9 Python tests:
 
 | Component | Tests | Coverage |
 |---|---|---|
@@ -344,6 +499,7 @@ The SeparationOracle and individual separators are covered by 24 C++ tests (`[or
 | Multistar | 1 C++ | Basic execution |
 | Comb | 1 C++ | Basic execution |
 | RGLM | 1 C++ | Basic execution |
+| SPI | 7 C++ | Pairs, lifting, loose UB, missing data, path, grow, shrink |
 
 ```bash
 ./build/rcspp_algo_tests [oracle]     # SeparationOracle tests
@@ -352,6 +508,7 @@ The SeparationOracle and individual separators are covered by 24 C++ tests (`[or
 ./build/rcspp_algo_tests [multistar]  # Multistar
 ./build/rcspp_algo_tests [comb]       # Comb
 ./build/rcspp_algo_tests [rglm]       # RGLM
+./build/rcspp_algo_tests [spi]        # SPI (Shortest Path Inequalities)
 ./build/rcspp_algo_tests [separator]  # Separator name() accessors
 ```
 
@@ -376,6 +533,7 @@ and wraps the same separation pipeline for HiGHS's user separator callback.
 | separation_tol | `--separation_tol X` | 0.1 | Fractional violation threshold |
 | separation_interval | `--separation_interval N` | 1 | Run separation every N-th callback (amortization) |
 | enable_rglm | `--enable_rglm true` | false | Enable RGLM separator |
+| all_pairs_propagation | `--all_pairs_propagation true` | false | Enable SPI separator + all-pairs domain propagation |
 | submip_separation | `--submip_separation true` | true | SEC separation at sub-MIP root node |
 
 ### Tolerances

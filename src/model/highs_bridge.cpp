@@ -269,6 +269,10 @@ void HiGHSBridge::install_separators() {
                 .y_offset = y_offset(),
                 .tol = frac_tol_,
                 .flow_tree = &flow_tree,
+                .upper_bound = mipsolver.mipdata_->upper_limit,
+                .all_pairs = all_pairs_.empty()
+                    ? std::span<const double>{}
+                    : std::span<const double>(all_pairs_),
             };
 
             const bool is_submip = !orig_to_reduced.empty();
