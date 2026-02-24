@@ -34,7 +34,7 @@ JSONEOF
     response=$(curl -sf -X POST "$API" \
         -H "Content-Type: application/json" \
         -d "$payload" \
-        --max-time 120)
+        --max-time 300)
 
     echo "$response" | jq -r '.choices[0].message.content // "No response from LLM"'
 }
