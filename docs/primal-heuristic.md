@@ -5,7 +5,7 @@ File: `src/heuristic/primal_heuristic.h` (header-only)
 ## Purpose
 
 Two heuristic components:
-1. **Initial solution** (`build_initial_solution`): runs before MIP solve on the complete graph, provides an initial feasible solution to HiGHS via `setSolution()`. Solver-independent — can be used standalone or fed to any MIP solver as a warm start.
+1. **Initial solution** (`build_initial_solution`): runs before MIP solve on the complete graph, provides an initial feasible solution to HiGHS via `setSolution()`. Solver-independent — can be used standalone or fed to any MIP solver as a warm-start.
 2. **LP-guided callback** (`lp_guided_heuristic`): runs during MIP solve via `kCallbackMipUserSolution`, builds reduced graphs from LP relaxation values and runs construction + local search on them
 
 ## Algorithm
@@ -18,7 +18,7 @@ Given an ordering of customers, insert each one at the cheapest position in the 
    - **Tour** (source == target): route = [depot, depot]
    - **Path** (source != target): route = [source, target]
 2. For each customer c in the given order:
-   - Find position p in route minimizing `cost(prev,c) + cost(c,next) - cost(prev,next)`
+   - Find position p in route minimizing $\text{cost}(prev,c) + \text{cost}(c,next) - \text{cost}(prev,next)$
    - Insert if capacity allows
 3. If too few customers inserted, force-insert the cheapest (tours need at least 2 customers for distinct edges)
 
@@ -50,16 +50,16 @@ For the LP-guided callback, construction and local search operate on a **reduced
 Three reduction strategies are used concurrently:
 
 **Strategy A: LP-value threshold**
-- Include edges with `x_e > 0.1` + edges between pairs of nodes with `y_i > 0.5`
+- Include edges with $x_e > 0.1$ + edges between pairs of nodes with $y_i > 0.5$
 - Simple, focuses on the LP support subgraph
 
 **Strategy B: RINS-style**
-- Include edges from incumbent (`x_e > 0.5`) OR fractional LP (`x_e > 0.1`)
+- Include edges from incumbent ($x_e > 0.5$) OR fractional LP ($x_e > 0.1$)
 - Falls back to Strategy A when no incumbent exists
 - Searches in the union of incumbent and LP relaxation neighborhoods
 
 **Strategy C: Neighborhood expansion**
-- Seed nodes: endpoints of edges with `x_e > 0.3`
+- Seed nodes: endpoints of edges with $x_e > 0.3$
 - Include seed edges + all edges between pairs of active nodes
 - Focuses on the connected neighborhood around the LP support
 
@@ -73,12 +73,12 @@ The initial heuristic supports two modes, controlled by the `deterministic` solv
 - Pre-builds all orderings upfront: 3 deterministic + random shuffles with seeds `0, 1, 2, ...`
 - Runs all restarts via `tbb::parallel_for` over the fixed set
 - Best solution selected by iterating results in index order (deterministic tiebreaking)
-- Restart count: `clamp(num_nodes, 20, 200)`
+- Restart count: $\text{clamp}(\text{num\_nodes}, 20, 200)$
 - Identical results across runs on any hardware
 
 **Opportunistic mode** (`--deterministic false`):
 - Multiple TBB workers race with `std::random_device` seeds
-- Workers run until a time budget expires: `min(500ms, num_nodes * 10ms)`
+- Workers run until a time budget expires: $\min(500\text{ms},\; \text{num\_nodes} \times 10\text{ms})$
 - May find better bounds on fast multi-core hardware
 - Results vary between runs
 
@@ -134,7 +134,7 @@ The solution vector has size `num_edges + num_nodes`:
 
 ## HiGHS Integration
 
-In `Model::solve()` (model.cpp), the warm start is fed to HiGHS:
+In `Model::solve()` (model.cpp), the warm-start is fed to HiGHS:
 
 ```cpp
 HighsSolution start;

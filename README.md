@@ -74,7 +74,7 @@ cmake --build build -j$(nproc)
 
 Accepts TSPLIB (`.vrp`, `.sppcc`) and numeric (`.txt`) instance formats. All options beyond `--source`/`--target`/`--branch_hyper` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
 
-#### Hyperplane branching
+### Hyperplane branching
 
 The `--branch_hyper` option enables dynamic constraint branching, which adds/removes LP constraint rows during the branch-and-bound search. Modes:
 
@@ -210,8 +210,8 @@ See [C++ API](docs/cpp-api.md) and [Python API](docs/python-api.md) for full doc
 ## Tests
 
 ```bash
-./build/rcspp_algo_tests                    # 57 C++ algorithm tests (no HiGHS needed)
-./build/rcspp_tests                         # 26 C++ integration tests (requires HiGHS)
+./build/rcspp_algo_tests                    # 63 C++ algorithm tests (no HiGHS needed)
+./build/rcspp_tests                         # 39 C++ integration tests (requires HiGHS)
 pytest tests/python/test_algorithms.py      # 33 Python algorithm tests (no HiGHS needed)
 pytest tests/python/test_solver.py          # Python solver tests (requires HiGHS)
 RCSPP_RUN_LOCAL_INSTALL_TEST=1 pytest tests/python/test_local_install.py  # venv + pip install -e . smoke test
@@ -261,6 +261,7 @@ docs/            Algorithm documentation
 - [Domain propagator](docs/domain-propagator.md) — BoundPropagator, labeling-based edge fixing
 - [Primal heuristic](docs/primal-heuristic.md) — initial solution, LP-guided callback, local search
 - [Benchmark results](docs/benchmarks.md) — SPPRCLIB and Roberti instance results
+- [Roadmap](docs/ROADMAP.md) — planned work units and priorities
 
 ## Dependencies
 
