@@ -1143,6 +1143,18 @@ TEST_CASE("SPI separator: finds pair cuts on tour with tight UB", "[spi]") {
             REQUIRE(v == 1.0);
         }
     }
+
+    // With lifting, pair cuts for {3,4} should include nodes 1,2 (symmetric
+    // expensive edges), so at least one cut should have more variables than
+    // just the pair.
+    bool found_lifted = false;
+    for (const auto& cut : cuts) {
+        if (cut.rhs < 1.0 + 1e-9 && cut.size() > 2) {
+            found_lifted = true;
+            break;
+        }
+    }
+    REQUIRE(found_lifted);
 }
 
 TEST_CASE("SPI separator: no cuts when UB is loose", "[spi]") {
@@ -1267,9 +1279,10 @@ TEST_CASE("SPI separator: path problem pair cuts", "[spi][path]") {
         for (double v : cut.values) {
             REQUIRE(v == 1.0);
         }
-        // rhs = |S|-1 for set S of size >= 2
-        int32_t set_size = cut.size();
-        REQUIRE(cut.rhs == static_cast<double>(set_size - 1));
+        // rhs = |S_min|-1 where S_min is the minimal infeasible set.
+        // With lifting, cut.size() >= |S_min|.
+        REQUIRE(cut.rhs >= 1.0 - 1e-9);
+        REQUIRE(cut.rhs < static_cast<double>(cut.size()));
     }
 }
 
@@ -1342,9 +1355,9 @@ TEST_CASE("SPI separator: greedy extension finds set cuts", "[spi]") {
     bool found_set_cut = false;
     for (const auto& cut : cuts) {
         REQUIRE(cut.violation > 1e-6);
-        int32_t set_size = cut.size();
-        REQUIRE(cut.rhs == static_cast<double>(set_size - 1));
-        if (set_size >= 3) found_set_cut = true;
+        REQUIRE(cut.rhs >= 1.0 - 1e-9);
+        REQUIRE(cut.rhs < static_cast<double>(cut.size()));
+        if (cut.size() >= 3) found_set_cut = true;
     }
     // With 4 expensive nodes and tight UB, we should find triplet+ cuts
     REQUIRE(found_set_cut);
@@ -1415,8 +1428,8 @@ TEST_CASE("SPI separator: shrinking produces minimal sets", "[spi]") {
         for (double v : cut.values) {
             REQUIRE(v == 1.0);
         }
-        int32_t set_size = cut.size();
-        REQUIRE(cut.rhs == static_cast<double>(set_size - 1));
+        REQUIRE(cut.rhs >= 1.0 - 1e-9);
+        REQUIRE(cut.rhs < static_cast<double>(cut.size()));
     }
 }
 

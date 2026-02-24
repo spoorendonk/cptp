@@ -190,6 +190,63 @@ void greedy_shrink(const Problem& prob,
     }
 }
 
+/// Lift a minimal infeasible set S by scanning nodes j ∉ S.
+/// Node j gets coefficient 1 if replacing every i ∈ S with j still yields
+/// an infeasible set (lb > ub).  This is the "extended cover" lifting:
+/// any node that is at least as "expensive" as every member of the minimal
+/// cover can be added with coefficient 1.
+///
+/// Returns lifted indices and values (coefficients).  RHS stays |S|-1.
+void lift_cut(const Problem& prob,
+              std::span<const double> all_pairs,
+              double ub,
+              const std::vector<int32_t>& set,
+              std::span<const double> y_values,
+              int32_t source, int32_t target, bool is_tour,
+              double tol,
+              std::vector<int32_t>& out_nodes,
+              std::vector<double>& out_coeffs) {
+    const int32_t n = prob.num_nodes();
+
+    // Start with the core set (coefficient 1)
+    out_nodes = set;
+    out_coeffs.assign(set.size(), 1.0);
+
+    // For each candidate j ∉ S, check all |S| replacements
+    for (int32_t j = 0; j < n; ++j) {
+        if (j == source) continue;
+        if (!is_tour && j == target) continue;
+        if (y_values[j] <= tol) continue;
+
+        // Skip if j ∈ S
+        bool in_set = false;
+        for (int32_t v : set) {
+            if (v == j) { in_set = true; break; }
+        }
+        if (in_set) continue;
+
+        // Check: for every i ∈ S, is (S \ {i}) ∪ {j} infeasible?
+        bool can_lift = true;
+        for (size_t idx = 0; idx < set.size(); ++idx) {
+            std::vector<int32_t> swapped;
+            swapped.reserve(set.size());
+            for (size_t k = 0; k < set.size(); ++k) {
+                swapped.push_back(k == idx ? j : set[k]);
+            }
+            double lb = compute_set_lb(prob, all_pairs, swapped);
+            if (lb <= ub + 1e-6) {
+                can_lift = false;
+                break;
+            }
+        }
+
+        if (can_lift) {
+            out_nodes.push_back(j);
+            out_coeffs.push_back(1.0);
+        }
+    }
+}
+
 }  // namespace
 
 std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
@@ -255,12 +312,25 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
 
             double lb = compute_set_lb(prob, ctx.all_pairs, {i, j});
             if (lb > ub + 1e-6) {
+                // Lift: scan for nodes that can replace either member
+                std::vector<int32_t> base_set = {i, j};
+                std::vector<int32_t> lifted_nodes;
+                std::vector<double> lifted_coeffs;
+                lift_cut(prob, ctx.all_pairs, ub, base_set,
+                         ctx.y_values, source, target, is_tour, tol,
+                         lifted_nodes, lifted_coeffs);
+
+                double sum_y = 0.0;
                 Cut cut;
-                cut.violation = violation;
-                cut.indices = {ctx.y_offset + i, ctx.y_offset + j};
-                cut.values = {1.0, 1.0};
-                cut.rhs = 1.0;
-                cuts.push_back(std::move(cut));
+                cut.rhs = 1.0;  // |S|-1 where S is the minimal set (pair)
+                for (size_t li = 0; li < lifted_nodes.size(); ++li) {
+                    cut.indices.push_back(ctx.y_offset + lifted_nodes[li]);
+                    cut.values.push_back(lifted_coeffs[li]);
+                    sum_y += lifted_coeffs[li] * ctx.y_values[lifted_nodes[li]];
+                }
+                cut.violation = sum_y - cut.rhs;
+                if (cut.violation > tol)
+                    cuts.push_back(std::move(cut));
 
                 seeds.push_back({i, j, violation});
             }
@@ -316,14 +386,24 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
         if (is_duplicate(sorted_set)) continue;
         emitted.push_back(sorted_set);
 
-        // Emit cut: Σ y_v ≤ |S| - 1
+        // Lift: scan for nodes that can replace any member of the minimal set
+        std::vector<int32_t> lifted_nodes;
+        std::vector<double> lifted_coeffs;
+        lift_cut(prob, ctx.all_pairs, ub, set,
+                 ctx.y_values, source, target, is_tour, tol,
+                 lifted_nodes, lifted_coeffs);
+
+        // Emit cut: Σ α_j y_j ≤ |S| - 1
+        double lifted_sum_y = 0.0;
         Cut cut;
-        cut.violation = violation;
         cut.rhs = static_cast<double>(set.size()) - 1.0;
-        for (int32_t v : set) {
-            cut.indices.push_back(ctx.y_offset + v);
-            cut.values.push_back(1.0);
+        for (size_t li = 0; li < lifted_nodes.size(); ++li) {
+            cut.indices.push_back(ctx.y_offset + lifted_nodes[li]);
+            cut.values.push_back(lifted_coeffs[li]);
+            lifted_sum_y += lifted_coeffs[li] * ctx.y_values[lifted_nodes[li]];
         }
+        cut.violation = lifted_sum_y - cut.rhs;
+        if (cut.violation <= tol) continue;
         cuts.push_back(std::move(cut));
     }
 
