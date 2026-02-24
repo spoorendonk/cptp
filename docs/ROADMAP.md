@@ -40,7 +40,7 @@ starting any overlapping work unit.
 | `claude/make-deterministic-ZwXew` | #17 | Open | Deterministic warm-start (fixed restarts, seeded RNG, stable_sort) |
 | `claude/extract-highs-patching-kWX1I` | #16 | Open | thread_local callbacks for parallel Model::solve() |
 | `claude/pluggable-separators-interface-nRwPT` | #15 | Open | SeparationOracle + BoundPropagator, optional HiGHS build |
-| `reorganize-benchmarks` | #13 | Open | Rename bench/ → benchmarks/, PathWyse workflow |
+| `reorganize-benchmarks` | #13 | Done | Rename bench/ → benchmarks/, PathWyse workflow |
 | `claude/shortest-path-inequalities-ID51D` | — | Branch | Shortest path inequality (SPI) separator |
 | `claude/test-ubs-cutoff-performance-FWIOd` | — | Branch | Cutoff + prove-only mode options |
 | `claude/github-pages-exploration-7DNje` | — | Branch | MkDocs Material documentation site |

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Benchmark hyperplane branching modes
-# Usage: ./bench/bench_hyperplane.sh [time_limit_seconds]
+# Usage: ./benchmarks/bench_hyperplane.sh [time_limit_seconds]
 
 set -uo pipefail
 
 SOLVER="./build/rcspp-solve"
-INST_DIR="bench/instances/spprclib"
+INST_DIR="benchmarks/instances/spprclib"
 TIME_LIMIT="${1:-120}"
 
 # 14 representative instances across sizes
