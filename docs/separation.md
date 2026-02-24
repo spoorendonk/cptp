@@ -19,10 +19,10 @@ originally developed for the CPTP (Jepsen et al. 2014). Standard CVRP cuts are
 File: `src/core/gomory_hu.h`
 
 Implements **Gusfield's simplified algorithm** to compute all pairwise min-cuts
-with only n-1 max-flow calls (instead of O(n^2)). The tree is built once per
+with only $n-1$ max-flow calls (instead of $O(n^2)$). The tree is built once per
 separation round from the fractional support graph and shared across all separators.
 
-Each max-flow uses the **Dinitz algorithm** (O(V^2 E)) on the support graph
+Each max-flow uses the **Dinitz algorithm** ($O(V^2 E)$) on the support graph
 (`src/core/dinitz.h`).
 
 Two query methods:
@@ -30,7 +30,7 @@ Two query methods:
 - `min_cut(target)` — walks the tree path from target to root (depot), returns
   the bottleneck cut partition and value. Used by SEC, Multistar, RGLM.
 - `all_cuts_on_path(target)` — returns all cuts along the path as lightweight
-  `CutRef` objects. Gives O(depth) candidate sets per target with zero additional
+  `CutRef` objects. Gives $O(\text{depth})$ candidate sets per target with zero additional
   max-flow cost. Used by RCI for multi-candidate extraction.
 
 **References**:
@@ -41,29 +41,27 @@ Two query methods:
 
 File: `src/sep/sec_separator.cpp`
 
-For each customer t with y_t > tol, query the Gomory-Hu tree min-cut between
-depot and t. The SEC requires:
+For each customer $t$ with $y_t > \text{tol}$, query the Gomory-Hu tree min-cut between
+depot and $t$. The SEC requires:
 
-```
-x(delta(S)) >= 2 * y_t
-```
+$$x(\delta(S)) \ge 2\,y_t$$
 
-where S is the target-side partition (not containing the depot).
+where $S$ is the target-side partition (not containing the depot).
 
 For **s-t path** instances (source != target), sets containing the path target
 need only 1 cut crossing (the path enters and terminates), so the RHS becomes
-`y_t` instead of `2 * y_t`.
+$y_t$ instead of $2\,y_t$.
 
 **Sparse form selection**: The separator counts nonzeros in two equivalent forms
 and emits whichever is sparser:
 
 | Form | Constraint | Nonzeros |
 |---|---|---|
-| Cut form | 2*y_t - x(delta(S)) <= 0 | \|delta(S)\| + 1 |
-| Inside form | x(E(S)) - sum_{j in S\{t}} y_j <= 0 | \|E(S)\| + \|S\| - 1 |
+| Cut form | $2\,y_t - x(\delta(S)) \le 0$ | $\lvert\delta(S)\rvert + 1$ |
+| Inside form | $x(E(S)) - \sum_{j \in S \setminus \{t\}} y_j \le 0$ | $\lvert E(S)\rvert + \lvert S\rvert - 1$ |
 
-The inside form is derived via degree substitution: x(delta({i})) = 2*y_i implies
-x(delta(S)) = 2*sum(y_i, i in S) - 2*x(E(S)).
+The inside form is derived via degree substitution: $x(\delta(\{i\})) = 2\,y_i$ implies
+$x(\delta(S)) = 2\sum_{i \in S} y_i - 2\,x(E(S))$.
 
 SEC is also used as a **feasibility check** on incumbent solutions found by HiGHS
 heuristics (feasibility pump, rounding, sub-MIPs). Any integer solution with
@@ -93,28 +91,24 @@ Sub-MIP separation is controlled by `--submip_separation true/false` (default: t
 
 File: `src/sep/rci_separator.cpp`
 
-For a set S of customers with total demand d(S), define:
+For a set $S$ of customers with total demand $d(S)$, define:
 
-- Q_r = d(S) mod Q  (skip if Q_r = 0)
-- k = ceil(d(S) / Q)  (skip if k <= 1)
+- $Q_r = d(S) \bmod Q$ (skip if $Q_r = 0$)
+- $k = \lceil d(S)/Q \rceil$ (skip if $k \le 1$)
 
-The RCI in >= form:
+The RCI in $\ge$ form:
 
-```
-x(delta(S)) - (2/Q_r) * sum(q_i * y_i, i in S) >= 2 * (k - d(S)/Q_r)
-```
+$$x(\delta(S)) - \frac{2}{Q_r} \sum_{i \in S} q_i\,y_i \;\ge\; 2\!\left(k - \frac{d(S)}{Q_r}\right)$$
 
 **Inside form** (via degree substitution, chosen when sparser):
 
-```
-x(E(S)) - sum_{i in S} (1 - q_i/Q_r) * y_i <= d(S)/Q_r - k
-```
+$$x(E(S)) - \sum_{i \in S} \!\left(1 - \frac{q_i}{Q_r}\right) y_i \;\le\; \frac{d(S)}{Q_r} - k$$
 
 ### Multi-candidate extraction
 
 Unlike SEC which uses one min-cut per target, RCI uses `all_cuts_on_path(target)`
 to extract **all** Gomory-Hu tree cuts along each target's path to root. This
-yields O(depth) candidate sets per target with no extra max-flow calls. Duplicate
+yields $O(\text{depth})$ candidate sets per target with no extra max-flow calls. Duplicate
 candidates (same GH tree node) are skipped via an `evaluated` bitmap.
 
 ### Add/drop local search
@@ -131,7 +125,7 @@ Candidates are evaluated and refined in parallel via TBB.
 
 ### Output cap
 
-Results are sorted by violation (descending) and capped at max(5, n/5) cuts
+Results are sorted by violation (descending) and capped at $\max(5, n/5)$ cuts
 per separator round (internal cap, before the per-separator top-k limit in
 HiGHSBridge).
 
@@ -139,19 +133,15 @@ HiGHSBridge).
 
 File: `src/sep/multistar_separator.cpp`
 
-The GLM inequality (Jepsen et al. eq 17) for a set S:
+The GLM inequality (Jepsen et al. eq 17) for a set $S$:
 
-```
-sum_{e in delta(S)} (1 - 2*q_{t(e)}/Q) * x_e - (2/Q) * sum_{i in S} q_i * y_i >= 0
-```
+$$\sum_{e \in \delta(S)} \!\left(1 - \frac{2\,q_{t(e)}}{Q}\right) x_e \;-\; \frac{2}{Q} \sum_{i \in S} q_i\,y_i \;\ge\; 0$$
 
-where t(e) is the endpoint of crossing edge e that lies **outside** S.
+where $t(e)$ is the endpoint of crossing edge $e$ that lies **outside** $S$.
 
-In <= form (for the HiGHS cut pool):
+In $\le$ form (for the HiGHS cut pool):
 
-```
-(2/Q) * sum_{i in S} q_i * y_i - sum_{e in delta(S)} (1 - 2*q_{t(e)}/Q) * x_e <= 0
-```
+$$\frac{2}{Q} \sum_{i \in S} q_i\,y_i \;-\; \sum_{e \in \delta(S)} \!\left(1 - \frac{2\,q_{t(e)}}{Q}\right) x_e \;\le\; 0$$
 
 Uses one Gomory-Hu tree min-cut per target node, same as SEC.
 
@@ -161,16 +151,16 @@ File: `src/sep/rglm_separator.h`, `src/sep/rglm_separator.cpp`
 
 Strengthens GLM (multistar) inequalities using ceiling-based rounding, analogous
 to how RCI strengthens the basic capacity inequality. Based on eq (24) of
-Jepsen et al. 2014 with a_i = d_i, b = Q. Enabled via `--enable_rglm true`
+Jepsen et al. 2014 with $a_i = d_i$, $b = Q$. Enabled via `--enable_rglm true`
 (disabled by default).
 
 ### Background
 
-The GLM inequality (eq 17) for a set S of customers uses the vehicle capacity Q
+The GLM inequality (eq 17) for a set $S$ of customers uses the vehicle capacity $Q$
 as the denominator in its coefficients. When the total demand is not a multiple
-of Q, the required number of vehicles k = ceil(alpha/Q) leaves a fractional
-remainder r = alpha mod Q. RGLM exploits this by replacing Q with the smaller
-value r in the denominators, producing tighter coefficients.
+of $Q$, the required number of vehicles $k = \lceil\alpha/Q\rceil$ leaves a fractional
+remainder $r = \alpha \bmod Q$. RGLM exploits this by replacing $Q$ with the smaller
+value $r$ in the denominators, producing tighter coefficients.
 
 The paper (p. 85) notes that RGLM is not separated directly -- instead, sets S
 found by other separators (multistar, capacity) are tested for RGLM violations.
@@ -178,54 +168,48 @@ We follow this approach by reusing the Gomory-Hu tree min-cut sets.
 
 ### Inequality
 
-For S subset of N (customer nodes, no depot), define:
+For $S \subseteq N$ (customer nodes, no depot), define:
 
-- alpha = sum_{i in S} d_i + 2 * sum_{j not in S} d_j
-- r = alpha mod Q (skip if r = 0, no rounding benefit)
-- k = ceil(alpha / Q) (skip if k <= 1)
+- $\alpha = \sum_{i \in S} d_i + 2\sum_{j \notin S} d_j$
+- $r = \alpha \bmod Q$ (skip if $r = 0$, no rounding benefit)
+- $k = \lceil\alpha/Q\rceil$ (skip if $k \le 1$)
 
-The RGLM constraint in >= form:
+The RGLM constraint in $\ge$ form:
 
-```
-sum_{e in delta(S)} x_e  >=  2k - 2*beta/r
-```
+$$\sum_{e \in \delta(S)} x_e \;\ge\; 2k - \frac{2\,\beta}{r}$$
 
-where beta = sum_{i in S} d_i(1-y_i) + sum_{j not in S} d_j(2 - sum_{e in E(j,S)} x_e).
+where $\beta = \sum_{i \in S} d_i(1-y_i) + \sum_{j \notin S} d_j\!\left(2 - \sum_{e \in E(j,S)} x_e\right)$.
 
-Rearranging to <= form for the cut pool:
+Rearranging to $\le$ form for the cut pool:
 
-```
-(2/r) * sum_{i in S} d_i * y_i
-  + sum_{e in delta(S)} (2*d_out(e)/r - 1) * x_e
-  <= 2 * (alpha/r - k)
-```
+$$\frac{2}{r} \sum_{i \in S} d_i\,y_i \;+\; \sum_{e \in \delta(S)} \!\left(\frac{2\,d_{\text{out}}(e)}{r} - 1\right) x_e \;\le\; 2\!\left(\frac{\alpha}{r} - k\right)$$
 
-where d_out(e) is the demand of the endpoint of e outside S.
+where $d_{\text{out}}(e)$ is the demand of the endpoint of $e$ outside $S$.
 
 ### Key difference from GLM
 
 | | GLM | RGLM |
 |---|---|---|
-| x-coefficient | -(1 - 2*d_out/Q) | 2*d_out/r - 1 |
-| y-coefficient | 2*d_i/Q | 2*d_i/r |
-| RHS | 0 | 2*(alpha/r - k) |
-| Denominator | Q (capacity) | r = alpha mod Q |
+| $x$-coefficient | $-(1 - 2\,d_{\text{out}}/Q)$ | $2\,d_{\text{out}}/r - 1$ |
+| $y$-coefficient | $2\,d_i/Q$ | $2\,d_i/r$ |
+| RHS | $0$ | $2(\alpha/r - k)$ |
+| Denominator | $Q$ (capacity) | $r = \alpha \bmod Q$ |
 
-Since r <= Q, the RGLM coefficients are at least as strong as GLM whenever
-r > 0 and k > 1.
+Since $r \le Q$, the RGLM coefficients are at least as strong as GLM whenever
+$r > 0$ and $k > 1$.
 
 ### Algorithm
 
 Follows the same structure as `MultistarSeparator::separate()`:
 
-1. Precompute d_total = sum of all customer demands (constant across targets).
-2. For each target node (non-depot, y > tol):
-   - Get min-cut from Gomory-Hu tree: S = {u : !reachable[u]}
-   - Compute alpha = 2*d_total - d_S, r = alpha mod Q, k = ceil(alpha/Q)
-   - Skip if r <= tol (no rounding benefit) or k <= 1
-   - Compute cut_flow and weighted star_sum over crossing edges
-   - Check violation: (2k - 2*beta/r) - cut_flow > tol
-   - Emit cut in <= form with appropriate coefficients
+1. Precompute $d_{\text{total}} = \sum$ of all customer demands (constant across targets).
+2. For each target node (non-depot, $y > \text{tol}$):
+   - Get min-cut from Gomory-Hu tree: $S = \{u : \texttt{!reachable}[u]\}$
+   - Compute $\alpha = 2\,d_{\text{total}} - d_S$, $r = \alpha \bmod Q$, $k = \lceil\alpha/Q\rceil$
+   - Skip if $r \le \text{tol}$ (no rounding benefit) or $k \le 1$
+   - Compute $\text{cut\_flow}$ and weighted $\text{star\_sum}$ over crossing edges
+   - Check violation: $(2k - 2\,\beta/r) - \text{cut\_flow} > \text{tol}$
+   - Emit cut in $\le$ form with appropriate coefficients
 
 ### Usage
 
@@ -269,13 +253,13 @@ File: `src/sep/comb_separator.cpp`
 
 Implements a BFS-based heuristic for comb separation (Jepsen et al. eq 13):
 
-1. **Handle construction**: BFS from depot, adding nodes with x_e > threshold
+1. **Handle construction**: BFS from depot, adding nodes with $x_e > \text{threshold}$
    (tries thresholds 0.5 and 0.3).
 2. **Tooth identification**: Crossing edges (one endpoint in handle, one outside)
-   become candidate teeth. Each tooth contributes x_e - y_{outside}.
+   become candidate teeth. Each tooth contributes $x_e - y_{\text{outside}}$.
 3. **Greedy selection**: Sort teeth by contribution, greedily select with no
-   shared inside/outside nodes. Require >= 3 teeth, odd count.
-4. **Violation check**: x(E(H)) + sum(x_{tooth}) - sum_{j in H}(y_j) - sum(y_{outside}) > (t-1)/2.
+   shared inside/outside nodes. Require $\ge 3$ teeth, odd count.
+4. **Violation check**: $x(E(H)) + \sum x_{\text{tooth}} - \sum_{j \in H} y_j - \sum y_{\text{outside}} > (t-1)/2$.
 
 **Status**: Currently active but produces very few cuts in practice. The
 formulation requires y-variable corrections not present in the standard CVRP
