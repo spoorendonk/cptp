@@ -74,7 +74,7 @@ cmake --build build -j$(nproc)
 
 Accepts TSPLIB (`.vrp`, `.sppcc`) and numeric (`.txt`) instance formats. All options beyond `--source`/`--target`/`--branch_hyper` are forwarded to HiGHS (e.g., `--time_limit`, `--threads`, `--output_flag`).
 
-#### Hyperplane branching
+### Hyperplane branching
 
 The `--branch_hyper` option enables dynamic constraint branching, which adds/removes LP constraint rows during the branch-and-bound search. Modes:
 
@@ -105,7 +105,7 @@ When `source != target`, the solver uses an open s-t path formulation (degree 1 
 ./build/rcspp-solve tests/data/tiny4.txt --output_flag false
 
 # Hyperplane branching (Ryan-Foster pairs)
-./build/rcspp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --branch_hyper pairs
+./build/rcspp-solve benchmarks/instances/spprclib/B-n45-k6-54.sppcc --branch_hyper pairs
 ```
 
 ### Instance formats
@@ -210,8 +210,8 @@ See [C++ API](docs/cpp-api.md) and [Python API](docs/python-api.md) for full doc
 ## Tests
 
 ```bash
-./build/rcspp_algo_tests                    # 57 C++ algorithm tests (no HiGHS needed)
-./build/rcspp_tests                         # 26 C++ integration tests (requires HiGHS)
+./build/rcspp_algo_tests                    # 63 C++ algorithm tests (no HiGHS needed)
+./build/rcspp_tests                         # 39 C++ integration tests (requires HiGHS)
 pytest tests/python/test_algorithms.py      # 33 Python algorithm tests (no HiGHS needed)
 pytest tests/python/test_solver.py          # Python solver tests (requires HiGHS)
 RCSPP_RUN_LOCAL_INSTALL_TEST=1 pytest tests/python/test_local_install.py  # venv + pip install -e . smoke test
@@ -259,8 +259,9 @@ docs/            Algorithm documentation
 - [Cut separation](docs/separation.md) — SEC, RCI, Multistar/GLM, RGLM, Comb, SeparationOracle
 - [Preprocessing](docs/preprocessing.md) — demand-reachability filtering, labeling-based edge elimination
 - [Domain propagator](docs/domain-propagator.md) — BoundPropagator, labeling-based edge fixing
-- [Warm-start heuristic](docs/warm-start-heuristic.md) — construction, local search, parallelism
+- [Primal heuristic](docs/primal-heuristic.md) — initial solution, LP-guided callback, local search
 - [Benchmark results](docs/benchmarks.md) — SPPRCLIB and Roberti instance results
+- [Roadmap](docs/ROADMAP.md) — planned work units and priorities
 
 ## Dependencies
 
@@ -271,7 +272,7 @@ docs/            Algorithm documentation
 
 ## Benchmarks
 
-Tested on 76 instances from two standard sets: [SPPRCLIB](https://or.rwth-aachen.de/research/spprclib) (45 instances) and Roberti Set 3 from [Jepsen et al. (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X) (31 instances). **71 of 76 solved to proven optimality** (93%) within a 1-hour time limit. The 5 unsolved are large M-series instances (151--200 nodes).
+Tested on 76 instances from two standard sets: [SPPRCLIB](https://or.rwth-aachen.de/research/spprclib) (45 instances) and Roberti Set 3 (Roberti and Roberti, see [Jepsen et al. (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X)) (31 instances). **71 of 76 solved to proven optimality** (93%) within a 1-hour time limit. The 5 unsolved are large M-series instances (151--200 nodes).
 
 See [docs/benchmarks.md](docs/benchmarks.md) for full results with UB/LB, gap, timing, and per-separator cut counts.
 
