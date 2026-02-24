@@ -8,7 +8,7 @@
 #include "core/io.h"
 #include "core/problem.h"
 #include "core/solution.h"
-#include "heuristic/warm_start.h"
+#include "heuristic/primal_heuristic.h"
 #include "preprocess/bound_propagator.h"
 #include "preprocess/edge_elimination.h"
 #include "sep/comb_separator.h"
@@ -26,6 +26,13 @@
 
 namespace nb = nanobind;
 using namespace nb::literals;
+
+// SeparationOracle stores unique_ptr<Separator>, so it is non-copyable.
+// Tell nanobind explicitly to avoid generating copy wrappers.
+namespace nanobind::detail {
+template <>
+struct is_copy_constructible<rcspp::sep::SeparationOracle> : std::false_type {};
+}  // namespace nanobind::detail
 
 // Helper: wrap a const std::vector<T>& as a read-only numpy view (no copy).
 // The parent python object must stay alive (use rv_policy::reference_internal).
@@ -210,11 +217,11 @@ NB_MODULE(_rcspp_bac, m) {
            "Check if integer solution satisfies all SECs.");
 
     // --- WarmStartResult ---
-    nb::class_<rcspp::heuristic::WarmStartResult>(m, "WarmStartResult")
-        .def_prop_ro("col_values", [](rcspp::heuristic::WarmStartResult& self) {
+    nb::class_<rcspp::heuristic::HeuristicResult>(m, "WarmStartResult")
+        .def_prop_ro("col_values", [](rcspp::heuristic::HeuristicResult& self) {
             return vec_view_numpy<double>(self.col_values, nb::find(self));
         })
-        .def_ro("objective", &rcspp::heuristic::WarmStartResult::objective);
+        .def_ro("objective", &rcspp::heuristic::HeuristicResult::objective);
 
     // --- build_warm_start ---
     m.def("build_warm_start", [](const rcspp::Problem& prob, double time_budget_ms) {

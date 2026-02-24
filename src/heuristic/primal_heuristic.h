@@ -240,7 +240,14 @@ single_restart(const Problem& prob,
         in_tour[source] = true;
         in_tour[target] = true;
     }
-    double remaining_cap = Q;
+    // Mandatory endpoints consume capacity too: depot once for tours,
+    // source+target for paths.
+    double remaining_cap = Q - prob.demand(source);
+    if (!is_tour) remaining_cap -= prob.demand(target);
+
+    if (remaining_cap < 0.0) {
+        return {std::move(tour), std::numeric_limits<double>::max()};
+    }
 
     greedy_insert(prob, tour, in_tour, remaining_cap, order, edge_active);
 
