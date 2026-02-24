@@ -214,6 +214,7 @@ See [C++ API](docs/cpp-api.md) and [Python API](docs/python-api.md) for full doc
 ./build/rcspp_tests                         # 26 C++ integration tests (requires HiGHS)
 pytest tests/python/test_algorithms.py      # 33 Python algorithm tests (no HiGHS needed)
 pytest tests/python/test_solver.py          # Python solver tests (requires HiGHS)
+RCSPP_RUN_LOCAL_INSTALL_TEST=1 pytest tests/python/test_local_install.py  # venv + pip install -e . smoke test
 ```
 
 The algorithm tests (`rcspp_algo_tests`) cover all solver-independent components:
