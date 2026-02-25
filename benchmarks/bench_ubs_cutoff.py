@@ -172,8 +172,8 @@ def main():
               f"{total_normal:>7.1f}s {'':>7} {'':>5} "
               f"{total_prove:>7.1f}s {'':>7} {'':>5} "
               f"{total_normal/total_prove:>7.2f}x")
-        print(f"\nGeometric mean speedup over {count} instances: "
-              f"{(total_normal/total_prove):.2f}x (arithmetic on totals)")
+        print(f"\nAggregate speedup over {count} instances: "
+              f"{(total_normal/total_prove):.2f}x")
 
 
 if __name__ == "__main__":

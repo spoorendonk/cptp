@@ -704,7 +704,7 @@ void HiGHSBridge::install_propagator() {
                         if (z_LR < inf) {
                             // Trigger C: Fix edges to 0
                             for (int32_t e = 0; e < m; ++e) {
-                                if (domain.col_upper_[e] < 0.5) continue;
+                                if (domain.col_upper_[e] < 0.5 || domain.col_lower_[e] > 0.5) continue;
 
                                 int32_t u = prob.graph().edge_source(e);
                                 int32_t v = prob.graph().edge_target(e);
@@ -748,13 +748,12 @@ void HiGHSBridge::install_propagator() {
                             // Trigger D: Fix nodes to 1 (optional, expensive)
                             if (rc_settings.fix_to_one) {
                                 // For each unfixed node, run labeling with that node forbidden
-                                struct NodeFix { int32_t node; };
-                                std::vector<NodeFix> candidates;
+                                std::vector<int32_t> candidates;
                                 for (int32_t i = 0; i < n; ++i) {
                                     if (i == prob.source() || i == prob.target()) continue;
                                     if (domain.col_lower_[m + i] > 0.5) continue;  // already fixed to 1
                                     if (domain.col_upper_[m + i] < 0.5) continue;  // already fixed to 0
-                                    candidates.push_back({i});
+                                    candidates.push_back(i);
                                 }
 
                                 // Parallel labeling with each node forbidden
@@ -762,7 +761,7 @@ void HiGHSBridge::install_propagator() {
                                 tbb::parallel_for(
                                     static_cast<size_t>(0), candidates.size(),
                                     [&](size_t idx) {
-                                        int32_t node_i = candidates[idx].node;
+                                        int32_t node_i = candidates[idx];
                                         // Copy profits and set forbidden node to -1e30
                                         std::vector<double> mod_profits = rc_profits;
                                         mod_profits[node_i] = -1e30;
@@ -792,7 +791,7 @@ void HiGHSBridge::install_propagator() {
                                     if (z_LR_minus[idx] >= inf) continue;
                                     double gap = z_LR_minus[idx] - z_LR;
                                     if (z_LP + gap > ub + 1e-6) {
-                                        int32_t node_i = candidates[idx].node;
+                                        int32_t node_i = candidates[idx];
                                         domain.changeBound(
                                             HighsBoundType::kLower, m + node_i, 1.0,
                                             HighsDomain::Reason::unspecified());

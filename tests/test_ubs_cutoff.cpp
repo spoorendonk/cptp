@@ -50,31 +50,31 @@ TEST_CASE("prove-only: tiny4 path", "[prove]") {
 // ── SPPRCLIB instances: prove-only with known optimal UBS ──
 
 TEST_CASE("prove-only: B-n45-k6-54", "[prove][slow]") {
-    auto r = prove_instance("bench/instances/spprclib/B-n45-k6-54.sppcc", -74278.0, 60);
+    auto r = prove_instance("benchmarks/instances/spprclib/B-n45-k6-54.sppcc", -74278.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }
 
 TEST_CASE("prove-only: B-n50-k8-40", "[prove][slow]") {
-    auto r = prove_instance("bench/instances/spprclib/B-n50-k8-40.sppcc", -12832.0, 60);
+    auto r = prove_instance("benchmarks/instances/spprclib/B-n50-k8-40.sppcc", -12832.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-12832.0, 1.0));
 }
 
 TEST_CASE("prove-only: B-n52-k7-15", "[prove][slow]") {
-    auto r = prove_instance("bench/instances/spprclib/B-n52-k7-15.sppcc", -74998.0, 60);
+    auto r = prove_instance("benchmarks/instances/spprclib/B-n52-k7-15.sppcc", -74998.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74998.0, 1.0));
 }
 
 TEST_CASE("prove-only: A-n63-k10-44", "[prove][slow]") {
-    auto r = prove_instance("bench/instances/spprclib/A-n63-k10-44.sppcc", -32561.0, 60);
+    auto r = prove_instance("benchmarks/instances/spprclib/A-n63-k10-44.sppcc", -32561.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-32561.0, 1.0));
 }
 
 TEST_CASE("prove-only: A-n69-k9-42", "[prove][slow]") {
-    auto r = prove_instance("bench/instances/spprclib/A-n69-k9-42.sppcc", -43290.0, 60);
+    auto r = prove_instance("benchmarks/instances/spprclib/A-n69-k9-42.sppcc", -43290.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-43290.0, 1.0));
 }
