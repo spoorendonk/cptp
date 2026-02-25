@@ -1,77 +1,53 @@
-# rcspp-bac — Resource Constrained Shortest Path Branch-and-Cut Solver
+# rcspp-bac
 
-## Git Workflow
-
-- **Never commit directly to main.** Always create a feature branch, push, and open a PR.
-- **Linear history only.** Merge PRs with squash or rebase (no merge commits).
-- **No force-push to main.**
-
-## Build
+## Quick Reference
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
+# build
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
+
+# test
+./build/rcspp_algo_tests && ./build/rcspp_tests
 ```
 
-For Python bindings (development):
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DRCSPP_BUILD_PYTHON=ON
-cmake --build build -j$(nproc)
-```
+## Git
 
-For pip-installable Python package:
-```bash
-pip install .
-```
+- Never commit directly to `main`. Always feature branches.
+- Linear history only (squash-merge or rebase-merge).
 
-## Test
+## Workflow: Plan → Grind
 
-```bash
-./build/rcspp_tests                              # C++ tests
-./build/rcspp-solve tests/data/tiny4.txt         # CLI
-```
+Every task has two phases. Do not skip planning.
 
-## Dependencies
+### Plan (default)
 
-- GCC 14, C++23
-- CMake 3.25+
-- `apt install libtbb-dev` (TBB 2021.11)
-- HiGHS: fetched via CMake FetchContent (v1.10.0)
-- Catch2: fetched via CMake FetchContent (v3.7.1)
+When given a task, **plan first**: investigate the code, propose an approach,
+discuss with the user. Wait for approval before implementing (e.g. "grind", "go", "do it").
 
-## Architecture
+### Grind (on approval)
 
-```
-src/core/        — Problem definition, IO parsers (TSPLIB, numeric .txt), Dinitz max-flow, Gomory-Hu tree
-src/preprocess/  — Demand-reachability and edge elimination via capacity-aware labeling
-src/sep/         — Solver-independent separators (SEC, RCI, Multistar, RGLM, Comb)
-src/model/       — HiGHS integration (Model, HiGHSBridge, propagator)
-src/heuristic/   — Warm-start construction + local search
-src/cli/         — CLI tool (rcspp-solve)
-src/util/        — Utilities (Timer)
-python/          — nanobind Python bindings
-tests/           — Catch2 tests
-docs/            — Algorithm documentation
-```
+Execute autonomously. Build, test, fix, repeat until green.
+Self-review, then fullgate: branch, PR, sync main, push.
+Progress lives in files and git — not in your context window.
 
-## Key types
+Only pause and ask a human when:
+- A fix requires changing the public API or architecture
+- You discover a bug in unrelated code you shouldn't touch
+- You're stuck after multiple failed attempts
 
-- `rcspp::Problem` — RCSPP instance using `static_graph` (own CSR graph); has `source()`, `target()`, `is_tour()`
-- `rcspp::Model` — User-facing solver interface; `set_source()`/`set_target()` for paths, `set_depot()` for tours
-- `rcspp::HiGHSBridge` — Wires separators + domain propagator into HiGHS MIP
-- `rcspp::sep::Separator` — Base class for cut separators
-- `rcspp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow (path-aware)
-- `rcspp::gomory_hu_tree` — Gusfield's algorithm, shared across separators
-- `rcspp::heuristic::build_warm_start` — Parallel greedy + local search heuristic
+### Fullgate
 
-## Tour vs s-t path
+Also runs standalone when user says **"fullgate"**:
+branch → PR → sync (merge main **into** feature branch) → tests → docs →
+push → review → build → test → push fixes → squash-merge → delete branch
 
-When `source == target` (default), the solver uses a closed tour formulation (degree 2 at all nodes).
-When `source != target`, it uses an open path formulation:
-- Degree 1 at source/target, degree 2 at intermediates
-- SEC cuts: sets containing the path target need only 1 cut crossing (path enters and terminates)
-- Numeric `.txt` format: optional `source target` line after the capacity line
+### Claiming Work (GitHub)
 
-## Namespace
+- `gh issue edit <N> --add-label agent-wip` when starting on an issue or PR
+- Check for `agent-wip` label before picking up work
+- Remove label and close/merge when done
 
-All code under `rcspp::` namespace, separators under `rcspp::sep::`, heuristics under `rcspp::heuristic::`, preprocessing under `rcspp::preprocess::`.
+### Teams
+
+For independent sub-tasks, launch a team. Each teammate works in its own
+worktree. Lead integrates: merge, resolve conflicts, build/test the result.

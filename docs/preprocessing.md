@@ -15,9 +15,9 @@ File: `src/preprocess/demand_reachability.h`
 Eliminates nodes that are unreachable within the capacity budget.
 
 - **Tour** (source == target): Dijkstra from depot; eliminates nodes where
-  `2 * min_demand_path(depot, v) - demand(v) > Q` (round-trip check)
-- **Path** (source != target): Dijkstra from both source and target; eliminates
-  nodes where `dist_source(v) + dist_target(v) - demand(v) > Q` (one-way check)
+  $2 \cdot \text{min\_demand\_path}(\text{depot}, v) - d_v > Q$ (round-trip check)
+- **Path** (source $\ne$ target): Dijkstra from both source and target; eliminates
+  nodes where $\text{dist}_s(v) + \text{dist}_t(v) - d_v > Q$ (one-way check)
 
 ## Edge Elimination
 
@@ -31,10 +31,29 @@ Forward labeling with:
 
 Lower bound computation:
 
-- **Tour**: labeling from depot; `lb(u,v) = f[u] + c(u,v) + f[v] + profit(depot)`
+- **Tour**: labeling from depot; $\text{lb}(u,v) = f[u] + c(u,v) + f[v] + p_{\text{depot}}$
 - **Path**: labeling from both source and target;
-  `lb(u,v) = min(f_s[u] + c(u,v) + f_t[v], f_s[v] + c(u,v) + f_t[u])`
+  $\text{lb}(u,v) = \min(f_s[u] + c(u,v) + f_t[v],\ f_s[v] + c(u,v) + f_t[u])$
 
 For each edge, if the lower bound exceeds the warm-start upper bound, the edge
 variable is fixed to zero before the MIP is built. The same labeling bounds are
 reused by the [domain propagator](domain-propagator.md) during branch-and-bound.
+
+## Testing
+
+8 C++ tests (`[preprocess]` tag) and 5 Python tests cover:
+
+| Test | Description |
+|---|---|
+| Demand reachability: tour round-trip | All nodes reachable with sufficient capacity |
+| Demand reachability: tour eliminates | High-demand node unreachable |
+| Demand reachability: path bidirectional | Source+target Dijkstra for s-t path |
+| Demand reachability: path eliminates | High-demand node on tight-capacity path |
+| Demand reachability: large capacity | All nodes reachable with very large Q |
+| Edge elimination: tour | Expensive edge eliminated with tight UB |
+| Edge elimination: path | Bidirectional labeling on s-t path |
+| Edge elimination: infinite UB | No edges eliminated |
+
+```bash
+./build/rcspp_algo_tests [preprocess]
+```

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <span>
 
 namespace rcspp {
@@ -24,6 +25,13 @@ struct SeparationContext {
     int32_t y_offset;  // LP column offset for node vars
     double tol = 1e-6;                 // cut violation tolerance
     const gomory_hu_tree* flow_tree = nullptr;
+
+    /// Current incumbent upper bound (for cost-based separators).
+    double upper_bound = std::numeric_limits<double>::infinity();
+
+    /// All-pairs shortest path bounds: flat n×n matrix, d(s,v) = all_pairs[s*n+v].
+    /// Empty when not available. Used by SPISeparator.
+    std::span<const double> all_pairs = {};
 };
 
 }  // namespace rcspp::sep

@@ -3,6 +3,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include "core/problem.h"
 #include "core/solution.h"
 #include "sep/separation_context.h"
+#include "sep/separation_oracle.h"
 #include "sep/separator.h"
 #include "util/logger.h"
 
@@ -38,6 +40,7 @@ class HiGHSBridge {
 
     int32_t x_offset() const { return 0; }
     int32_t y_offset() const { return num_edges_; }
+    int32_t num_nodes() const { return num_nodes_; }
 
     /// Set separation skip interval: separate every N-th callback invocation.
     /// 1 = every round (default), 2 = every other round, etc.
@@ -65,6 +68,18 @@ class HiGHSBridge {
 
     /// Install domain propagator that fixes edges during B&C based on labeling bounds.
     void install_propagator();
+
+    /// Install LP-guided primal heuristic callback (kCallbackMipUserSolution).
+    void install_heuristic_callback();
+
+    /// Enable/disable heuristic callback.
+    void set_heuristic_callback(bool enable) { heuristic_callback_ = enable; }
+
+    /// Set time budget for each heuristic callback invocation (ms).
+    void set_heuristic_budget_ms(double ms) { heuristic_budget_ms_ = ms; }
+
+    /// Set heuristic strategy: 0=all, 1=LP-threshold, 2=RINS, 3=neighborhood.
+    void set_heuristic_strategy(int s) { heuristic_strategy_ = s; }
 
  private:
     /// Order the visited nodes by following edges from source.
@@ -106,6 +121,20 @@ class HiGHSBridge {
     mutable int64_t total_cuts_ = 0;
     mutable int64_t separation_rounds_ = 0;
     mutable int64_t separation_calls_ = 0;  // total callback invocations
+
+    // Heuristic callback: LP-guided primal heuristic
+    bool heuristic_callback_ = true;
+    double heuristic_budget_ms_ = 20.0;
+    int heuristic_strategy_ = 0;  // 0=all, 1=threshold, 2=RINS, 3=neighborhood
+
+    // Cached LP relaxation from separator callback (shared with heuristic)
+    std::shared_ptr<std::vector<double>> cached_x_lp_;
+    std::shared_ptr<std::vector<double>> cached_y_lp_;
+    std::shared_ptr<std::mutex> lp_cache_mutex_;
+
+    // Heuristic callback statistics
+    std::shared_ptr<int64_t> heuristic_calls_;
+    std::shared_ptr<int64_t> heuristic_solutions_;
 };
 
 }  // namespace rcspp

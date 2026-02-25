@@ -5,11 +5,34 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
-#include "model/model.h"
 #include "core/io.h"
+#include "core/problem.h"
+#include "core/solution.h"
+#include "heuristic/primal_heuristic.h"
+#include "preprocess/bound_propagator.h"
+#include "preprocess/edge_elimination.h"
+#include "sep/comb_separator.h"
+#include "sep/cut.h"
+#include "sep/multistar_separator.h"
+#include "sep/rci_separator.h"
+#include "sep/rglm_separator.h"
+#include "sep/sec_separator.h"
+#include "sep/separation_oracle.h"
+#include "sep/separator.h"
+
+#ifdef RCSPP_HAS_HIGHS
+#include "model/model.h"
+#endif
 
 namespace nb = nanobind;
 using namespace nb::literals;
+
+// SeparationOracle stores unique_ptr<Separator>, so it is non-copyable.
+// Tell nanobind explicitly to avoid generating copy wrappers.
+namespace nanobind::detail {
+template <>
+struct is_copy_constructible<rcspp::sep::SeparationOracle> : std::false_type {};
+}  // namespace nanobind::detail
 
 // Helper: wrap a const std::vector<T>& as a read-only numpy view (no copy).
 // The parent python object must stay alive (use rv_policy::reference_internal).
@@ -123,6 +146,192 @@ NB_MODULE(_rcspp_bac, m) {
            "demands"_a, "capacity"_a, "source"_a = 0, "target"_a = 0,
            "name"_a = "");
 
+    // ================================================================
+    // Solver-independent algorithm API
+    // ================================================================
+
+    // --- Cut ---
+    nb::class_<rcspp::sep::Cut>(m, "Cut")
+        .def_prop_ro("indices", [](rcspp::sep::Cut& self) {
+            return vec_view_numpy<int32_t>(self.indices, nb::find(self));
+        })
+        .def_prop_ro("values", [](rcspp::sep::Cut& self) {
+            return vec_view_numpy<double>(self.values, nb::find(self));
+        })
+        .def_ro("rhs", &rcspp::sep::Cut::rhs)
+        .def_ro("violation", &rcspp::sep::Cut::violation)
+        .def_prop_ro("size", &rcspp::sep::Cut::size);
+
+    // --- SeparationOracle ---
+    nb::class_<rcspp::sep::SeparationOracle>(m, "SeparationOracle")
+        .def(nb::init<const rcspp::Problem&>(), "problem"_a,
+             nb::keep_alive<1, 2>(),  // oracle refs problem
+             "Create a separation oracle for the given problem.")
+        .def("add_default_separators",
+             &rcspp::sep::SeparationOracle::add_default_separators,
+             "Add the default separator set (SEC + RCI + Multistar + Comb).")
+        .def("add_sec", [](rcspp::sep::SeparationOracle& self) {
+            self.add_separator(std::make_unique<rcspp::sep::SECSeparator>());
+        }, "Add Subtour Elimination Constraint separator.")
+        .def("add_rci", [](rcspp::sep::SeparationOracle& self) {
+            self.add_separator(std::make_unique<rcspp::sep::RCISeparator>());
+        }, "Add Rounded Capacity Inequality separator.")
+        .def("add_multistar", [](rcspp::sep::SeparationOracle& self) {
+            self.add_separator(std::make_unique<rcspp::sep::MultistarSeparator>());
+        }, "Add Multistar (GLM) separator.")
+        .def("add_comb", [](rcspp::sep::SeparationOracle& self) {
+            self.add_separator(std::make_unique<rcspp::sep::CombSeparator>());
+        }, "Add Comb inequality separator.")
+        .def("add_rglm", [](rcspp::sep::SeparationOracle& self) {
+            self.add_separator(std::make_unique<rcspp::sep::RGLMSeparator>());
+        }, "Add Rounded GLM separator.")
+        .def("set_max_cuts_per_separator",
+             &rcspp::sep::SeparationOracle::set_max_cuts_per_separator,
+             "max_cuts"_a,
+             "Set max cuts to keep per separator per round (0 = unlimited).")
+        .def("separate", [](const rcspp::sep::SeparationOracle& self,
+                            nb::ndarray<double, nb::shape<-1>> x_values,
+                            nb::ndarray<double, nb::shape<-1>> y_values,
+                            int32_t x_offset, int32_t y_offset,
+                            double tol) {
+            auto xv = x_values.view();
+            auto yv = y_values.view();
+            return self.separate(
+                {xv.data(), static_cast<size_t>(x_values.shape(0))},
+                {yv.data(), static_cast<size_t>(y_values.shape(0))},
+                x_offset, y_offset, tol);
+        }, "x_values"_a, "y_values"_a, "x_offset"_a = 0, "y_offset"_a = 0,
+           "tol"_a = rcspp::sep::kDefaultFracTol,
+           "Run separation on LP solution. Returns list of Cut objects.")
+        .def("is_feasible", [](const rcspp::sep::SeparationOracle& self,
+                               nb::ndarray<double, nb::shape<-1>> x_values,
+                               nb::ndarray<double, nb::shape<-1>> y_values,
+                               int32_t x_offset, int32_t y_offset) {
+            auto xv = x_values.view();
+            auto yv = y_values.view();
+            return self.is_feasible(
+                {xv.data(), static_cast<size_t>(x_values.shape(0))},
+                {yv.data(), static_cast<size_t>(y_values.shape(0))},
+                x_offset, y_offset);
+        }, "x_values"_a, "y_values"_a, "x_offset"_a = 0, "y_offset"_a = 0,
+           "Check if integer solution satisfies all SECs.");
+
+    // --- WarmStartResult ---
+    nb::class_<rcspp::heuristic::HeuristicResult>(m, "WarmStartResult")
+        .def_prop_ro("col_values", [](rcspp::heuristic::HeuristicResult& self) {
+            return vec_view_numpy<double>(self.col_values, nb::find(self));
+        })
+        .def_ro("objective", &rcspp::heuristic::HeuristicResult::objective);
+
+    // --- build_warm_start ---
+    m.def("build_warm_start", [](const rcspp::Problem& prob, double time_budget_ms) {
+        return rcspp::heuristic::build_warm_start(prob, time_budget_ms);
+    }, "problem"_a, "time_budget_ms"_a = 1000.0,
+       "Build a warm-start solution via parallel randomized construction + local search.");
+
+    // --- Preprocessing: forward/backward labeling ---
+    m.def("forward_labeling", [](const rcspp::Problem& prob, int32_t source) {
+        auto bounds = rcspp::preprocess::forward_labeling(prob, source);
+        auto* data = new std::vector<double>(std::move(bounds));
+        nb::capsule owner(data, [](void* p) noexcept {
+            delete static_cast<std::vector<double>*>(p);
+        });
+        return nb::ndarray<nb::numpy, double, nb::shape<-1>>(
+            data->data(), {data->size()}, std::move(owner));
+    }, "problem"_a, "source"_a,
+       "Capacity-aware 2-cycle elimination labeling from source.");
+
+    m.def("backward_labeling", [](const rcspp::Problem& prob, int32_t target) {
+        auto bounds = rcspp::preprocess::backward_labeling(prob, target);
+        auto* data = new std::vector<double>(std::move(bounds));
+        nb::capsule owner(data, [](void* p) noexcept {
+            delete static_cast<std::vector<double>*>(p);
+        });
+        return nb::ndarray<nb::numpy, double, nb::shape<-1>>(
+            data->data(), {data->size()}, std::move(owner));
+    }, "problem"_a, "target"_a,
+       "Capacity-aware 2-cycle elimination labeling from target.");
+
+    // --- Preprocessing: edge elimination ---
+    m.def("edge_elimination", [](const rcspp::Problem& prob,
+                                  nb::ndarray<double, nb::shape<-1>> fwd,
+                                  nb::ndarray<double, nb::shape<-1>> bwd,
+                                  double upper_bound, double correction) {
+        auto fv = fwd.view();
+        auto bv = bwd.view();
+        std::vector<double> f(fv.data(), fv.data() + fwd.shape(0));
+        std::vector<double> b(bv.data(), bv.data() + bwd.shape(0));
+        auto eliminated = rcspp::preprocess::edge_elimination(
+            prob, f, b, upper_bound, correction);
+        // Convert vector<bool> to numpy int8 array
+        size_t m = eliminated.size();
+        auto* data = new std::vector<int8_t>(m);
+        for (size_t i = 0; i < m; ++i) (*data)[i] = eliminated[i] ? 1 : 0;
+        nb::capsule owner(data, [](void* p) noexcept {
+            delete static_cast<std::vector<int8_t>*>(p);
+        });
+        return nb::ndarray<nb::numpy, int8_t, nb::shape<-1>>(
+            data->data(), {m}, std::move(owner));
+    }, "problem"_a, "fwd_bounds"_a, "bwd_bounds"_a,
+       "upper_bound"_a, "correction"_a,
+       "Edge elimination using labeling bounds. Returns bool array per edge.");
+
+    // --- BoundPropagator ---
+    nb::class_<rcspp::preprocess::BoundPropagator>(m, "BoundPropagator")
+        .def("__init__", [](rcspp::preprocess::BoundPropagator* self,
+                            const rcspp::Problem& prob,
+                            nb::ndarray<double, nb::shape<-1>> fwd,
+                            nb::ndarray<double, nb::shape<-1>> bwd,
+                            double correction) {
+            auto fv = fwd.view();
+            auto bv = bwd.view();
+            new (self) rcspp::preprocess::BoundPropagator(
+                prob,
+                std::vector<double>(fv.data(), fv.data() + fwd.shape(0)),
+                std::vector<double>(bv.data(), bv.data() + bwd.shape(0)),
+                correction);
+        }, "problem"_a, "fwd_bounds"_a, "bwd_bounds"_a, "correction"_a,
+           nb::keep_alive<1, 2>())
+        .def("set_all_pairs_bounds", [](rcspp::preprocess::BoundPropagator& self,
+                                        nb::ndarray<double, nb::shape<-1>> dist) {
+            auto dv = dist.view();
+            self.set_all_pairs_bounds(
+                std::vector<double>(dv.data(), dv.data() + dist.shape(0)));
+        }, "dist"_a, "Set all-pairs bounds (flat n*n array) for stronger Trigger B.")
+        .def("sweep", [](const rcspp::preprocess::BoundPropagator& self,
+                          double upper_bound,
+                          nb::ndarray<double, nb::shape<-1>> col_upper) {
+            auto cv = col_upper.view();
+            auto fixings = self.sweep(upper_bound,
+                {cv.data(), static_cast<size_t>(col_upper.shape(0))});
+            auto* data = new std::vector<int32_t>(std::move(fixings));
+            nb::capsule owner(data, [](void* p) noexcept {
+                delete static_cast<std::vector<int32_t>*>(p);
+            });
+            return nb::ndarray<nb::numpy, int32_t, nb::shape<-1>>(
+                data->data(), {data->size()}, std::move(owner));
+        }, "upper_bound"_a, "col_upper"_a,
+           "Trigger A sweep: return edge indices that can be fixed to 0.")
+        .def("propagate_fixed_edge",
+             [](const rcspp::preprocess::BoundPropagator& self,
+                int32_t edge, double upper_bound,
+                nb::ndarray<double, nb::shape<-1>> col_upper) {
+            auto cv = col_upper.view();
+            auto fixings = self.propagate_fixed_edge(edge, upper_bound,
+                {cv.data(), static_cast<size_t>(col_upper.shape(0))});
+            auto* data = new std::vector<int32_t>(std::move(fixings));
+            nb::capsule owner(data, [](void* p) noexcept {
+                delete static_cast<std::vector<int32_t>*>(p);
+            });
+            return nb::ndarray<nb::numpy, int32_t, nb::shape<-1>>(
+                data->data(), {data->size()}, std::move(owner));
+        }, "edge"_a, "upper_bound"_a, "col_upper"_a,
+           "Trigger B: given edge fixed to 1, return edges that can be fixed to 0.");
+
+    // ================================================================
+    // HiGHS integration (only when built with RCSPP_BUILD_HIGHS)
+    // ================================================================
+#ifdef RCSPP_HAS_HIGHS
     // --- Model ---
     // Input arrays are read directly from numpy (zero-copy read via span).
     nb::class_<rcspp::Model>(m, "Model")
@@ -164,7 +373,12 @@ NB_MODULE(_rcspp_bac, m) {
             return self.solve(options);
         }, "options"_a = rcspp::SolverOptions{});
 
-    // IO functions
+    m.attr("has_highs") = true;
+#else
+    m.attr("has_highs") = false;
+#endif
+
+    // IO functions (always available)
     m.def("load", [](const std::string& path) {
         return rcspp::io::load(path);
     }, "path"_a, "Load an RCSPP instance from file (auto-detect format)");

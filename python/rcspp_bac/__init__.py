@@ -1,19 +1,43 @@
 from rcspp_bac._rcspp_bac import (
-    Model,
+    # Core types (always available)
     Problem,
     SeparatorStats,
     SolveResult,
     Status,
     load,
+    # Solver-independent algorithms
+    Cut,
+    SeparationOracle,
+    WarmStartResult,
+    BoundPropagator,
+    build_warm_start,
+    forward_labeling,
+    backward_labeling,
+    edge_elimination,
+    has_highs,
 )
-from rcspp_bac.solver import solve
 
 __all__ = [
-    "Model",
+    # Core types
     "Problem",
     "SeparatorStats",
     "SolveResult",
     "Status",
     "load",
-    "solve",
+    # Algorithm API
+    "Cut",
+    "SeparationOracle",
+    "WarmStartResult",
+    "BoundPropagator",
+    "build_warm_start",
+    "forward_labeling",
+    "backward_labeling",
+    "edge_elimination",
+    "has_highs",
 ]
+
+# HiGHS-dependent imports (optional)
+if has_highs:
+    from rcspp_bac._rcspp_bac import Model
+    from rcspp_bac.solver import solve
+    __all__ += ["Model", "solve"]

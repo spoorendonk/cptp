@@ -7,6 +7,8 @@
 
 #include "core/digraph.h"
 #include "core/gomory_hu.h"
+#include "heuristic/primal_heuristic.h"
+#include "lp_data/HighsCallback.h"
 #include "mip/HighsMipSolverData.h"
 #include "mip/HighsUserPropagator.h"
 #include "mip/HighsUserSeparator.h"
@@ -14,6 +16,7 @@
 #include "preprocess/reachability.h"
 #include "sep/sec_separator.h"
 #include "sep/separation_context.h"
+#include "sep/separation_oracle.h"
 
 #include <tbb/task_group.h>
 
@@ -27,7 +30,12 @@ HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
       num_edges_(prob.num_edges()),
       num_nodes_(prob.num_nodes()),
       frac_tol_(frac_tol),
-      int_tol_(1e-6) {
+      int_tol_(1e-6),
+      cached_x_lp_(std::make_shared<std::vector<double>>()),
+      cached_y_lp_(std::make_shared<std::vector<double>>()),
+      lp_cache_mutex_(std::make_shared<std::mutex>()),
+      heuristic_calls_(std::make_shared<int64_t>(0)),
+      heuristic_solutions_(std::make_shared<int64_t>(0)) {
     // Integral feasibility: tight but not zero to avoid rejecting
     // valid solutions due to floating-point noise in LP values.
     // Fractional separation uses a looser tolerance (default 1e-2).
@@ -51,6 +59,14 @@ void HiGHSBridge::build_formulation() {
     std::vector<double> col_cost(total_vars, 0.0);
     std::vector<double> col_lower(total_vars, 0.0);
     std::vector<double> col_upper(total_vars, 1.0);
+
+    // Tour mode: depot-incident edges allow x_e ∈ {0,1,2} to permit 2-node tours
+    // (Jepsen et al. 2014, standard CPTP/CVRP formulation)
+    if (prob_.is_tour()) {
+        for (auto e : graph.incident_edges(prob_.source())) {
+            col_upper[e] = 2.0;
+        }
+    }
 
     // Fix source and target y variables to 1 via bounds
     col_lower[m + prob_.source()] = 1.0;
@@ -218,6 +234,13 @@ void HiGHSBridge::install_separators() {
             } else {
                 std::copy_n(sol.col_value.begin(), m, x_vals.begin());
                 std::copy_n(sol.col_value.begin() + m, n, y_vals.begin());
+
+                // Cache LP values for heuristic callback
+                {
+                    std::lock_guard lock(*lp_cache_mutex_);
+                    *cached_x_lp_ = x_vals;
+                    *cached_y_lp_ = y_vals;
+                }
             }
 
             // Build support graph once for all separators
@@ -246,6 +269,10 @@ void HiGHSBridge::install_separators() {
                 .y_offset = y_offset(),
                 .tol = frac_tol_,
                 .flow_tree = &flow_tree,
+                .upper_bound = mipsolver.mipdata_->upper_limit,
+                .all_pairs = all_pairs_.empty()
+                    ? std::span<const double>{}
+                    : std::span<const double>(all_pairs_),
             };
 
             const bool is_submip = !orig_to_reduced.empty();
@@ -257,7 +284,7 @@ void HiGHSBridge::install_separators() {
                 sep::SECSeparator sec;
                 auto cuts = sec.separate(ctx);
 
-                std::sort(cuts.begin(), cuts.end(),
+                std::stable_sort(cuts.begin(), cuts.end(),
                     [](const sep::Cut& a, const sep::Cut& b) {
                         return a.violation > b.violation;
                     });
@@ -318,7 +345,7 @@ void HiGHSBridge::install_separators() {
                     if (!results[i].empty()) stats.rounds_called++;
 
                     auto& cuts = results[i];
-                    std::sort(cuts.begin(), cuts.end(),
+                    std::stable_sort(cuts.begin(), cuts.end(),
                         [](const sep::Cut& a, const sep::Cut& b) {
                             return a.violation > b.violation;
                         });
@@ -351,37 +378,11 @@ void HiGHSBridge::install_separators() {
             const int32_t n = num_nodes_;
             if (static_cast<int32_t>(sol.size()) < m + n) return true;
 
-            const auto& graph = prob_.graph();
-            const double graph_tol = 1e-6;  // for edge inclusion in support graph
-
-            // Build support graph and Gomory-Hu tree for feasibility check
-            digraph_builder builder(n);
-            for (auto e : graph.edges()) {
-                double xval = sol[e];
-                if (xval > graph_tol) {
-                    int32_t u = graph.edge_source(e);
-                    int32_t v = graph.edge_target(e);
-                    builder.add_arc(u, v, xval);
-                    builder.add_arc(v, u, xval);
-                }
-            }
-            auto [support_graph, capacity] = builder.build();
-            gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
-
-            sep::SeparationContext ctx{
-                .problem = prob_,
-                .x_values = std::span(sol.data(), static_cast<size_t>(m)),
-                .y_values = std::span(sol.data() + m, static_cast<size_t>(n)),
-                .x_offset = x_offset(),
-                .y_offset = y_offset(),
-                .tol = int_tol_,
-                .flow_tree = &flow_tree,
-            };
-
-            // Only check SEC — these are the lazy constraints
-            sep::SECSeparator sec;
-            auto cuts = sec.separate(ctx);
-            return cuts.empty();
+            sep::SeparationOracle oracle(prob_);
+            return oracle.is_feasible(
+                std::span(sol.data(), static_cast<size_t>(m)),
+                std::span(sol.data() + m, static_cast<size_t>(n)),
+                x_offset(), y_offset());
         });
 }
 
@@ -608,6 +609,81 @@ void HiGHSBridge::install_propagator() {
     logger_.log("Installed domain propagator with labeling bounds");
 }
 
+void HiGHSBridge::install_heuristic_callback() {
+    if (!heuristic_callback_) return;
+
+    auto calls = heuristic_calls_;
+    auto solutions = heuristic_solutions_;
+    double budget_ms = heuristic_budget_ms_;
+    int strategy = heuristic_strategy_;
+
+    // Rate-limit: run heuristic at most once per N nodes.
+    auto last_node_count = std::make_shared<int64_t>(0);
+    constexpr int64_t node_interval = 200;
+
+    auto cached_x = cached_x_lp_;
+    auto cached_y = cached_y_lp_;
+    auto cache_mtx = lp_cache_mutex_;
+    highs_.setCallback(
+        [this, cached_x, cached_y, cache_mtx, calls, solutions, budget_ms,
+         last_node_count, strategy](
+            int callback_type, const std::string& /*message*/,
+            const HighsCallbackOutput* data_out,
+            HighsCallbackInput* data_in,
+            void* /*user_data*/) {
+            // Only handle kCallbackMipUserSolution
+            if (callback_type != static_cast<int>(
+                    HighsCallbackType::kCallbackMipUserSolution)) {
+                return;
+            }
+
+            // Skip the initial query after setup (pre-solve heuristic already ran)
+            if (data_out->external_solution_query_origin ==
+                kExternalMipSolutionQueryOriginAfterSetup) {
+                return;
+            }
+
+            // Rate-limit: skip if not enough nodes since last call
+            int64_t current_nodes = data_out->mip_node_count;
+            if (current_nodes - *last_node_count < node_interval) {
+                return;
+            }
+            *last_node_count = current_nodes;
+
+            // Read cached LP values from separator callback
+            std::vector<double> x_lp, y_lp;
+            {
+                std::lock_guard lock(*cache_mtx);
+                if (cached_x->empty()) return;
+                x_lp = *cached_x;
+                y_lp = *cached_y;
+            }
+
+            // Build incumbent vector from current best solution (if available)
+            std::vector<double> incumbent;
+            if (!data_out->mip_solution.empty() &&
+                data_out->mip_primal_bound < 1e20) {
+                incumbent = data_out->mip_solution;
+            }
+
+            (*calls)++;
+
+            auto result = heuristic::lp_guided_heuristic(
+                prob_, x_lp, y_lp, incumbent, budget_ms, strategy);
+
+            if (!result.col_values.empty() &&
+                result.objective < data_out->mip_primal_bound - 1e-6) {
+                data_in->user_has_solution = true;
+                data_in->user_solution = std::move(result.col_values);
+                (*solutions)++;
+            }
+        },
+        nullptr);
+
+    highs_.startCallback(HighsCallbackType::kCallbackMipUserSolution);
+    logger_.log("Installed LP-guided heuristic callback (budget={}ms)", budget_ms);
+}
+
 std::vector<int32_t> HiGHSBridge::order_path(
     const std::vector<int32_t>& visited_nodes,
     const std::vector<int32_t>& active_edges) const {
@@ -722,6 +798,12 @@ SolveResult HiGHSBridge::extract_result() const {
         logger_.log("Propagator: {} calls, {} UB improvements, {} fixings ({} sweep + {} chain)",
                     *propagator_calls_, *ub_improvements_, *propagator_fixings_,
                     *sweep_fixings_, *chain_fixings_);
+    }
+
+    // Print heuristic callback statistics (debug_entered_ is set during install)
+    if (heuristic_calls_ && *heuristic_calls_ > 0) {
+        logger_.log("Heuristic callback: {} calls, {} solutions injected",
+                    *heuristic_calls_, *heuristic_solutions_);
     }
 
     // Attach separator statistics

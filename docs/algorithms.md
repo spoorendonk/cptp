@@ -21,17 +21,19 @@ The solver supports two modes:
 
 Undirected edge formulation following Jepsen et al. (2014):
 
-- **x_e in {0,1}**: whether edge e is in the tour
-- **y_i in {0,1}**: whether customer i is visited
+- $x_e \in \{0,1\}$: whether edge $e$ is in the tour
+- $y_i \in \{0,1\}$: whether customer $i$ is visited
 
-**Objective**: `min sum(cost_e * x_e) - sum(profit_i * y_i)`
+**Objective**:
+
+$$\min \sum_e c_e \, x_e - \sum_i p_i \, y_i$$
 
 **Constraints**:
 1. Degree:
-   - **Tour**: `sum(x_e : e incident to i) = 2 * y_i` for each node
-   - **Path**: `sum(x_e : e incident to i) = y_i` for source/target, `= 2 * y_i` for intermediates
-2. Capacity: `sum(demand_i * y_i) <= Q`
-3. Fixed nodes: `y_source = 1`, `y_target = 1`
+   - **Tour**: $\sum_{e \in \delta(i)} x_e = 2\,y_i$ for each node $i$
+   - **Path**: $\sum_{e \in \delta(i)} x_e = y_i$ for source/target, $= 2\,y_i$ for intermediates
+2. Capacity: $\sum_i d_i \, y_i \le Q$
+3. Fixed nodes: $y_s = 1$, $y_t = 1$
 4. Subtour elimination (separated dynamically)
 5. Capacity inequalities (separated dynamically)
 
@@ -44,7 +46,7 @@ Load instance
 Preprocessing (parallel via TBB)
     |-- Forward labeling (bounds from source)
     |-- Backward labeling (bounds from target; same as forward for tour)
-    '-- Warm-start heuristic (greedy + local search)
+    '-- Initial heuristic (greedy + local search)
     |
     v
 Build MIP formulation
@@ -57,7 +59,8 @@ Install HiGHS callbacks
     |-- User separator   --> separation.md
     |-- Feasibility check (SEC on incumbents, with sub-MIP column mapping)
     |-- Sub-MIP root SEC separation (column mapping via undoPrimal)
-    '-- Domain propagator --> domain-propagator.md
+    |-- Domain propagator --> domain-propagator.md
+    '-- LP-guided heuristic callback --> primal-heuristic.md
     |
     v
 HiGHS MIP solve
@@ -89,15 +92,17 @@ See [domain-propagator.md](domain-propagator.md) for full details.
 
 Demand-reachability filtering and labeling-based edge elimination. See [preprocessing.md](preprocessing.md) for full details.
 
-## Warm-Start Heuristic
+## Primal Heuristic
 
-Parallel construction + local search heuristic using Intel TBB. See [warm-start-heuristic.md](warm-start-heuristic.md) for full details.
+Parallel construction + local search heuristic using Intel TBB. See [primal-heuristic.md](primal-heuristic.md) for full details.
 
-**Construction**: Greedy cheapest-insertion with three deterministic orderings (profit/demand ratio, absolute profit, distance from source) plus random restarts. For paths, the initial route is `[source, target]` (open); for tours, `[depot, depot]` (closed).
+**Initial solution** (`build_initial_solution`): Greedy cheapest-insertion with three deterministic orderings (profit/demand ratio, absolute profit, distance from source) plus random restarts on the complete graph. Time budget: $\min(500\text{ms},\; n \times 10\text{ms})$.
+
+**LP-guided callback** (`lp_guided_heuristic`): During MIP solve, builds reduced graphs from LP relaxation values using three strategies (LP-value threshold, RINS-style agreement, neighborhood expansion) and runs construction + local search on each. Registered via `kCallbackMipUserSolution`. Time budget: 20ms per invocation.
 
 **Local search**: 2-opt, or-opt (1/2/3 chains), node drop, node add with first-improvement.
 
-**Parallelism**: Multiple TBB workers run independent construction+search with a shared best solution. Time budget: `min(500ms, num_nodes * 10ms)`.
+**Parallelism**: By default (deterministic mode), all restarts are pre-built with deterministic seeds and executed via `tbb::parallel_for`, giving identical results across runs. With `--deterministic false`, the solver uses time-based workers with random seeds for potentially better bounds on fast hardware.
 
 ## References
 

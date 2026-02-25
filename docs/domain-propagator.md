@@ -1,13 +1,59 @@
 # Domain Propagator
 
-File: `src/model/highs_bridge.cpp` (install_propagator method)
+Files: `src/preprocess/bound_propagator.h` (solver-independent), `src/model/highs_bridge.cpp` (HiGHS integration)
 
 ## Overview
 
-A custom domain propagator injected into HiGHS via the `HighsUserPropagator` patch.
-Runs inside `HighsSearch.cpp` after HiGHS's built-in reduced-cost fixing
-(`HighsRedcostFixing`). Uses labeling bounds to fix edge variables to zero when
-no improving tour can use that edge.
+Labeling-based domain propagation fixes edge variables to zero when no improving
+tour/path can use that edge. Available in two forms:
+
+1. **`BoundPropagator`** (solver-independent) — standalone class in `src/preprocess/bound_propagator.h`, usable from any MIP solver's propagation callback.
+2. **HiGHS integration** — injected via `HighsUserPropagator` patch, runs inside `HighsSearch.cpp` after HiGHS's built-in reduced-cost fixing.
+
+## BoundPropagator (solver-independent)
+
+File: `src/preprocess/bound_propagator.h`, `src/preprocess/bound_propagator.cpp`
+
+Encapsulates labeling bounds, adjacency structures, and both propagation triggers
+into a reusable class. Pre-builds edge costs, profits, and adjacency lists in the
+constructor for efficient repeated calls.
+
+```cpp
+#include "preprocess/bound_propagator.h"
+#include "preprocess/edge_elimination.h"
+
+auto fwd = rcspp::preprocess::forward_labeling(prob, prob.source());
+auto bwd = rcspp::preprocess::backward_labeling(prob, prob.target());
+double correction = prob.is_tour() ? prob.profits()[prob.source()] : 0.0;
+
+rcspp::preprocess::BoundPropagator prop(prob, fwd, bwd, correction);
+
+// Trigger A: sweep all edges when UB improves
+auto fixed = prop.sweep(upper_bound, col_upper);
+auto fixed_nodes = prop.sweep_nodes(col_upper, /*y_offset=*/num_edges);
+
+// Trigger B: chain fixings when edge is branched to 1
+auto chain = prop.propagate_fixed_edge(edge, upper_bound, col_upper);
+
+// Optional: all-pairs bounds for stronger Trigger B
+prop.set_all_pairs_bounds(dist);  // flat n*n array
+```
+
+### Methods
+
+| Method | Returns | Description |
+|---|---|---|
+| `sweep(ub, col_upper)` | `vector<int32_t>` | Trigger A: edge indices fixable to 0 |
+| `sweep_nodes(col_upper, y_offset)` | `vector<int32_t>` | Node variable indices fixable to 0 (after sweep) |
+| `propagate_fixed_edge(e, ub, col_upper)` | `vector<int32_t>` | Trigger B: edges fixable to 0 given edge e=1 |
+| `set_all_pairs_bounds(dist)` | void | Enable stronger all-pairs Trigger B |
+
+## HiGHS Integration
+
+The HiGHS propagator uses the same algorithmic logic as `BoundPropagator` but is
+implemented as an inline lambda in `HiGHSBridge::install_propagator()` for
+performance (avoids vector allocations in the hot path). It interacts directly
+with HiGHS's `HighsDomain` for bound changes.
 
 ## Labeling Bounds
 
@@ -16,53 +62,53 @@ to the propagator at setup time.
 
 **Forward labeling** `labeling_from(prob, root)`:
 - Label-correcting algorithm from a given root node
-- Label state: (net_cost, demand, predecessor)
-- Net cost = sum(edge_costs) - sum(profits) along path
-- Seed: f[root] = -profit(root), demand = demand(root)
+- Label state: $(\text{net\_cost},\ \text{demand},\ \text{predecessor})$
+- Net cost = $\sum \text{edge\_costs} - \sum \text{profits}$ along path
+- Seed: $f[\text{root}] = -\text{profit}(\text{root})$, $\text{demand} = d_{\text{root}}$
 - 2-cycle elimination: no immediate return to predecessor
-- Capacity check: accumulated demand <= Q
-- Label dominance: (cost1, demand1) dominates (cost2, demand2) iff
-  cost1 <= cost2 AND demand1 <= demand2
+- Capacity check: accumulated $\text{demand} \le Q$
+- Label dominance: $(\text{cost}_1, \text{dem}_1)$ dominates $(\text{cost}_2, \text{dem}_2)$ iff
+  $\text{cost}_1 \le \text{cost}_2$ and $\text{dem}_1 \le \text{dem}_2$
 - Max 50 labels per node to bound complexity
-- Returns f[v] = minimum net cost to reach v from root
+- Returns $f[v]$ = minimum net cost to reach $v$ from root
 
 Convenience wrappers: `forward_labeling(prob, source)`, `forward_labeling(prob)`,
 `backward_labeling(prob, target)`.
 
 **Correction term**: When source = target (tour), the depot profit is subtracted
-in both forward and backward bounds. Add `correction = profit(source)` to
-compensate. For s-t paths (source != target), correction = 0.
+in both forward and backward bounds. Add $\text{correction} = \text{profit}(\text{source})$ to
+compensate. For s-t paths (source $\ne$ target), $\text{correction} = 0$.
 
 ## Trigger A: Upper Bound Sweep
 
-When the MIP upper bound improves (`ub < last_ub - 1e-9`):
+When the MIP upper bound improves ($\text{ub} < \text{last\_ub} - 10^{-9}$):
 
 1. Reset all processed-edge flags (tighter UB may enable new fixings).
-2. For each unfixed edge e = (u, v):
-   - Compute lower bound: `lb = min(f[u] + cost(e) + b[v], f[v] + cost(e) + b[u]) + correction`
-   - If `lb > ub + 1e-6`: fix x_e = 0 via `domain.changeBound(kUpper, e, 0.0)`
-3. For each unfixed node i: if all incident edges are fixed to 0, fix y_i = 0.
+2. For each unfixed edge $e = (u, v)$:
+   - Compute lower bound: $\text{lb} = \min(f[u] + \text{cost}(e) + b[v],\ f[v] + \text{cost}(e) + b[u]) + \text{correction}$
+   - If $\text{lb} > \text{ub} + 10^{-6}$: fix $x_e = 0$ via `domain.changeBound(kUpper, e, 0.0)`
+3. For each unfixed node $i$: if all incident edges are fixed to 0, fix $y_i = 0$.
 
 This is the same logic as static edge elimination in preprocessing, but applied
 dynamically as the upper bound tightens during branch-and-bound.
 
 ## Trigger B: Chained Bounds
 
-When an edge x_(a,i) is fixed to 1 (by branching or propagation):
+When an edge $x_{(a,i)}$ is fixed to 1 (by branching or propagation):
 
 ### Default: Neighbor-only scan
 
 Scan edges adjacent to both endpoints of the fixed edge:
 
 **Neighbors of i** (forward direction through fixed edge):
-- `cost_a_to_i = f[a] + cost(a,i) - profit(i)`
-- For each neighbor edge (i, j): `lb = cost_a_to_i + cost(i,j) + b[j] + correction`
-- If `lb > ub + 1e-6`: fix x_(i,j) = 0
+- $\text{cost}_{a \to i} = f[a] + \text{cost}(a,i) - \text{profit}(i)$
+- For each neighbor edge $(i, j)$: $\text{lb} = \text{cost}_{a \to i} + \text{cost}(i,j) + b[j] + \text{correction}$
+- If $\text{lb} > \text{ub} + 10^{-6}$: fix $x_{(i,j)} = 0$
 
 **Neighbors of a** (backward direction through fixed edge):
-- `cost_via_i_return = cost(a,i) + b[i] - profit(a)`
-- For each neighbor edge (k, a): `lb = f[k] + cost(k,a) + cost_via_i_return + correction`
-- If `lb > ub + 1e-6`: fix x_(k,a) = 0
+- $\text{cost\_via\_i\_return} = \text{cost}(a,i) + b[i] - \text{profit}(a)$
+- For each neighbor edge $(k, a)$: $\text{lb} = f[k] + \text{cost}(k,a) + \text{cost\_via\_i\_return} + \text{correction}$
+- If $\text{lb} > \text{ub} + 10^{-6}$: fix $x_{(k,a)} = 0$
 
 ### All-pairs variant (--all_pairs_propagation true)
 
@@ -75,6 +121,29 @@ just neighbors). For each candidate edge (u, v), tests 8 orientations combining:
 Each orientation computes: `lb = d[start->...->endpoint1] + cost + d[endpoint2->...->finish] + correction`.
 
 Disabled by default — benchmarks show negligible gain over neighbor-only scan.
+
+## Testing
+
+The BoundPropagator is covered by 11 C++ tests (`[propagator]` tag) and 5 Python tests:
+
+| Test | Description |
+|---|---|
+| Sweep fixes expensive edges | Trigger A eliminates cost=100 edge with tight UB |
+| Sweep with loose UB | Confirms no fixings with very large UB |
+| Sweep skips already-fixed edges | Pre-fixed edges not reported again |
+| Sweep on s-t path problem | Path-mode Trigger A with bidirectional bounds |
+| sweep_nodes fixes isolated nodes | Nodes with all incident edges fixed to 0 |
+| sweep_nodes no fixings when edges open | All edges open → no node fixings |
+| propagate_fixed_edge (neighbor-only) | Trigger B eliminates expensive neighbor |
+| propagate_fixed_edge (all-pairs) | Trigger B with all-pairs bounds eliminates distant edges |
+| propagate_fixed_edge loose UB | Confirms no chain fixings with large UB |
+| has_all_pairs_bounds initially false | Verifies default state |
+| Accessor correctness | fwd_bounds, bwd_bounds, correction values |
+
+```bash
+./build/rcspp_algo_tests [propagator]       # All BoundPropagator tests
+./build/rcspp_algo_tests [propagator][path] # Path-mode propagator tests
+```
 
 ## HiGHS Integration
 
@@ -124,7 +193,7 @@ parallel preprocessing phase:
 tbb::task_group
 ├─ forward_labeling(problem, source)    → fwd_bounds
 ├─ backward_labeling(problem, target)   → bwd_bounds  (same as fwd for tour)
-└─ build_warm_start(problem, budget)    → warm_start solution
+└─ build_initial_solution(problem, budget)    → initial solution
 ```
 
 These bounds serve double duty:
