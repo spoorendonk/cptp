@@ -61,7 +61,7 @@ Time limit: 60s for easy instances, 3600s for hard ones.
 
 ## Roberti Set 3 (31 instances)
 
-Instances from Roberti and Roberti (see [Jepsen et al. (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X), Set 3), derived from CVRP column generation duals. 76--200 nodes.
+Instances from Roberto Roberti (see [Jepsen et al. (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X), Set 3), derived from CVRP column-generation duals produced by Roberti's implementation of the Baldacci, Mingozzi & Roberti (2011) algorithm. 76--200 nodes.
 Time limit: 300s for E/F/P instances, 300s for M instances (3600s pending).
 
 **22 of 31 instances solved to optimality** (300s limit). M-series instances need a 3600s run.
@@ -128,4 +128,4 @@ cmake --build build -j$(nproc)
 ./build/rcspp-solve benchmarks/instances/roberti/E-n76-k8_b.vrp --time_limit 3600
 ```
 
-Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are in [`benchmarks/progress.csv`](benchmarks/progress.csv).
+Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are in [`benchmarks/progress.csv`](../benchmarks/progress.csv).
