@@ -165,7 +165,7 @@ Tests cover:
 - **Individual separators** (11 tests): SEC (tour + path, target-in-S handling), RCI, Multistar, Comb, RGLM, separator name accessors
 - **BoundPropagator** (11 tests): Trigger A sweep, Trigger B chain fixings, all-pairs bounds, path mode, sweep_nodes, edge skipping, accessor correctness
 - **Preprocessing** (8 tests): demand reachability (tour + path), edge elimination, labeling bounds
-- **Warm-start heuristic** (6 tests): tour/path construction, degree/capacity consistency
+- **Primal heuristic** (6 tests): tour/path construction, degree/capacity consistency
 - **Core** (5 tests): Dinitz max-flow, Gomory-Hu tree, Problem accessors, IO parsing
 
 Run individual test tags:
@@ -175,7 +175,7 @@ Run individual test tags:
 ./build/rcspp_algo_tests [propagator]   # BoundPropagator tests
 ./build/rcspp_algo_tests [sec]          # SEC separator tests
 ./build/rcspp_algo_tests [path]         # s-t path mode tests
-./build/rcspp_algo_tests [heuristic]    # Warm-start tests
+./build/rcspp_algo_tests [heuristic]    # Primal heuristic tests
 ```
 
 ## Solver API (requires HiGHS)
