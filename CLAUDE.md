@@ -1,136 +1,126 @@
 # rcspp-bac — Resource Constrained Shortest Path Branch-and-Cut Solver
 
-## Git Workflow
-
-- **Never commit directly to main.** Always create a feature branch, push, and open a PR.
-- **If user says "commit" while on main**: create a feature branch, commit there, push, and open a PR automatically.
-- **Linear history only.** Merge PRs with squash or rebase (no merge commits).
-- **No force-push to main.**
-
-## Build
+## Quick Reference
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j$(nproc)
-```
+# build
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
 
-Algorithms only (no HiGHS):
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DRCSPP_BUILD_HIGHS=OFF
-cmake --build build -j$(nproc)
-```
+# build without HiGHS (algorithms only)
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DRCSPP_BUILD_HIGHS=OFF && cmake --build build -j$(nproc)
 
-For Python bindings (development):
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DRCSPP_BUILD_PYTHON=ON
-cmake --build build -j$(nproc)
-```
+# test
+./build/rcspp_algo_tests            # 63 algorithm tests (no HiGHS needed)
+./build/rcspp_tests                  # 39 integration tests (requires HiGHS)
+pytest tests/python/test_algorithms.py  # 33 Python tests
 
-For pip-installable Python package:
-```bash
+# python package
 pip install .
 ```
 
-## Test
+## Git Workflow
 
-```bash
-./build/rcspp_algo_tests                         # 63 algorithm tests (no HiGHS needed)
-./build/rcspp_tests                              # 39 integration tests (requires HiGHS)
-pytest tests/python/test_algorithms.py           # 33 Python algorithm tests
-pytest tests/python/test_solver.py               # Python solver tests (requires HiGHS)
-./build/rcspp-solve tests/data/tiny4.txt         # CLI
-```
-
-Test structure:
-- `tests/test_max_flow.cpp` — Dinitz max-flow, Gomory-Hu tree (4 tests)
-- `tests/test_separators.cpp` — Individual separators (SEC, RCI, Multistar, Comb, RGLM), preprocessing, warm-start heuristic (35 tests)
-- `tests/test_oracle.cpp` — SeparationOracle, BoundPropagator pluggable API (24 tests)
-- `tests/test_model.cpp` — Model API, solver integration [requires HiGHS] (9 tests)
-- `tests/test_optimal.cpp` — Known-optimal instances from SPPRCLIB [requires HiGHS] (7 tests)
-- `tests/test_propagator.cpp` — Labeling, edge elimination, propagator integration [requires HiGHS] (11 tests)
-- `tests/test_thread_local.cpp` — Thread-local separator/propagator integration [requires HiGHS] (12 tests)
-- `tests/test_instances.cpp` — Instance integration tests [requires HiGHS] (13 tests, separate executable)
-- `tests/python/test_algorithms.py` — Python bindings for algorithms (33 tests, no HiGHS)
-- `tests/python/test_solver.py` — Python solver API [requires HiGHS]
-
-## Dependencies
-
-- GCC 14, C++23
-- CMake 3.25+
-- `apt install libtbb-dev` (TBB 2021.11)
-- HiGHS: fetched via CMake FetchContent (v1.10.0)
-- Catch2: fetched via CMake FetchContent (v3.7.1)
+- Never commit directly to `main`. Always feature branches.
+- If on main when committing: create branch, commit, push, open PR.
+- Linear history (squash-merge or rebase-merge). No force-push to `main`.
 
 ## Architecture
 
 Two libraries:
 - **`rcspp_algorithms`** — solver-independent (separators, propagation, heuristic, preprocessing). Only TBB.
-- **`rcspp_model`** — HiGHS integration (optional, `RCSPP_BUILD_HIGHS=ON` by default).
+- **`rcspp_model`** — HiGHS integration (optional, default ON).
 
 ```
-src/core/        — Problem definition, IO parsers (TSPLIB, numeric .txt), Dinitz max-flow, Gomory-Hu tree
-src/sep/         — Solver-independent separators (SEC, RCI, Multistar, RGLM, Comb) + SeparationOracle
-src/preprocess/  — BoundPropagator, demand-reachability, edge elimination via capacity-aware labeling
+src/core/        — Problem, IO parsers (TSPLIB, numeric .txt), Dinitz max-flow, Gomory-Hu tree
+src/sep/         — Separators (SEC, RCI, Multistar, RGLM, Comb) + SeparationOracle
+src/preprocess/  — BoundPropagator, demand-reachability, edge elimination
 src/heuristic/   — Primal heuristics (initial solution + LP-guided callback)
-src/model/       — HiGHS integration (Model, HiGHSBridge, propagator) [optional]
-src/cli/         — CLI tool (rcspp-solve) [requires HiGHS]
-src/util/        — Utilities (Logger, Timer)
+src/model/       — HiGHS integration (Model, HiGHSBridge, propagator)
+src/cli/         — CLI tool (rcspp-solve)
 python/          — nanobind Python bindings
-tests/           — Catch2 tests + Python tests
-benchmarks/      — Benchmark instances, scripts, and results
+tests/           — Catch2 + Python tests
 docs/            — Algorithm documentation
 ```
 
-## Key types
+See `docs/` for algorithm details and theory.
 
-- `rcspp::Problem` — RCSPP instance using `static_graph` (own CSR graph); has `source()`, `target()`, `is_tour()`
-- `rcspp::sep::SeparationOracle` — Solver-independent cut separation (bundles support graph, GH tree, parallel separators)
-- `rcspp::preprocess::BoundPropagator` — Solver-independent domain propagation (sweep + chain fixings)
-- `rcspp::heuristic::build_warm_start` — Parallel greedy + local search heuristic
-- `rcspp::sep::Separator` — Base class for cut separators
-- `rcspp::sep::SECSeparator` — Subtour elimination via Dinitz max-flow (path-aware)
-- `rcspp::gomory_hu_tree` — Gusfield's algorithm, shared across separators
-- `rcspp::heuristic::build_initial_solution` — Pre-solve greedy + local search heuristic
-- `rcspp::heuristic::lp_guided_heuristic` — LP-guided callback heuristic (reduced graph)
+## Key Types
+
+- `rcspp::Problem` — RCSPP instance using `static_graph` (CSR); `source()`, `target()`, `is_tour()`
+- `rcspp::sep::SeparationOracle` — Solver-independent cut separation (support graph, GH tree, parallel separators)
+- `rcspp::preprocess::BoundPropagator` — Solver-independent domain propagation
 - `rcspp::Model` — User-facing solver interface (HiGHS); `set_source()`/`set_target()` for paths, `set_depot()` for tours
-- `rcspp::HiGHSBridge` — Wires separators + domain propagator into HiGHS MIP
 
-## Tour vs s-t path
+## Coding Conventions
 
-When `source == target` (default), the solver uses a closed tour formulation (degree 2 at all nodes).
-When `source != target`, it uses an open path formulation:
-- Degree 1 at source/target, degree 2 at intermediates
-- SEC cuts: sets containing the path target need only 1 cut crossing (path enters and terminates)
-- Numeric `.txt` format: optional `source target` line after the capacity line
+- C++23, GCC 14, `rcspp::` namespace (sub: `rcspp::sep::`, `rcspp::heuristic::`, `rcspp::preprocess::`)
+- Tour vs s-t path: `source == target` → closed tour (degree 2); `source != target` → open path (degree 1 at endpoints)
 
-## Namespace
+## Dependencies
 
-All code under `rcspp::` namespace, separators under `rcspp::sep::`, heuristics under `rcspp::heuristic::`, preprocessing under `rcspp::preprocess::`.
+GCC 14, C++23, CMake 3.25+, TBB (`apt install libtbb-dev`), HiGHS + Catch2 (FetchContent)
 
-## Agent Coordination
+## Workflow: Plan → Grind
 
-The roadmap (docs/ROADMAP.md) defines work units with IDs like `2.3`,
-`3.8`, `5.1`. Each work unit maps to a branch name (e.g., `3.1-tune-separation-tol`).
+Every task has two phases. Do not skip planning.
 
-**Before suggesting or starting any work unit:**
-1. Check open branches: `git branch -a`
-2. Check open PRs: `gh pr list`
-3. Check for running agents on this machine (background tasks, worktrees)
-4. Never start a work unit that another agent has an open branch or PR for
-5. Prefer the lowest-numbered unblocked, unclaimed work unit
+### 1. Plan (default)
 
-## Fullgate
+When given a task, **start by planning**:
 
-When the user says **"fullgate"**, run this sequence in order. Each step can also be invoked individually by name:
+1. Investigate — read relevant code, docs, tests, issues
+2. Propose an approach — what to change, where, and why
+3. Discuss with the user — refine until aligned
+4. Wait for explicit approval to proceed (e.g. "grind", "go", "do it")
 
-1. **Feature branch** — create one if not already on a feature branch
-2. **Create PR** — if no PR exists for the current branch
-3. **Sync main** — pull latest main and merge into the current feature branch, resolve conflicts
-4. **Tests** — check if new/updated tests are needed and add them
-5. **Update docs** — update README.md and docs as needed
-6. **Push & update PR**
-7. **Review** — thoroughly review the PR (code quality, correctness, style, tests, performance)
+### 2. Grind (on approval)
+
+When the user says **"grind"** (or similar), execute autonomously:
+
+1. Implement the change
+2. Build — if it fails, read errors, fix, rebuild
+3. Test — if tests fail, read failures, fix, retest
+4. Repeat 1–3 until build and tests pass clean
+5. Self-review: correctness, edge cases, performance
+6. If review finds issues, go back to 1
+7. Fullgate (see below) — branch, PR, sync, docs, push
+
+Progress lives in files and git — not in your context window.
+
+### When to Stop and Ask
+
+Only pause the grind and ask a human when:
+- A fix requires changing the public API or architecture
+- You discover a bug in unrelated code you shouldn't touch
+- You're stuck after multiple failed attempts at the same issue
+
+Otherwise: keep going until build and tests pass.
+
+### Fullgate
+
+The final stage of a grind. Also runs standalone when user says **"fullgate"**:
+
+1. **Branch** — create feature branch if needed
+2. **PR** — create draft PR if none exists
+3. **Sync** — pull latest main, merge into feature branch, resolve conflicts
+4. **Tests** — add or update tests as needed
+5. **Docs** — update README.md and docs as needed
+6. **Push** — push branch, update PR description
+7. **Review** — self-review: correctness, style, tests, performance
 8. **Build** — `cmake --build build -j$(nproc)`
-9. **Test** — `./build/rcspp_tests`
-10. **Push & update PR** again with any fixes
-11. **Finalize** — if nothing more to do: squash-merge the PR, delete feature branch (local + remote), pull main, switch to main
+9. **Test** — `./build/rcspp_algo_tests && ./build/rcspp_tests`
+10. **Push** — push any review fixes
+11. **Finalize** — squash-merge PR, delete branch, pull main
+
+### Claiming Work
+
+- Add label `agent-wip` when you open or start working on an issue or PR
+- Check for `agent-wip` before picking up work — never work on labeled items
+- Remove `agent-wip` and close/merge when done
+
+### Teams
+
+When a task has independent sub-tasks, launch a team.
+Each teammate runs in its own worktree (isolated repo copy).
+Lead agent integrates: merge branches, resolve conflicts, run full build/test.
+Do NOT use teams for sequential work.
