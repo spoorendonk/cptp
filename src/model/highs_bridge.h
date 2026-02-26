@@ -20,6 +20,15 @@ namespace rcspp {
 /// HiGHS options as string key-value pairs, forwarded directly.
 using SolverOptions = std::vector<std::pair<std::string, std::string>>;
 
+/// Strategy for Lagrangian reduced-cost fixing in the propagator.
+enum class RCFixingStrategy { off, root_only, on_ub_improvement, periodic };
+
+struct RCFixingSettings {
+    RCFixingStrategy strategy = RCFixingStrategy::on_ub_improvement;
+    int32_t periodic_interval = 100;
+    bool fix_to_one = false;
+};
+
 /// Wires the CPTP formulation and custom separators into HiGHS.
 class HiGHSBridge {
  public:
@@ -56,6 +65,9 @@ class HiGHSBridge {
 
     /// Set upper bound for edge elimination preprocessing.
     void set_upper_bound(double ub) { upper_bound_ = ub; }
+
+    /// Configure Lagrangian reduced-cost fixing in the propagator.
+    void set_rc_fixing(RCFixingSettings settings) { rc_settings_ = settings; }
 
     /// Set pre-computed labeling bounds for edge elimination and propagation.
     /// f = forward bounds (source → v), b = backward bounds (v → target).
@@ -108,6 +120,12 @@ class HiGHSBridge {
 
     // All-pairs labeling bounds for stronger Trigger B propagation
     std::vector<double> all_pairs_;    // flat n×n: d(s,v) = all_pairs_[s*n+v]
+
+    // RC fixing settings and statistics
+    RCFixingSettings rc_settings_;
+    std::shared_ptr<int64_t> rc_fix0_count_;
+    std::shared_ptr<int64_t> rc_fix1_count_;
+    std::shared_ptr<int64_t> rc_label_runs_;
 
     // Propagator statistics (shared with callback lambda)
     std::shared_ptr<int64_t> propagator_fixings_;

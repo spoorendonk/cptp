@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <vector>
 
 #include "core/problem.h"
@@ -17,7 +18,8 @@ struct Label {
     int32_t prev;    // previous node (for 2-cycle elimination)
 };
 
-/// Capacity-aware 2-cycle elimination labeling from a given root node.
+/// Capacity-aware 2-cycle elimination labeling from a given root node,
+/// with custom edge costs and node profits.
 ///
 /// For each node v, computes the minimum net cost f[v] to reach v from root
 /// via any path that respects: (1) vehicle capacity, (2) 2-cycle elimination
@@ -26,30 +28,23 @@ struct Label {
 /// Net cost = sum of edge costs along path - sum of profits of visited nodes
 /// (excluding root profit, which is always collected... see seed below).
 ///
-/// Returns f[v] for each node. f[root] = -profit(root).
-inline std::vector<double> labeling_from(const Problem& prob, int32_t root) {
+/// Returns f[v] for each node. f[root] = -profits[root].
+inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
+                                         std::span<const double> edge_costs,
+                                         std::span<const double> profits) {
     const int32_t n = prob.num_nodes();
     const auto& graph = prob.graph();
     const double Q = prob.capacity();
     constexpr double inf = std::numeric_limits<double>::infinity();
 
-    // For each node, maintain a set of non-dominated labels.
-    // Label dominance: (cost1, demand1) dominates (cost2, demand2) iff
-    //   cost1 <= cost2 AND demand1 <= demand2.
     std::vector<std::vector<Label>> labels(n);
-
-    // Best (minimum) cost to reach each node (for quick lower bound queries).
     std::vector<double> best_cost(n, inf);
 
-    // Seed: root with cost = -profit(root), demand = demand(root), prev = -1
-    double root_cost = -prob.profit(root);
+    double root_cost = -profits[root];
     double root_demand = prob.demand(root);
     labels[root].push_back({root_cost, root_demand, -1});
     best_cost[root] = root_cost;
 
-    // BFS/label-setting with a queue of (node, label_index) to propagate.
-    // Since costs can be negative (from profits), we cannot use Dijkstra.
-    // Use FIFO label-correcting approach with dominance checks.
     constexpr int32_t kMaxLabelsPerNode = 50;
 
     struct QueueEntry {
@@ -74,7 +69,7 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root) {
             double new_demand = lbl.demand + prob.demand(v);
             if (new_demand > Q) continue;
 
-            double new_cost = lbl.cost + prob.edge_cost(e) - prob.profit(v);
+            double new_cost = lbl.cost + edge_costs[e] - profits[v];
 
             auto& v_labels = labels[v];
             bool dominated = false;
@@ -117,6 +112,11 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root) {
     }
 
     return best_cost;
+}
+
+/// Capacity-aware 2-cycle elimination labeling using the problem's own costs.
+inline std::vector<double> labeling_from(const Problem& prob, int32_t root) {
+    return labeling_from(prob, root, prob.edge_costs(), prob.profits());
 }
 
 /// Forward labeling from a given source node (wrapper for labeling_from).

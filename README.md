@@ -25,7 +25,7 @@ The primary application is as a **pricing solver in branch-and-price for CVRP**.
 - **Pluggable algorithm library** (`rcspp_algorithms`) — separators, propagation, heuristic, and preprocessing, usable with any MIP solver
 - **Dynamic cut separation**: subtour elimination (SEC), rounded capacity inequalities (RCI), multistar/GLM inequalities, rounded GLM (RGLM), comb
 - **Gomory-Hu tree** (Gusfield's algorithm) shared across separators for efficient min-cut computation
-- **Domain propagator**: labeling-based edge fixing during branch-and-bound
+- **Domain propagator**: labeling-based edge fixing and Lagrangian reduced-cost fixing during branch-and-bound
 - **Preprocessing**: demand-reachability filtering and labeling-based edge elimination
 - **Warm-start heuristic**: parallel greedy construction + local search (2-opt, or-opt, node drop/add) via TBB
 - **Batteries-included HiGHS integration** — full branch-and-cut solver out of the box
@@ -88,6 +88,21 @@ The `--branch_hyper` option enables dynamic constraint branching, which adds/rem
 | `all` | All of the above combined |
 
 When `source != target`, the solver uses an open s-t path formulation (degree 1 at source/target, degree 2 at intermediates). When `source == target` (default), the standard tour formulation is used.
+
+#### Reduced-cost fixing
+
+The `--rc_fixing` option controls Lagrangian reduced-cost fixing in the domain propagator. This re-runs capacity-aware labeling with LP reduced costs as edge weights, then uses the Lagrangian gap to fix edge variables to 0 (and optionally node variables to 1).
+
+| Mode | Description |
+|------|-------------|
+| `off` | No reduced-cost fixing |
+| `root_only` | Run once when the first upper bound is found |
+| `on_ub_improvement` (default) | Run whenever the upper bound improves |
+| `periodic` | Run every N propagator calls (`--rc_fixing_interval`, default 100) |
+
+Additional options:
+- `--rc_fixing_interval N` — interval for the `periodic` strategy (default 100)
+- `--rc_fixing_to_one true` — also attempt to fix node variables to 1 (requires N additional labeling runs per invocation; disabled by default)
 
 ### Examples
 

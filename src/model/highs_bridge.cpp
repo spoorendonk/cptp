@@ -18,6 +18,9 @@
 #include "sep/separation_context.h"
 #include "sep/separation_oracle.h"
 
+#include <mutex>
+
+#include <tbb/parallel_for.h>
 #include <tbb/task_group.h>
 
 namespace rcspp {
@@ -269,6 +272,10 @@ void HiGHSBridge::install_separators() {
                 .y_offset = y_offset(),
                 .tol = frac_tol_,
                 .flow_tree = &flow_tree,
+                .upper_bound = mipsolver.mipdata_->upper_limit,
+                .all_pairs = all_pairs_.empty()
+                    ? std::span<const double>{}
+                    : std::span<const double>(all_pairs_),
             };
 
             const bool is_submip = !orig_to_reduced.empty();
@@ -411,11 +418,18 @@ void HiGHSBridge::install_propagator() {
     chain_fixings_ = std::make_shared<int64_t>(0);
     ub_improvements_ = std::make_shared<int64_t>(0);
     propagator_calls_ = std::make_shared<int64_t>(0);
+    rc_fix0_count_ = std::make_shared<int64_t>(0);
+    rc_fix1_count_ = std::make_shared<int64_t>(0);
+    rc_label_runs_ = std::make_shared<int64_t>(0);
     auto propagator_fixings = propagator_fixings_;
     auto sweep_fixings = sweep_fixings_;
     auto chain_fixings = chain_fixings_;
     auto ub_improvements = ub_improvements_;
     auto propagator_calls = propagator_calls_;
+    auto rc_fix0 = rc_fix0_count_;
+    auto rc_fix1 = rc_fix1_count_;
+    auto rc_runs = rc_label_runs_;
+    auto rc_settings = rc_settings_;
 
     // Capture labeling bounds by value (they won't change during solve).
     auto fwd = std::make_shared<std::vector<double>>(fwd_bounds_);
@@ -450,7 +464,7 @@ void HiGHSBridge::install_propagator() {
     HighsUserPropagator::setCallback(
         [=, &prob = prob_](HighsDomain& domain,
                            const HighsMipSolver& mipsolver,
-                           const HighsLpRelaxation& /*lp*/) {
+                           const HighsLpRelaxation& lp) {
             // Skip sub-MIPs: different column space
             if (mipsolver.submip) return;
 
@@ -596,6 +610,196 @@ void HiGHSBridge::install_propagator() {
                                 HighsDomain::Reason::unspecified());
                             fixings++;
                             (*chain_fixings)++;
+                        }
+                    }
+                }
+            }
+
+            // ── Trigger C: Lagrangian reduced-cost fixing (edges → 0) ──
+            // ── Trigger D: Lagrangian reduced-cost fixing (nodes → 1) ──
+            if (rc_settings.strategy != RCFixingStrategy::off) {
+                bool run_rc = false;
+                // Gate: decide whether to run RC fixing this call
+                switch (rc_settings.strategy) {
+                    case RCFixingStrategy::root_only:
+                        // Run once when UB first becomes available
+                        run_rc = ub_improved && (*ub_improvements == 1);
+                        break;
+                    case RCFixingStrategy::on_ub_improvement:
+                        run_rc = ub_improved;
+                        break;
+                    case RCFixingStrategy::periodic:
+                        run_rc = (*propagator_calls % rc_settings.periodic_interval) == 0;
+                        break;
+                    default:
+                        break;
+                }
+
+                if (run_rc && lp.getStatus() == HighsLpRelaxation::Status::kOptimal) {
+                    const auto& lp_sol = lp.getSolution();
+                    double z_LP = lp.getObjective();
+                    int32_t ncols = static_cast<int32_t>(lp_sol.col_dual.size());
+
+                    // Build reduced-cost edge weights and node profits.
+                    // RC for variable j = c_j - dual info. For MIP columns at LP:
+                    //   rc_j = col_dual[j] (HiGHS stores reduced costs in col_dual)
+                    // The Lagrangian edge cost = original_cost + rc (reduced cost acts as perturbation).
+                    // Actually, the reduced cost already IS the Lagrangian cost relative to the LP basis.
+                    // For labeling: use rc_j directly as the edge weight.
+                    // For y-vars: rc_{m+i} as the negative profit contribution.
+                    if (ncols >= m + n) {
+                        std::vector<double> rc_edge_costs(m);
+                        std::vector<double> rc_profits(n);
+                        for (int32_t e = 0; e < m; ++e) {
+                            rc_edge_costs[e] = lp_sol.col_dual[e];
+                        }
+                        for (int32_t i = 0; i < n; ++i) {
+                            // y_i has objective coefficient -profit(i), so
+                            // rc for y_i = col_dual[m+i]. The labeling subtracts profits,
+                            // so rc_profit = -col_dual[m+i] to match the labeling convention.
+                            rc_profits[i] = -lp_sol.col_dual[m + i];
+                        }
+
+                        // Correction under RC costs: for tours, depot RC profit
+                        double rc_corr = prob.is_tour() ? rc_profits[prob.source()] : 0.0;
+
+                        // Forward + backward labeling with RC costs (parallel)
+                        std::vector<double> rc_fwd, rc_bwd;
+                        {
+                            tbb::task_group tg;
+                            tg.run([&] {
+                                rc_fwd = preprocess::labeling_from(
+                                    prob, prob.source(), rc_edge_costs, rc_profits);
+                            });
+                            if (prob.is_tour()) {
+                                tg.wait();
+                                rc_bwd = rc_fwd;
+                            } else {
+                                tg.run([&] {
+                                    rc_bwd = preprocess::labeling_from(
+                                        prob, prob.target(), rc_edge_costs, rc_profits);
+                                });
+                                tg.wait();
+                            }
+                        }
+                        (*rc_runs) += prob.is_tour() ? 1 : 2;
+
+                        // Compute z_LR: cheapest resource-feasible tour/path under RC costs
+                        double z_LR = inf;
+                        if (prob.is_tour()) {
+                            // Tour: z_LR = min over edges (rc_fwd[u] + rc_e + rc_fwd[v]) + rc_corr
+                            for (int32_t e = 0; e < m; ++e) {
+                                int32_t u = prob.graph().edge_source(e);
+                                int32_t v = prob.graph().edge_target(e);
+                                if (rc_fwd[u] < inf && rc_fwd[v] < inf) {
+                                    double val = rc_fwd[u] + rc_edge_costs[e] + rc_fwd[v] + rc_corr;
+                                    z_LR = std::min(z_LR, val);
+                                }
+                            }
+                        } else {
+                            // Path: z_LR = rc_fwd[target]
+                            z_LR = rc_fwd[prob.target()];
+                        }
+
+                        if (z_LR < inf) {
+                            // Trigger C: Fix edges to 0
+                            for (int32_t e = 0; e < m; ++e) {
+                                if (domain.col_upper_[e] < 0.5 || domain.col_lower_[e] > 0.5) continue;
+
+                                int32_t u = prob.graph().edge_source(e);
+                                int32_t v = prob.graph().edge_target(e);
+
+                                double lb1 = (rc_fwd[u] < inf && rc_bwd[v] < inf)
+                                    ? rc_fwd[u] + rc_edge_costs[e] + rc_bwd[v] + rc_corr
+                                    : inf;
+                                double lb2 = (rc_fwd[v] < inf && rc_bwd[u] < inf)
+                                    ? rc_fwd[v] + rc_edge_costs[e] + rc_bwd[u] + rc_corr
+                                    : inf;
+                                double edge_lb = std::min(lb1, lb2);
+
+                                double excess = edge_lb - z_LR;
+                                if (z_LP + excess > ub + 1e-6) {
+                                    domain.changeBound(
+                                        HighsBoundType::kUpper, e, 0.0,
+                                        HighsDomain::Reason::unspecified());
+                                    fixings++;
+                                    (*rc_fix0)++;
+                                }
+                            }
+
+                            // Fix nodes where all incident edges are now fixed to 0
+                            for (int32_t i = 0; i < n; ++i) {
+                                if (domain.col_upper_[m + i] < 0.5) continue;
+                                if (i == prob.source() || i == prob.target()) continue;
+                                bool all_fixed = true;
+                                for (const auto& [e, nb] : adjacency[i]) {
+                                    if (domain.col_upper_[e] > 0.5) {
+                                        all_fixed = false;
+                                        break;
+                                    }
+                                }
+                                if (all_fixed) {
+                                    domain.changeBound(
+                                        HighsBoundType::kUpper, m + i, 0.0,
+                                        HighsDomain::Reason::unspecified());
+                                }
+                            }
+
+                            // Trigger D: Fix nodes to 1 (optional, expensive)
+                            if (rc_settings.fix_to_one) {
+                                // For each unfixed node, run labeling with that node forbidden
+                                std::vector<int32_t> candidates;
+                                for (int32_t i = 0; i < n; ++i) {
+                                    if (i == prob.source() || i == prob.target()) continue;
+                                    if (domain.col_lower_[m + i] > 0.5) continue;  // already fixed to 1
+                                    if (domain.col_upper_[m + i] < 0.5) continue;  // already fixed to 0
+                                    candidates.push_back(i);
+                                }
+
+                                // Parallel labeling with each node forbidden
+                                std::vector<double> z_LR_minus(candidates.size(), inf);
+                                tbb::parallel_for(
+                                    static_cast<size_t>(0), candidates.size(),
+                                    [&](size_t idx) {
+                                        int32_t node_i = candidates[idx];
+                                        // Copy profits and set forbidden node to -1e30
+                                        std::vector<double> mod_profits = rc_profits;
+                                        mod_profits[node_i] = -1e30;
+
+                                        auto fwd_i = preprocess::labeling_from(
+                                            prob, prob.source(), rc_edge_costs, mod_profits);
+
+                                        if (prob.is_tour()) {
+                                            double best = inf;
+                                            for (int32_t e = 0; e < m; ++e) {
+                                                int32_t u = prob.graph().edge_source(e);
+                                                int32_t v = prob.graph().edge_target(e);
+                                                if (fwd_i[u] < inf && fwd_i[v] < inf) {
+                                                    double val = fwd_i[u] + rc_edge_costs[e] + fwd_i[v] + rc_corr;
+                                                    best = std::min(best, val);
+                                                }
+                                            }
+                                            z_LR_minus[idx] = best;
+                                        } else {
+                                            z_LR_minus[idx] = fwd_i[prob.target()];
+                                        }
+                                    });
+
+                                (*rc_runs) += static_cast<int64_t>(candidates.size());
+
+                                for (size_t idx = 0; idx < candidates.size(); ++idx) {
+                                    if (z_LR_minus[idx] >= inf) continue;
+                                    double gap = z_LR_minus[idx] - z_LR;
+                                    if (z_LP + gap > ub + 1e-6) {
+                                        int32_t node_i = candidates[idx];
+                                        domain.changeBound(
+                                            HighsBoundType::kLower, m + node_i, 1.0,
+                                            HighsDomain::Reason::unspecified());
+                                        fixings++;
+                                        (*rc_fix1)++;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -794,6 +998,10 @@ SolveResult HiGHSBridge::extract_result() const {
         logger_.log("Propagator: {} calls, {} UB improvements, {} fixings ({} sweep + {} chain)",
                     *propagator_calls_, *ub_improvements_, *propagator_fixings_,
                     *sweep_fixings_, *chain_fixings_);
+    }
+    if (rc_fix0_count_ && (*rc_fix0_count_ > 0 || *rc_fix1_count_ > 0)) {
+        logger_.log("RC fixing: {} edges fixed to 0, {} nodes fixed to 1, {} labeling runs",
+                    *rc_fix0_count_, *rc_fix1_count_, *rc_label_runs_);
     }
 
     // Print heuristic callback statistics (debug_entered_ is set during install)
