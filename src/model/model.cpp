@@ -123,6 +123,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::string branch_hyper = "off";
     bool output_flag = true;
     bool deterministic = true;
+    double cutoff = std::numeric_limits<double>::infinity();
+    bool disable_heuristics = false;
+    RCFixingSettings rc_settings;
     for (const auto& [key, value] : options) {
         if (key == "separation_interval") {
             separation_interval = std::stoi(value);
@@ -168,6 +171,29 @@ SolveResult Model::solve(const SolverOptions& options) {
             branch_hyper = value;
             continue;
         }
+        if (key == "cutoff") {
+            cutoff = std::stod(value);
+            continue;
+        }
+        if (key == "disable_heuristics") {
+            disable_heuristics = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "rc_fixing") {
+            if (value == "root_only") rc_settings.strategy = RCFixingStrategy::root_only;
+            else if (value == "on_ub_improvement") rc_settings.strategy = RCFixingStrategy::on_ub_improvement;
+            else if (value == "periodic") rc_settings.strategy = RCFixingStrategy::periodic;
+            else rc_settings.strategy = RCFixingStrategy::off;
+            continue;
+        }
+        if (key == "rc_fixing_interval") {
+            rc_settings.periodic_interval = std::stoi(value);
+            continue;
+        }
+        if (key == "rc_fixing_to_one") {
+            rc_settings.fix_to_one = (value == "true" || value == "1");
+            continue;
+        }
         if (key == "output_flag") {
             output_flag = (value == "true" || value == "1");
             continue;
@@ -176,6 +202,17 @@ SolveResult Model::solve(const SolverOptions& options) {
         if (status != HighsStatus::kOk) {
             logger_.log("Warning: HiGHS rejected option {} = {}", key, value);
         }
+    }
+
+    // When cutoff is provided, set HiGHS objective_bound for node pruning.
+    // This sets the initial upper_limit in the MIP solver, enabling pruning
+    // of nodes whose LP bound exceeds the cutoff.
+    // When heuristics are disabled, turn off HiGHS internal MIP heuristics.
+    if (cutoff < std::numeric_limits<double>::infinity()) {
+        highs.setOptionValue("objective_bound", cutoff);
+    }
+    if (disable_heuristics) {
+        highs.setOptionValue("mip_heuristic_effort", 0.0);
     }
 
     // Suppress HiGHS console output; forward through our logger if enabled
@@ -203,6 +240,11 @@ SolveResult Model::solve(const SolverOptions& options) {
     heuristic::HeuristicResult warm_start;
     double warm_start_ub = std::numeric_limits<double>::infinity();
 
+    // Use cutoff as UB when provided (known optimal for prove-only mode)
+    if (cutoff < std::numeric_limits<double>::infinity()) {
+        warm_start_ub = cutoff;
+    }
+
     {
         Timer preproc_timer;
 
@@ -222,10 +264,12 @@ SolveResult Model::solve(const SolverOptions& options) {
                               all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
                 });
             });
-            tg.run([&] {
-                warm_start = heuristic::build_initial_solution(
-                    problem_, num_restarts, budget_ms);
-            });
+            if (!disable_heuristics) {
+                tg.run([&] {
+                    warm_start = heuristic::build_initial_solution(
+                        problem_, num_restarts, budget_ms);
+                });
+            }
             tg.wait();
 
             // Extract source row for fwd/bwd bounds
@@ -255,10 +299,12 @@ SolveResult Model::solve(const SolverOptions& options) {
                     bwd_bounds = preprocess::backward_labeling(problem_, target);
                 });
             }
-            tg.run([&] {
-                warm_start = heuristic::build_initial_solution(
-                    problem_, num_restarts, budget_ms);
-            });
+            if (!disable_heuristics) {
+                tg.run([&] {
+                    warm_start = heuristic::build_initial_solution(
+                        problem_, num_restarts, budget_ms);
+                });
+            }
             tg.wait();
 
             if (source == target) {
@@ -266,9 +312,13 @@ SolveResult Model::solve(const SolverOptions& options) {
             }
         }
 
-        warm_start_ub = warm_start.objective;
-        logger_.log("Preprocessing: {}s, UB={}", preproc_timer.elapsed_seconds(),
-                    warm_start_ub);
+        // Heuristic UB only used when no cutoff was provided
+        if (cutoff >= std::numeric_limits<double>::infinity()) {
+            warm_start_ub = warm_start.objective;
+        }
+        logger_.log("Preprocessing: {}s, UB={}{}", preproc_timer.elapsed_seconds(),
+                    warm_start_ub,
+                    (cutoff < std::numeric_limits<double>::infinity() ? " (cutoff)" : ""));
     }
 
     HiGHSBridge bridge(problem_, highs, logger_, separation_tol);
@@ -276,6 +326,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_max_cuts_per_separator(max_cuts_per_sep);
     bridge.set_submip_separation(submip_separation);
     bridge.set_upper_bound(warm_start_ub);
+    bridge.set_rc_fixing(rc_settings);
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
     if (all_pairs_propagation) {
         bridge.set_all_pairs_bounds(std::move(all_pairs));
@@ -473,8 +524,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_heuristic_strategy(heuristic_strategy);
     bridge.install_heuristic_callback();
 
-    // Pass initial solution to HiGHS
-    {
+    // Pass initial solution to HiGHS (skip if heuristics disabled)
+    if (!disable_heuristics) {
         HighsSolution start;
         start.value_valid = true;
         start.col_value = std::move(warm_start.col_values);

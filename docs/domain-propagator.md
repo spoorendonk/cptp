@@ -178,10 +178,46 @@ Reported at solve completion:
 Propagator: 1234 calls, 5 UB improvements, 89 fixings (42 sweep + 47 chain)
 ```
 
+## Trigger C: Lagrangian Reduced-Cost Fixing (edges to 0)
+
+Uses LP reduced costs as edge weights in capacity-aware labeling to obtain
+Lagrangian bounds, then fixes edges whose Lagrangian excess proves they cannot
+be in any improving solution.
+
+1. Extract reduced costs from the LP relaxation: `rc_edge[e] = col_dual[e]`,
+   `rc_profit[i] = -col_dual[m+i]`.
+2. Run forward (and backward for s-t paths) labeling with RC costs.
+3. Compute `z_LR` = cheapest resource-feasible tour/path under RC costs.
+   - Tour: `z_LR = min_e (rc_fwd[u] + rc_e + rc_fwd[v]) + correction`
+   - Path: `z_LR = rc_fwd[target]`
+4. For each unfixed edge e=(u,v):
+   - `excess(e) = min(rc_fwd[u] + rc_e + rc_bwd[v], rc_fwd[v] + rc_e + rc_bwd[u]) + corr - z_LR`
+   - If `z_LP + excess(e) > UB + 1e-6`: fix x_e = 0
+5. Fix isolated nodes (all incident edges fixed to 0) to y_i = 0.
+
+This is strictly stronger than Trigger A because it combines LP dual information
+with resource-feasibility constraints from the labeling.
+
+## Trigger D: Lagrangian Reduced-Cost Fixing (nodes to 1)
+
+Optional (enabled with `--rc_fixing_to_one true`). For each unfixed node i, runs
+labeling with node i forbidden (`profit_i = -1e30`). If the Lagrangian gap from
+excluding node i exceeds the UB, the node must be visited in every optimal solution.
+
+- `z_LR_{-i}` = cheapest tour/path avoiding node i
+- If `z_LP + (z_LR_{-i} - z_LR) > UB + 1e-6`: fix y_i = 1
+
+Requires N labeling runs per invocation (parallelized via TBB). Disabled by
+default as benchmarks show minimal benefit (only 6 total node fixings across 28
+SPPRCLIB instances).
+
 ## CLI Options
 
 | Flag | Default | Description |
 |---|---|---|
+| `--rc_fixing <strategy>` | `on_ub_improvement` | Lagrangian RC fixing: `off`, `root_only`, `on_ub_improvement`, `periodic` |
+| `--rc_fixing_interval N` | 100 | Interval for `periodic` strategy |
+| `--rc_fixing_to_one true` | false | Enable Trigger D (fix nodes to 1) |
 | `--all_pairs_propagation true` | false | Use all-pairs labeling for stronger Trigger B |
 
 ## Preprocessing Pipeline
