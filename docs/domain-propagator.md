@@ -57,23 +57,21 @@ with HiGHS's `HighsDomain` for bound changes.
 
 ## Labeling Bounds
 
-Computed during preprocessing (`src/preprocess/edge_elimination.h`) and passed
-to the propagator at setup time.
+Computed during preprocessing via `src/preprocess/ng_labeling.h` and passed to
+the propagator at setup time.
 
-**Forward labeling** `labeling_from(prob, root)`:
-- Label-correcting algorithm from a given root node
-- Label state: $(\text{net\_cost},\ \text{demand},\ \text{predecessor})$
+**ng-route / DSSR labeling** (`ng::compute_bounds`):
+- Label-correcting algorithm with iterative ng-neighborhood growth
+- Label state: $(\text{net\_cost},\ \text{demand},\ \text{predecessor},\ \text{ng-visited bitset})$
 - Net cost = $\sum \text{edge\_costs} - \sum \text{profits}$ along path
-- Seed: $f[\text{root}] = -\text{profit}(\text{root})$, $\text{demand} = d_{\text{root}}$
-- 2-cycle elimination: no immediate return to predecessor
 - Capacity check: accumulated $\text{demand} \le Q$
-- Label dominance: $(\text{cost}_1, \text{dem}_1)$ dominates $(\text{cost}_2, \text{dem}_2)$ iff
-  $\text{cost}_1 \le \text{cost}_2$ and $\text{dem}_1 \le \text{dem}_2$
-- Max 50 labels per node to bound complexity
-- Returns $f[v]$ = minimum net cost to reach $v$ from root
+- Dominance uses cost, demand, and visited-subset relation
+- SIMD prefilter path (AVX2) for candidate scans with scalar fallback
+- Returns forward/backward lower bounds used by both edge elimination and propagation
 
-Convenience wrappers: `forward_labeling(prob, source)`, `forward_labeling(prob)`,
-`backward_labeling(prob, target)`.
+When `dssr_async=true`, additional bound snapshots are published during solve
+through `SharedBoundsStore`, and the propagator callback switches to newer
+versions without restarting HiGHS.
 
 **Correction term**: When source = target (tour), the depot profit is subtracted
 in both forward and backward bounds. Add $\text{correction} = \text{profit}(\text{source})$ to
@@ -219,6 +217,12 @@ SPPRCLIB instances).
 | `--rc_fixing_interval N` | 100 | Interval for `periodic` strategy |
 | `--rc_fixing_to_one true` | false | Enable Trigger D (fix nodes to 1) |
 | `--all_pairs_propagation true` | false | Use all-pairs labeling for stronger Trigger B |
+| `--dssr_async true` | true | Run background DSSR bound tightening during B&B |
+| `--ng_initial_size N` | 4 | Initial ng neighborhood size |
+| `--ng_max_size N` | 12 | Maximum ng neighborhood size |
+| `--ng_dssr_iters N` | 6 | DSSR iterations per labeling run |
+| `--ng_label_budget N` | 50 | Max active labels per node in ng labeling |
+| `--ng_simd true` | true | Enable AVX2 prefilter path for dominance candidate scans |
 
 ## Preprocessing Pipeline
 
@@ -227,11 +231,14 @@ parallel preprocessing phase:
 
 ```
 tbb::task_group
-├─ forward_labeling(problem, source)    → fwd_bounds
-├─ backward_labeling(problem, target)   → bwd_bounds  (same as fwd for tour)
-└─ build_initial_solution(problem, budget)    → initial solution
+├─ ng::compute_bounds(problem, source, target, opts)  → fwd_bounds, bwd_bounds
+└─ build_initial_solution(problem, budget)            → initial solution
 ```
 
 These bounds serve double duty:
 1. **Static edge elimination** in `build_formulation()` — fix variables before solve
 2. **Dynamic propagation** during solve — fix variables as UB tightens and edges get fixed
+
+With async DSSR enabled, a background worker publishes tighter snapshots while
+branch-and-bound is running, and the same Trigger A/B logic consumes the
+refreshed arrays.

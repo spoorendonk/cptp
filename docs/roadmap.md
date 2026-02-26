@@ -54,13 +54,30 @@ task_group. Domain propagator uses labeling bounds for variable fixing.
 
 ## 3. Implementation Roadmap
 
-Each **work unit** (e.g., 1.1, 2.3, 4.5) is one PR. When you say "do 2.3",
-that means: create branch `2.3-<short-name>`, implement it, open a PR.
+Each **work unit** (e.g., 2.1, 3.3, 5.5) is one PR. When you say "do 3.3",
+that means: create branch `3.3-<short-name>`, implement it, open a PR.
 
 Work units have explicit file ownership and dependencies. Agents check open
 branches and PRs before claiming a unit.
 
-### Step 0 — Immediate Next Steps
+### Step 0 — ng-paths / DSSR / bucket-inspired bounds
+
+```
+Deliverable: stronger RCSPP bounds pipeline using iterative ng growth, faster
+dominance, and asynchronous bound updates during B&B.
+```
+
+| ID | PR title | Deliverable | Files | Depends on |
+|----|----------|-------------|-------|------------|
+| 0.1 | Cross-project design sync (baldes + pathwyse) | Import dominance/data-layout ideas from `../blades` and DSSR growth strategy from `../pathwyse`; document target architecture and invariants | docs/, src/preprocess/ | — |
+| 0.2 | SoA + SIMD dominance baseline | Refactor labeling dominance path to SoA layout with AVX/scalar fallback; add deterministic microbench and correctness parity tests | src/preprocess/, tests/ | 0.1 |
+| 0.3 | Shared bound store for async updates | Add versioned shared store for forward/backward cost bounds so background DSSR workers can publish snapshots while B&B consumes them safely | src/model/, src/preprocess/ | 0.1 |
+| 0.4 | Parallel DSSR schedule during B&B | Start DSSR with max ng size 4, grow toward 8-12 on background threads, and wire snapshot consumption into propagation/fixing callbacks | src/model/, src/preprocess/, src/util/ | 0.2, 0.3 |
+| 0.5 | Reduced-cost fixing cost/benefit study | Quantify DSSR vs 2-cycle elimination for reduced-cost fixing (fixings gained, runtime, node-count impact), then choose dynamic policy | benchmarks/, docs/benchmarks.md, src/model/ | 0.4 |
+| 0.6 | Incumbent/optimal handoff from ng solver | When ng/DSSR finds full feasible path, inject incumbent; if global proof condition is met, stop B&B and report optimal | src/model/highs_bridge.cpp, src/preprocess/ | 0.4 |
+| 0.7 | Iterative LB reuse and monotone pruning | Reuse DSSR bounds across iterations, enforce monotone tightening, and apply updated bounds in subsequent pruning passes | src/preprocess/, src/model/ | 0.4 |
+
+### Step 1 — Immediate Next Steps
 
 ```
 Deliverable: deterministic profiling, tuning, and benchmarking baseline.
@@ -70,11 +87,11 @@ stable ordering, reproducible machine config).
 
 | ID | PR title | Deliverable | Files | Depends on |
 |----|----------|-------------|-------|------------|
-| 0.1 | Performance analysis and acceleration feasibility | Profile heuristic, separators, and propagator time/memory; assess SIMD/AVX and GPU offload candidates with expected ROI | benchmarks/, docs/ | — |
-| 0.2 | Parameter sweep for default settings | Sweep core parameters on medium/large instances that solve within 100s; propose deterministic default values | src/model/, src/heuristic/, src/preprocess/, benchmarks/ | 0.1 |
-| 0.3 | Full benchmark + PathWyse comparison | Run complete SPPRCLIB + Roberti benchmark campaign; publish runtime/gap tables and PathWyse comparison | benchmarks/, docs/benchmarks.md | 0.2 |
+| 1.1 | Performance analysis and acceleration feasibility | Profile heuristic, separators, and propagator time/memory; assess SIMD/AVX and GPU offload candidates with expected ROI | benchmarks/, docs/ | — |
+| 1.2 | Parameter sweep for default settings | Sweep core parameters on medium/large instances that solve within 100s; propose deterministic default values | src/model/, src/heuristic/, src/preprocess/, benchmarks/ | 1.1 |
+| 1.3 | Full benchmark + PathWyse comparison | Run complete SPPRCLIB + Roberti benchmark campaign; publish runtime/gap tables and PathWyse comparison | benchmarks/, docs/benchmarks.md | 1.2 |
 
-### Step 1 — Land open PRs
+### Step 2 — Land open PRs
 
 ```
 Deliverable: merge stalled PRs, clean up branches.
@@ -82,18 +99,18 @@ Deliverable: merge stalled PRs, clean up branches.
 
 | ID | PR title | Deliverable | Files | Depends on |
 |----|----------|-------------|-------|------------|
-| 1.1 | Land deterministic solver (#17) | Review, fix conflicts, merge | src/heuristic/, src/sep/ | — |
-| 1.2 | Land thread_local callbacks (#16) | Review, fix conflicts, merge | third_party/highs_patch/ | — |
-| 1.3 | Land pluggable separators (#15) | Review, fix conflicts, merge | src/sep/separation_oracle.*, src/preprocess/bound_propagator.* | — |
-| 1.4 | Land benchmarks reorg (#13) | Review, fix conflicts, merge | benchmarks/, tests/ | — |
-| 1.5 | Land SPI separator | Create PR from branch, review, merge | src/sep/spi_separator.* | — |
-| 1.6 | Land cutoff/prove-only | Create PR from branch, review, merge | src/model/ | — |
-| 1.7 | Land docs fixes | Create PR from branch, review, merge | docs/ | — |
-| 1.8 | Clean up stale branches | Delete merged/abandoned remote branches | — | 1.1–1.7 |
+| 2.1 | Land deterministic solver (#17) | Review, fix conflicts, merge | src/heuristic/, src/sep/ | — |
+| 2.2 | Land thread_local callbacks (#16) | Review, fix conflicts, merge | third_party/highs_patch/ | — |
+| 2.3 | Land pluggable separators (#15) | Review, fix conflicts, merge | src/sep/separation_oracle.*, src/preprocess/bound_propagator.* | — |
+| 2.4 | Land benchmarks reorg (#13) | Review, fix conflicts, merge | benchmarks/, tests/ | — |
+| 2.5 | Land SPI separator | Create PR from branch, review, merge | src/sep/spi_separator.* | — |
+| 2.6 | Land cutoff/prove-only | Create PR from branch, review, merge | src/model/ | — |
+| 2.7 | Land docs fixes | Create PR from branch, review, merge | docs/ | — |
+| 2.8 | Clean up stale branches | Delete merged/abandoned remote branches | — | 2.1–2.7 |
 
-**All of 1.1–1.7 are parallel.** 1.8 depends on all others.
+**All of 2.1–2.7 are parallel.** 2.8 depends on all others.
 
-### Step 2 — Test coverage & stability
+### Step 3 — Test coverage & stability
 
 ```
 Deliverable: comprehensive test suite, confidence in correctness.
@@ -101,17 +118,17 @@ Deliverable: comprehensive test suite, confidence in correctness.
 
 | ID | PR title | Deliverable | Files | Depends on |
 |----|----------|-------------|-------|------------|
-| 2.1 | Path vs tour formulation tests | Side-by-side tests: same graph solved as tour and s-t path, verify degree constraints and SEC form | tests/test_formulation.cpp | 1.1 |
-| 2.2 | Separator edge case tests | Empty cuts, singleton sets, numerical stability (tight tolerances), all 5 separators | tests/test_separators.cpp | 1.1 |
-| 2.3 | Sub-MIP column mapping tests | Verify SEC separation works correctly in sub-MIP context with column mapping | tests/test_separators.cpp | 1.3 |
-| 2.4 | Heuristic unit tests | Direct tests for primal heuristic construction + local search (not just via model) | tests/test_heuristic.cpp | 1.1 |
-| 2.5 | Python binding integration tests | End-to-end: load instance, solve, check solution from Python | tests/python/test_bindings.py | 1.3 |
-| 2.6 | Large instance scaling tests | 200+ node instances, verify solver doesn't degrade unexpectedly | tests/test_instances.cpp | 1.4 |
-| 2.7 | Domain propagator regression tests | Edge cases: all-pairs mode, tightened UBs, zero-demand nodes | tests/test_propagator.cpp | 1.1 |
+| 3.1 | Path vs tour formulation tests | Side-by-side tests: same graph solved as tour and s-t path, verify degree constraints and SEC form | tests/test_formulation.cpp | 2.1 |
+| 3.2 | Separator edge case tests | Empty cuts, singleton sets, numerical stability (tight tolerances), all 5 separators | tests/test_separators.cpp | 2.1 |
+| 3.3 | Sub-MIP column mapping tests | Verify SEC separation works correctly in sub-MIP context with column mapping | tests/test_separators.cpp | 2.3 |
+| 3.4 | Heuristic unit tests | Direct tests for primal heuristic construction + local search (not just via model) | tests/test_heuristic.cpp | 2.1 |
+| 3.5 | Python binding integration tests | End-to-end: load instance, solve, check solution from Python | tests/python/test_bindings.py | 2.3 |
+| 3.6 | Large instance scaling tests | 200+ node instances, verify solver doesn't degrade unexpectedly | tests/test_instances.cpp | 2.4 |
+| 3.7 | Domain propagator regression tests | Edge cases: all-pairs mode, tightened UBs, zero-demand nodes | tests/test_propagator.cpp | 2.1 |
 
-**All of 2.1–2.7 are parallel** — they touch different test files.
+**All of 3.1–3.7 are parallel** — they touch different test files.
 
-### Step 3 — Parameter tuning
+### Step 4 — Parameter tuning
 
 ```
 Deliverable: optimal default parameters for each solver component, backed by
@@ -124,33 +141,33 @@ All runs must be deterministic (fixed seed/thread count and stable ordering).
 
 | ID | PR title | Deliverable | Files | Depends on |
 |----|----------|-------------|-------|------------|
-| 3.1 | Tune separation_tol | Profile violation threshold (0.01–0.5) across SPPRCLIB + Roberti; find optimal default (current: 0.1, Jepsen et al. suggest 0.4) | src/model/highs_bridge.cpp, benchmarks/ | 1.4 |
-| 3.2 | Tune max_cuts_per_separator | Profile top-k cuts per round (1–20) per separator; may differ per separator family | src/model/highs_bridge.cpp, benchmarks/ | 1.4 |
-| 3.3 | Tune separation_interval | Profile amortization (1–5) across instance size classes; larger instances may benefit from less frequent separation | src/model/highs_bridge.cpp, benchmarks/ | 1.4 |
-| 3.4 | RGLM enable/disable decision | Benchmark RGLM on full instance set with tuned params from 3.1–3.3; decide if it should be on by default | src/sep/rglm_separator.cpp, benchmarks/ | 3.1, 3.2 |
-| 3.5 | Comb effectiveness evaluation | Benchmark Comb on full instance set; if ineffective, deprecate with documented rationale | src/sep/comb_separator.cpp, benchmarks/ | 3.1, 3.2 |
+| 4.1 | Tune separation_tol | Profile violation threshold (0.01–0.5) across SPPRCLIB + Roberti; find optimal default (current: 0.1, Jepsen et al. suggest 0.4) | src/model/highs_bridge.cpp, benchmarks/ | 2.4 |
+| 4.2 | Tune max_cuts_per_separator | Profile top-k cuts per round (1–20) per separator; may differ per separator family | src/model/highs_bridge.cpp, benchmarks/ | 2.4 |
+| 4.3 | Tune separation_interval | Profile amortization (1–5) across instance size classes; larger instances may benefit from less frequent separation | src/model/highs_bridge.cpp, benchmarks/ | 2.4 |
+| 4.4 | RGLM enable/disable decision | Benchmark RGLM on full instance set with tuned params from 4.1–4.3; decide if it should be on by default | src/sep/rglm_separator.cpp, benchmarks/ | 4.1, 4.2 |
+| 4.5 | Comb effectiveness evaluation | Benchmark Comb on full instance set; if ineffective, deprecate with documented rationale | src/sep/comb_separator.cpp, benchmarks/ | 4.1, 4.2 |
 
 **Propagator parameters:**
 
 | ID | PR title | Deliverable | Files | Depends on |
 |----|----------|-------------|-------|------------|
-| 3.6 | Tune propagator label budget | Profile max labels per node (10–200, current hardcoded 50) on hard instances | src/preprocess/edge_elimination.h, benchmarks/ | 1.4 |
-| 3.7 | Tune all_pairs_propagation | Profile all-pairs mode cost vs fixing gain; find instance-size threshold where it pays off | src/model/model.cpp, benchmarks/ | 1.4 |
+| 4.6 | Tune propagator label budget | Profile max labels per node (10–200, current hardcoded 50) on hard instances | src/preprocess/edge_elimination.h, benchmarks/ | 2.4 |
+| 4.7 | Tune all_pairs_propagation | Profile all-pairs mode cost vs fixing gain; find instance-size threshold where it pays off | src/model/model.cpp, benchmarks/ | 2.4 |
 
 **Heuristic parameters:**
 
 | ID | PR title | Deliverable | Files | Depends on |
 |----|----------|-------------|-------|------------|
-| 3.8 | Tune primal heuristic (warm-start) time budget | Profile time budget scaling (current: min(500ms, n*10ms)) vs solution quality and total solve time | src/heuristic/warm_start.h, benchmarks/ | 1.1 |
-| 3.9 | Tune primal heuristic (warm-start) restart count | Profile number of restarts (current: time-based) vs quality; ties into deterministic solver (#17) | src/heuristic/warm_start.h, benchmarks/ | 1.1 |
-| 3.10 | Tune local search neighbourhood | Profile 2-opt vs or-opt vs combined; measure move acceptance rates and time per move | src/heuristic/warm_start.h, benchmarks/ | 1.1 |
+| 4.8 | Tune primal heuristic (warm-start) time budget | Profile time budget scaling (current: min(500ms, n*10ms)) vs solution quality and total solve time | src/heuristic/warm_start.h, benchmarks/ | 2.1 |
+| 4.9 | Tune primal heuristic (warm-start) restart count | Profile number of restarts (current: time-based) vs quality; ties into deterministic solver (#17) | src/heuristic/warm_start.h, benchmarks/ | 2.1 |
+| 4.10 | Tune local search neighbourhood | Profile 2-opt vs or-opt vs combined; measure move acceptance rates and time per move | src/heuristic/warm_start.h, benchmarks/ | 2.1 |
 
-**3.1, 3.2, 3.3 are parallel** (independent parameter sweeps on separation).
-**3.6, 3.7 are parallel** (independent propagator experiments).
-**3.8, 3.9, 3.10 are parallel** (independent heuristic experiments).
-3.4 and 3.5 depend on 3.1 + 3.2. All three groups are parallel with each other.
+**4.1, 4.2, 4.3 are parallel** (independent parameter sweeps on separation).
+**4.6, 4.7 are parallel** (independent propagator experiments).
+**4.8, 4.9, 4.10 are parallel** (independent heuristic experiments).
+4.4 and 4.5 depend on 4.1 + 4.2. All three groups are parallel with each other.
 
-### Step 4 — Solver internals & performance
+### Step 5 — Solver internals & performance
 
 ```
 Deliverable: tackle the 5 unsolved Roberti M-series instances (150–200 nodes).
@@ -158,17 +175,17 @@ Deliverable: tackle the 5 unsolved Roberti M-series instances (150–200 nodes).
 
 | ID | PR title | Deliverable | Files | Depends on |
 |----|----------|-------------|-------|------------|
-| 4.1 | CPU/memory profiling on hard instances | Identify bottlenecks: LP vs separation vs propagation | benchmarks/ | 1.4 |
-| 4.2 | Branching strategy control | Custom variable selection via HiGHS callbacks (if available) | src/model/highs_bridge.cpp | 1.2 |
-| 4.3 | Parallel Model::solve() | Enable concurrent solves on different threads (uses thread_local from 1.2) | src/model/ | 1.2 |
-| 4.4 | Early termination heuristic | Skip separation when UB stabilizes or gap is tiny | src/model/highs_bridge.cpp | 1.1 |
-| 4.5 | Ryan-Foster branching for RCSPP | Investigate branching on edge pairs (from threading analysis branch) | src/model/ | 4.2 |
+| 5.1 | CPU/memory profiling on hard instances | Identify bottlenecks: LP vs separation vs propagation | benchmarks/ | 2.4 |
+| 5.2 | Branching strategy control | Custom variable selection via HiGHS callbacks (if available) | src/model/highs_bridge.cpp | 2.2 |
+| 5.3 | Parallel Model::solve() | Enable concurrent solves on different threads (uses thread_local from 2.2) | src/model/ | 2.2 |
+| 5.4 | Early termination heuristic | Skip separation when UB stabilizes or gap is tiny | src/model/highs_bridge.cpp | 2.1 |
+| 5.5 | Ryan-Foster branching for RCSPP | Investigate branching on edge pairs (from threading analysis branch) | src/model/ | 5.2 |
 
-**4.1, 4.2, 4.3, 4.4 are parallel.** 4.5 depends on 4.2.
+**5.1, 5.2, 5.3, 5.4 are parallel.** 5.5 depends on 5.2.
 
 ---
 
-### Step 5 — Applications Expansion
+### Step 6 — Applications Expansion
 
 ```
 Deliverable: prioritize use-case support from docs/applications.md using
@@ -177,9 +194,9 @@ published papers and public instance sets.
 
 | ID | PR title | Deliverable | Files | Depends on |
 |----|----------|-------------|-------|------------|
-| 5.1 | PCTSP / Selective TSP onboarding | Consolidate academic references, ingest/normalize public instances, document objective/penalty convention mapping to current CPTP model | docs/applications.md, docs/benchmarks.md, src/core/ | 0.3 |
-| 5.2 | Orienteering edge-resource extension | Add support plan for edge-budget resources and instance ingestion path for OP datasets | docs/applications.md, src/model/, src/core/ | 5.1 |
-| 5.3 | Multi-resource extension planning | Define two-resource formulation/test plan and identify benchmark sets for capacity+time style pricing | docs/applications.md, docs/roadmap.md | 5.2 |
-| 5.4 | Directed support planning (last) | Define directed-formulation migration path and collect asymmetric benchmark instances | docs/applications.md, docs/roadmap.md | 5.3 |
+| 6.1 | PCTSP / Selective TSP onboarding | Consolidate academic references, ingest/normalize public instances, document objective/penalty convention mapping to current CPTP model | docs/applications.md, docs/benchmarks.md, src/core/ | 1.3 |
+| 6.2 | Orienteering edge-resource extension | Add support plan for edge-budget resources and instance ingestion path for OP datasets | docs/applications.md, src/model/, src/core/ | 6.1 |
+| 6.3 | Multi-resource extension planning | Define two-resource formulation/test plan and identify benchmark sets for capacity+time style pricing | docs/applications.md, docs/roadmap.md | 6.2 |
+| 6.4 | Directed support planning (last) | Define directed-formulation migration path and collect asymmetric benchmark instances | docs/applications.md, docs/roadmap.md | 6.3 |
 
 ---

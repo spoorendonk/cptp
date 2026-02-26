@@ -87,11 +87,22 @@ void HiGHSBridge::build_formulation() {
         }
     }
 
-    // Edge elimination: capacity-aware 2-cycle labeling bounds
+    // Edge elimination: capacity-aware labeling bounds (possibly async-updated).
+    std::vector<double> elim_fwd = fwd_bounds_;
+    std::vector<double> elim_bwd = bwd_bounds_;
+    double elim_corr = correction_;
+    if (shared_bounds_) {
+        auto snap = shared_bounds_->snapshot();
+        if (!snap.fwd.empty() && !snap.bwd.empty()) {
+            elim_fwd = std::move(snap.fwd);
+            elim_bwd = std::move(snap.bwd);
+            elim_corr = snap.correction;
+        }
+    }
     if (upper_bound_ < std::numeric_limits<double>::infinity()
-        && !fwd_bounds_.empty() && !bwd_bounds_.empty()) {
+        && !elim_fwd.empty() && !elim_bwd.empty()) {
         auto eliminated = preprocess::edge_elimination(
-            prob_, fwd_bounds_, bwd_bounds_, upper_bound_, correction_);
+            prob_, elim_fwd, elim_bwd, upper_bound_, elim_corr);
         int32_t edge_elim_count = 0;
         for (auto e : graph.edges()) {
             if (eliminated[e] && col_upper[e] > 0.0) {
@@ -402,7 +413,18 @@ void HiGHSBridge::set_all_pairs_bounds(std::vector<double> dist) {
 }
 
 void HiGHSBridge::install_propagator() {
-    if (fwd_bounds_.empty() || bwd_bounds_.empty()) return;
+    preprocess::BoundSnapshot initial_snapshot;
+    if (shared_bounds_) {
+        initial_snapshot = shared_bounds_->snapshot();
+    }
+    if (initial_snapshot.fwd.empty() || initial_snapshot.bwd.empty()) {
+        initial_snapshot.fwd = fwd_bounds_;
+        initial_snapshot.bwd = bwd_bounds_;
+        initial_snapshot.correction = correction_;
+        initial_snapshot.ng_size = 1;
+        initial_snapshot.version = 0;
+    }
+    if (initial_snapshot.fwd.empty() || initial_snapshot.bwd.empty()) return;
 
     const auto& graph = prob_.graph();
     const int32_t m = num_edges_;
@@ -431,10 +453,10 @@ void HiGHSBridge::install_propagator() {
     auto rc_runs = rc_label_runs_;
     auto rc_settings = rc_settings_;
 
-    // Capture labeling bounds by value (they won't change during solve).
-    auto fwd = std::make_shared<std::vector<double>>(fwd_bounds_);
-    auto bwd = std::make_shared<std::vector<double>>(bwd_bounds_);
-    double corr = correction_;
+    // Mutable snapshot consumed by callback; refreshed from shared store.
+    auto bounds_snapshot = std::make_shared<preprocess::BoundSnapshot>(std::move(initial_snapshot));
+    auto shared_bounds = shared_bounds_;
+    auto async_ub = async_upper_bound_;
 
     // All-pairs bounds for stronger Trigger B (empty if not computed)
     auto ap = std::make_shared<std::vector<double>>(std::move(all_pairs_));
@@ -468,13 +490,25 @@ void HiGHSBridge::install_propagator() {
             // Skip sub-MIPs: different column space
             if (mipsolver.submip) return;
 
+            if (shared_bounds) {
+                auto snap = shared_bounds->snapshot();
+                if (snap.version != bounds_snapshot->version) {
+                    *bounds_snapshot = std::move(snap);
+                }
+            }
+
+            const auto& f = bounds_snapshot->fwd;
+            const auto& b = bounds_snapshot->bwd;
+            const double corr = bounds_snapshot->correction;
+            if (f.empty() || b.empty()) return;
+
             double ub = mipsolver.mipdata_->upper_limit;
+            if (async_ub) {
+                ub = std::min(ub, async_ub->load(std::memory_order_relaxed));
+            }
             if (ub >= inf) return;
 
             (*propagator_calls)++;
-
-            const auto& f = *fwd;
-            const auto& b = *bwd;
             const auto& ec = *edge_costs;
             const auto& pr = *profits;
             const auto& adjacency = *adj;

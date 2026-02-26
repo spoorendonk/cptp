@@ -1,59 +1,85 @@
 # Preprocessing
 
-Files: `src/preprocess/demand_reachability.h`, `src/preprocess/edge_elimination.h`
+Files: `src/preprocess/reachability.h`, `src/preprocess/edge_elimination.h`, `src/preprocess/ng_labeling.h`
 
 ## Overview
 
-Two preprocessing phases run in parallel (via TBB) before the MIP is built. Both
-reduce problem size by eliminating nodes and edges that cannot appear in any
-improving solution.
+Two preprocessing phases run in parallel (via TBB) before the MIP is built:
+
+1. demand-reachability node filtering
+2. ng-route/DSSR labeling bounds for edge elimination and propagation
+
+The warm-start heuristic runs in parallel with these phases and provides the
+initial upper bound used by elimination.
 
 ## Demand-Reachability
 
-File: `src/preprocess/demand_reachability.h`
+File: `src/preprocess/reachability.h`
 
 Eliminates nodes that are unreachable within the capacity budget.
 
-- **Tour** (source == target): Dijkstra from depot; eliminates nodes where
-  $2 \cdot \text{min\_demand\_path}(\text{depot}, v) - d_v > Q$ (round-trip check)
-- **Path** (source $\ne$ target): Dijkstra from both source and target; eliminates
-  nodes where $\text{dist}_s(v) + \text{dist}_t(v) - d_v > Q$ (one-way check)
+- **Tour** (`source == target`): Dijkstra from depot; eliminate nodes where
+  `2 * dist(depot, v) - demand(v) > Q`
+- **Path** (`source != target`): Dijkstra from source and target; eliminate
+  nodes where `dist_s(v) + dist_t(v) - demand(v) > Q`
+
+## ng-route / DSSR Labeling
+
+File: `src/preprocess/ng_labeling.h`
+
+The solver computes forward/backward lower-bound arrays with iterative ng-path
+labeling (DSSR style):
+
+- Label state tracks `(cost, demand, predecessor, ng-visited bitset)`
+- Dominance checks `(cost, demand, visited-subset)`
+- AVX2 prefilter is used when available (`ng_simd=true`)
+- ng neighborhoods are grown iteratively from detected cycles until reaching a
+  configured cap
+
+Main options (from `Model::solve` options map):
+
+- `ng_initial_size` (default 4)
+- `ng_max_size` (default 12)
+- `ng_dssr_iters` (default 6)
+- `ng_label_budget` (default 50)
+- `ng_simd` (default true)
 
 ## Edge Elimination
 
 File: `src/preprocess/edge_elimination.h`
 
-Forward labeling with:
-- Net cost tracking (edge costs minus collected profits)
-- Demand accumulation with capacity check
-- 2-cycle elimination (no immediate return to predecessor)
-- Label dominance to control enumeration
+Given forward bounds `f` and backward bounds `b`:
 
-Lower bound computation:
+- **Tour**: `lb(u,v) = f[u] + c(u,v) + f[v] + profit(source)`
+- **Path**: `lb(u,v) = min(f_s[u] + c(u,v) + f_t[v], f_s[v] + c(u,v) + f_t[u])`
 
-- **Tour**: labeling from depot; $\text{lb}(u,v) = f[u] + c(u,v) + f[v] + p_{\text{depot}}$
-- **Path**: labeling from both source and target;
-  $\text{lb}(u,v) = \min(f_s[u] + c(u,v) + f_t[v],\ f_s[v] + c(u,v) + f_t[u])$
+If `lb(u,v) > UB`, edge `(u,v)` is fixed to zero before MIP build.
 
-For each edge, if the lower bound exceeds the warm-start upper bound, the edge
-variable is fixed to zero before the MIP is built. The same labeling bounds are
-reused by the [domain propagator](domain-propagator.md) during branch-and-bound.
+## Async DSSR During B&B
+
+Files: `src/preprocess/shared_bounds.h`, `src/model/model.cpp`,
+`src/model/highs_bridge.cpp`
+
+If `dssr_async=true`, a background worker runs tighter fixed-ng labeling stages
+while HiGHS branch-and-bound is running:
+
+- publishes improved `(f,b)` snapshots via `SharedBoundsStore`
+- snapshots are monotone tightened element-wise
+- propagator callback consumes newer versions on the fly
+
+This allows stronger pruning without restarting the solve.
 
 ## Testing
 
-8 C++ tests (`[preprocess]` tag) and 5 Python tests cover:
+Key coverage:
 
-| Test | Description |
-|---|---|
-| Demand reachability: tour round-trip | All nodes reachable with sufficient capacity |
-| Demand reachability: tour eliminates | High-demand node unreachable |
-| Demand reachability: path bidirectional | Source+target Dijkstra for s-t path |
-| Demand reachability: path eliminates | High-demand node on tight-capacity path |
-| Demand reachability: large capacity | All nodes reachable with very large Q |
-| Edge elimination: tour | Expensive edge eliminated with tight UB |
-| Edge elimination: path | Bidirectional labeling on s-t path |
-| Edge elimination: infinite UB | No edges eliminated |
+- parity test (`ng_size=1`) against legacy 2-cycle labeling
+- shared-bounds monotonic tightening behavior
+- elementary s-t path detection from ng labeling
+
+Run:
 
 ```bash
-./build/rcspp_algo_tests [preprocess]
+./build/rcspp_algo_tests [ng]
+./build/rcspp_algo_tests [shared_bounds]
 ```

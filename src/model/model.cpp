@@ -2,6 +2,7 @@
 #include "model/highs_bridge.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <thread>
 
@@ -10,6 +11,8 @@
 
 #include "heuristic/primal_heuristic.h"
 #include "preprocess/edge_elimination.h"
+#include "preprocess/ng_labeling.h"
+#include "preprocess/shared_bounds.h"
 #include "mip/HighsUserSeparator.h"
 #include "mip/HighsMipSolverData.h"
 #include "sep/sec_separator.h"
@@ -22,6 +25,54 @@
 #include "util/timer.h"
 
 namespace rcspp {
+
+namespace {
+
+heuristic::HeuristicResult build_ng_path_start(const Problem& problem,
+                                               std::span<const int32_t> path) {
+    heuristic::HeuristicResult result;
+    result.objective = std::numeric_limits<double>::infinity();
+    if (path.size() < 2) return result;
+
+    const auto& graph = problem.graph();
+    const int32_t m = problem.num_edges();
+    const int32_t n = problem.num_nodes();
+
+    std::vector<double> col_values(static_cast<size_t>(m + n), 0.0);
+
+    for (int32_t node : path) {
+        if (node < 0 || node >= n) return result;
+        col_values[static_cast<size_t>(m + node)] = 1.0;
+    }
+
+    double objective = 0.0;
+    for (size_t k = 0; k + 1 < path.size(); ++k) {
+        const int32_t u = path[k];
+        const int32_t v = path[k + 1];
+        int32_t edge = -1;
+        for (auto e : graph.incident_edges(u)) {
+            if (graph.other_endpoint(e, u) == v) {
+                edge = e;
+                break;
+            }
+        }
+        if (edge < 0) return result;
+        col_values[edge] = 1.0;
+        objective += problem.edge_cost(edge);
+    }
+
+    for (int32_t i = 0; i < n; ++i) {
+        if (col_values[static_cast<size_t>(m + i)] > 0.5) {
+            objective -= problem.profit(i);
+        }
+    }
+
+    result.col_values = std::move(col_values);
+    result.objective = objective;
+    return result;
+}
+
+}  // namespace
 
 Model::Model() = default;
 
@@ -125,6 +176,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool deterministic = true;
     double cutoff = std::numeric_limits<double>::infinity();
     bool disable_heuristics = false;
+    bool dssr_async = true;
+    preprocess::ng::DssrOptions dssr_options;
     RCFixingSettings rc_settings;
     for (const auto& [key, value] : options) {
         if (key == "separation_interval") {
@@ -179,6 +232,30 @@ SolveResult Model::solve(const SolverOptions& options) {
             disable_heuristics = (value == "true" || value == "1");
             continue;
         }
+        if (key == "dssr_async") {
+            dssr_async = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "ng_initial_size") {
+            dssr_options.initial_ng_size = std::stoi(value);
+            continue;
+        }
+        if (key == "ng_max_size") {
+            dssr_options.max_ng_size = std::stoi(value);
+            continue;
+        }
+        if (key == "ng_dssr_iters") {
+            dssr_options.dssr_iterations = std::stoi(value);
+            continue;
+        }
+        if (key == "ng_label_budget") {
+            dssr_options.max_labels_per_node = std::stoi(value);
+            continue;
+        }
+        if (key == "ng_simd") {
+            dssr_options.enable_simd = (value == "true" || value == "1");
+            continue;
+        }
         if (key == "rc_fixing") {
             if (value == "root_only") rc_settings.strategy = RCFixingStrategy::root_only;
             else if (value == "on_ub_improvement") rc_settings.strategy = RCFixingStrategy::on_ub_improvement;
@@ -203,6 +280,12 @@ SolveResult Model::solve(const SolverOptions& options) {
             logger_.log("Warning: HiGHS rejected option {} = {}", key, value);
         }
     }
+
+    dssr_options.initial_ng_size = std::max<int32_t>(1, dssr_options.initial_ng_size);
+    dssr_options.max_ng_size = std::max<int32_t>(dssr_options.initial_ng_size,
+                                                 dssr_options.max_ng_size);
+    dssr_options.dssr_iterations = std::max<int32_t>(1, dssr_options.dssr_iterations);
+    dssr_options.max_labels_per_node = std::max<int32_t>(1, dssr_options.max_labels_per_node);
 
     // When cutoff is provided, set HiGHS objective_bound for node pruning.
     // This sets the initial upper_limit in the MIP solver, enabling pruning
@@ -237,8 +320,11 @@ SolveResult Model::solve(const SolverOptions& options) {
     const int32_t n = problem_.num_nodes();
     std::vector<double> fwd_bounds, bwd_bounds;
     std::vector<double> all_pairs;
-    heuristic::HeuristicResult warm_start;
+    heuristic::HeuristicResult warm_start{{}, std::numeric_limits<double>::infinity()};
     double warm_start_ub = std::numeric_limits<double>::infinity();
+    int32_t ng_size_used = 1;
+    double ng_path_ub = std::numeric_limits<double>::infinity();
+    std::vector<int32_t> ng_path_nodes;
 
     // Use cutoff as UB when provided (known optimal for prove-only mode)
     if (cutoff < std::numeric_limits<double>::infinity()) {
@@ -284,7 +370,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                     all_pairs.begin() + static_cast<ptrdiff_t>(target) * n + n);
             }
         } else {
-            // Default: depot-only labeling with warm-start
+            // Default: source/target DSSR-ng labeling with warm-start
             int num_restarts = std::clamp(n, 20, 200);
             double budget_ms = deterministic ? 0.0
                 : std::min(500.0, std::max(10.0,
@@ -292,13 +378,16 @@ SolveResult Model::solve(const SolverOptions& options) {
 
             tbb::task_group tg;
             tg.run([&] {
-                fwd_bounds = preprocess::forward_labeling(problem_, source);
+                auto bounds = preprocess::ng::compute_bounds(
+                    problem_, source, target, dssr_options);
+                fwd_bounds = std::move(bounds.fwd);
+                bwd_bounds = std::move(bounds.bwd);
+                ng_size_used = bounds.ng_size;
+                if (bounds.elementary_path_found) {
+                    ng_path_ub = bounds.elementary_path_cost;
+                    ng_path_nodes = std::move(bounds.elementary_path);
+                }
             });
-            if (source != target) {
-                tg.run([&] {
-                    bwd_bounds = preprocess::backward_labeling(problem_, target);
-                });
-            }
             if (!disable_heuristics) {
                 tg.run([&] {
                     warm_start = heuristic::build_initial_solution(
@@ -306,15 +395,22 @@ SolveResult Model::solve(const SolverOptions& options) {
                 });
             }
             tg.wait();
-
-            if (source == target) {
-                bwd_bounds = fwd_bounds;
-            }
         }
 
         // Heuristic UB only used when no cutoff was provided
         if (cutoff >= std::numeric_limits<double>::infinity()) {
             warm_start_ub = warm_start.objective;
+        }
+        if (ng_path_ub < warm_start_ub) {
+            warm_start_ub = ng_path_ub;
+        }
+        if (!ng_path_nodes.empty()) {
+            auto ng_start = build_ng_path_start(problem_, ng_path_nodes);
+            if (!ng_start.col_values.empty() &&
+                ng_start.objective < warm_start.objective - 1e-9) {
+                warm_start = std::move(ng_start);
+                warm_start_ub = std::min(warm_start_ub, warm_start.objective);
+            }
         }
         logger_.log("Preprocessing: {}s, UB={}{}", preproc_timer.elapsed_seconds(),
                     warm_start_ub,
@@ -327,18 +423,35 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_submip_separation(submip_separation);
     bridge.set_upper_bound(warm_start_ub);
     bridge.set_rc_fixing(rc_settings);
+
+    auto shared_bounds = std::make_shared<preprocess::SharedBoundsStore>(
+        preprocess::BoundSnapshot{
+            .fwd = fwd_bounds,
+            .bwd = bwd_bounds,
+            .correction = correction,
+            .ng_size = ng_size_used,
+            .version = 0,
+        });
+    auto async_upper_bound = std::make_shared<std::atomic<double>>(warm_start_ub);
+    bridge.set_shared_bounds_store(shared_bounds);
+    bridge.set_async_upper_bound(async_upper_bound);
+
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
     if (all_pairs_propagation) {
         bridge.set_all_pairs_bounds(std::move(all_pairs));
     }
 
-    // Add separators
+    // Add separators.
+    // NOTE: SEC is path-safe. Other families below are currently validated for
+    // tour mode only; keep them disabled for s-t path to avoid invalid cuts.
     bridge.add_separator(std::make_unique<sep::SECSeparator>());
-    bridge.add_separator(std::make_unique<sep::RCISeparator>());
-    bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
-    if (enable_rglm)
-        bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
-    bridge.add_separator(std::make_unique<sep::CombSeparator>());
+    if (problem_.is_tour()) {
+        bridge.add_separator(std::make_unique<sep::RCISeparator>());
+        bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
+        if (enable_rglm)
+            bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
+        bridge.add_separator(std::make_unique<sep::CombSeparator>());
+    }
     if (all_pairs_propagation)
         bridge.add_separator(std::make_unique<sep::SPISeparator>());
 
@@ -535,7 +648,43 @@ SolveResult Model::solve(const SolverOptions& options) {
         highs.setSolution(start);
     }
 
+    std::atomic<bool> stop_async_dssr{false};
+    std::thread async_dssr_worker;
+    if (dssr_async &&
+        !all_pairs_propagation &&
+        dssr_options.max_ng_size > ng_size_used) {
+        async_dssr_worker = std::thread([&]() {
+            const int32_t start_ng = std::max(ng_size_used + 1, dssr_options.initial_ng_size + 1);
+            int32_t updates = 0;
+            for (int32_t ng_size = start_ng;
+                 ng_size <= dssr_options.max_ng_size &&
+                 !stop_async_dssr.load(std::memory_order_relaxed);
+                 ++ng_size) {
+                auto stage_opts = dssr_options;
+                stage_opts.initial_ng_size = ng_size;
+                stage_opts.max_ng_size = ng_size;
+                stage_opts.dssr_iterations = std::max<int32_t>(1, dssr_options.dssr_iterations / 2);
+                auto bounds = preprocess::ng::compute_bounds(problem_, source, target, stage_opts);
+                bool changed = shared_bounds->publish_tightening(bounds.fwd, bounds.bwd, bounds.ng_size);
+                if (changed) updates++;
+                if (bounds.elementary_path_found) {
+                    double prev = async_upper_bound->load(std::memory_order_relaxed);
+                    while (bounds.elementary_path_cost + 1e-9 < prev &&
+                           !async_upper_bound->compare_exchange_weak(
+                               prev, bounds.elementary_path_cost, std::memory_order_relaxed)) {
+                    }
+                }
+            }
+            (void)updates;
+        });
+    }
+
     highs.run();
+
+    stop_async_dssr.store(true, std::memory_order_relaxed);
+    if (async_dssr_worker.joinable()) {
+        async_dssr_worker.join();
+    }
 
     // Clear static callbacks/state to avoid leaking between solves
     HighsUserSeparator::clearCallback();

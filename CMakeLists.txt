@@ -83,6 +83,7 @@ if(RCSPP_BUILD_TESTS)
     # Standalone algorithm tests (no HiGHS needed)
     add_executable(rcspp_algo_tests
         tests/test_max_flow.cpp
+        tests/test_ng_labeling.cpp
         tests/test_separators.cpp
         tests/test_oracle.cpp
     )

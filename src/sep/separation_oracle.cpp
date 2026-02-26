@@ -23,9 +23,11 @@ void SeparationOracle::add_separator(std::unique_ptr<Separator> sep) {
 
 void SeparationOracle::add_default_separators() {
     separators_.push_back(std::make_unique<SECSeparator>());
-    separators_.push_back(std::make_unique<RCISeparator>());
-    separators_.push_back(std::make_unique<MultistarSeparator>());
-    separators_.push_back(std::make_unique<CombSeparator>());
+    if (prob_.is_tour()) {
+        separators_.push_back(std::make_unique<RCISeparator>());
+        separators_.push_back(std::make_unique<MultistarSeparator>());
+        separators_.push_back(std::make_unique<CombSeparator>());
+    }
 }
 
 std::vector<Cut> SeparationOracle::separate(
