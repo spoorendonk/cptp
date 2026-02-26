@@ -276,7 +276,7 @@ docs/            Algorithm documentation
 - [Domain propagator](docs/domain-propagator.md) — BoundPropagator, labeling-based edge fixing
 - [Primal heuristic](docs/primal-heuristic.md) — initial solution, LP-guided callback, local search
 - [Benchmark results](docs/benchmarks.md) — SPPRCLIB and Roberti instance results
-- [Roadmap](docs/ROADMAP.md) — planned work units and priorities
+- [Roadmap](docs/roadmap.md) — planned work units and priorities
 
 ## Dependencies
 
