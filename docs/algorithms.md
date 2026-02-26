@@ -60,7 +60,7 @@ Install HiGHS callbacks
     |-- Feasibility check (SEC on incumbents, with sub-MIP column mapping)
     |-- Sub-MIP root SEC separation (column mapping via undoPrimal)
     |-- Domain propagator --> domain-propagator.md
-    '-- LP-guided heuristic callback --> primal-heuristic.md
+    '-- LP-guided heuristic callback --> warm-start-heuristic.md
     |
     v
 HiGHS MIP solve
@@ -94,7 +94,7 @@ Demand-reachability filtering and labeling-based edge elimination. See [preproce
 
 ## Primal Heuristic
 
-Parallel construction + local search heuristic using Intel TBB. See [primal-heuristic.md](primal-heuristic.md) for full details.
+Parallel construction + local search heuristic using Intel TBB. See [warm-start-heuristic.md](warm-start-heuristic.md) for full details.
 
 **Initial solution** (`build_initial_solution`): Greedy cheapest-insertion with three deterministic orderings (profit/demand ratio, absolute profit, distance from source) plus random restarts on the complete graph. Time budget: $\min(500\text{ms},\; n \times 10\text{ms})$.
 

@@ -274,7 +274,7 @@ docs/            Algorithm documentation
 - [Cut separation](docs/separation.md) — SEC, RCI, Multistar/GLM, RGLM, Comb, SeparationOracle
 - [Preprocessing](docs/preprocessing.md) — demand-reachability filtering, labeling-based edge elimination
 - [Domain propagator](docs/domain-propagator.md) — BoundPropagator, labeling-based edge fixing
-- [Primal heuristic](docs/primal-heuristic.md) — initial solution, LP-guided callback, local search
+- [Primal heuristic](docs/warm-start-heuristic.md) — initial solution, LP-guided callback, local search
 - [Benchmark results](docs/benchmarks.md) — SPPRCLIB and Roberti instance results
 - [Roadmap](docs/ROADMAP.md) — planned work units and priorities
 
