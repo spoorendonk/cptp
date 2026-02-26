@@ -435,7 +435,7 @@ LP relaxation solution.
 #include "sep/separation_oracle.h"
 
 rcspp::sep::SeparationOracle oracle(prob);
-oracle.add_default_separators();  // SEC + RCI + Multistar + Comb
+oracle.add_default_separators();  // Tour: SEC+RCI+Multistar+Comb, Path: SEC
 
 // In your solver's cut callback:
 auto cuts = oracle.separate(x_values, y_values, x_offset, y_offset);
@@ -465,7 +465,10 @@ constraints. Used as a lazy-constraint callback on integer-feasible solutions.
 
 ### Adding separators
 
-Default set via `add_default_separators()`: SEC, RCI, Multistar, Comb.
+Default set via `add_default_separators()`:
+
+- **Tour** (`source == target`): SEC, RCI, Multistar, Comb
+- **Path** (`source != target`): SEC
 
 Individual separators:
 ```cpp

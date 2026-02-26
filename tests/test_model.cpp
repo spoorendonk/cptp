@@ -114,6 +114,35 @@ TEST_CASE("Model solves s-t path instance", "[model][path]") {
     }
 }
 
+TEST_CASE("Model path: disable_heuristics still keeps optimal objective",
+          "[model][path][regression]") {
+    rcspp::Model model;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+
+    model.set_graph(4, edges, costs);
+    model.set_source(0);
+    model.set_target(3);
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 7.0);
+
+    auto opts = quiet;
+    opts.push_back({"disable_heuristics", "true"});
+    auto result = model.solve(opts);
+
+    REQUIRE(result.has_solution());
+    REQUIRE_THAT(result.objective, WithinAbs(-13.0, 1e-6));
+    if (!result.tour.empty()) {
+        REQUIRE(result.tour.front() == 0);
+        REQUIRE(result.tour.back() == 3);
+    }
+}
+
 TEST_CASE("Model solves path with non-zero source", "[model][path]") {
     // source=1, target=3 (neither is node 0)
     rcspp::Model model;

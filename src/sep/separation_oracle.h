@@ -39,7 +39,10 @@ class SeparationOracle {
     /// Add a user-constructed separator.
     void add_separator(std::unique_ptr<Separator> sep);
 
-    /// Add the default separator set (SEC + RCI + Multistar + Comb).
+    /// Add the default separator set.
+    ///
+    /// Tour mode (source == target): SEC + RCI + Multistar + Comb.
+    /// Path mode (source != target): SEC only.
     void add_default_separators();
 
     /// Run all separators on an LP relaxation solution.
