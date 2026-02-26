@@ -49,7 +49,7 @@ Accepts TSPLIB (`.vrp`, `.sppcc`) and numeric (`.txt`) instance formats. All opt
 
 ```bash
 # Tour (closed loop from depot)
-./build/rcspp-solve bench/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
+./build/rcspp-solve benchmarks/instances/spprclib/B-n45-k6-54.sppcc --time_limit 120
 
 # s-t path (source/target read from file)
 ./build/rcspp-solve tests/data/tiny4_path.txt
