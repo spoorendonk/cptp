@@ -4,7 +4,7 @@ Branch-and-cut solver for the Resource Constrained Shortest Path Problem (RCSPP)
 
 Current state: production-quality solver with SEC, RCI, Multistar, RGLM, Comb
 separators, demand-reachability preprocessing, edge elimination via labeling,
-domain propagation, and parallel warm-start heuristic. Solves 45/45 SPPRCLIB
+domain propagation, and parallel primal heuristic (warm-start). Solves 45/45 SPPRCLIB
 instances and 26/31 Roberti Set 3 instances to optimality.
 
 ---
@@ -16,7 +16,7 @@ src/core/        — Problem, static_graph, IO, Dinitz max-flow, Gomory-Hu tree
 src/preprocess/  — Demand-reachability, edge elimination (label-correcting)
 src/sep/         — SEC, RCI, Multistar, RGLM, Comb separators
 src/model/       — HiGHS integration (Model, HiGHSBridge, propagator)
-src/heuristic/   — Warm-start construction + local search
+src/heuristic/   — Primal heuristic (warm-start) construction + local search
 src/cli/         — CLI tool (rcspp-solve)
 src/util/        — Logger, Timer
 python/          — nanobind Python bindings
@@ -37,7 +37,7 @@ starting any overlapping work unit.
 
 | Branch | PR | Status | Summary |
 |--------|-----|--------|---------|
-| `claude/make-deterministic-ZwXew` | #17 | Open | Deterministic warm-start (fixed restarts, seeded RNG, stable_sort) |
+| `claude/make-deterministic-ZwXew` | #17 | Open | Deterministic primal heuristic (warm-start) (fixed restarts, seeded RNG, stable_sort) |
 | `claude/extract-highs-patching-kWX1I` | #16 | Open | thread_local callbacks for parallel Model::solve() |
 | `claude/pluggable-separators-interface-nRwPT` | #15 | Open | SeparationOracle + BoundPropagator, optional HiGHS build |
 | `reorganize-benchmarks` | #13 | Done | Rename bench/ → benchmarks/, PathWyse workflow |
@@ -87,7 +87,7 @@ Deliverable: comprehensive test suite, confidence in correctness.
 | 2.1 | Path vs tour formulation tests | Side-by-side tests: same graph solved as tour and s-t path, verify degree constraints and SEC form | tests/test_formulation.cpp | 1.1 |
 | 2.2 | Separator edge case tests | Empty cuts, singleton sets, numerical stability (tight tolerances), all 5 separators | tests/test_separators.cpp | 1.1 |
 | 2.3 | Sub-MIP column mapping tests | Verify SEC separation works correctly in sub-MIP context with column mapping | tests/test_separators.cpp | 1.3 |
-| 2.4 | Heuristic unit tests | Direct tests for warm-start construction + local search (not just via model) | tests/test_heuristic.cpp | 1.1 |
+| 2.4 | Heuristic unit tests | Direct tests for primal heuristic construction + local search (not just via model) | tests/test_heuristic.cpp | 1.1 |
 | 2.5 | Python binding integration tests | End-to-end: load instance, solve, check solution from Python | tests/python/test_bindings.py | 1.3 |
 | 2.6 | Large instance scaling tests | 200+ node instances, verify solver doesn't degrade unexpectedly | tests/test_instances.cpp | 1.4 |
 | 2.7 | Domain propagator regression tests | Edge cases: all-pairs mode, tightened UBs, zero-demand nodes | tests/test_propagator.cpp | 1.1 |
@@ -123,8 +123,8 @@ set and proposes tuned defaults.
 
 | ID | PR title | Deliverable | Files | Depends on |
 |----|----------|-------------|-------|------------|
-| 3.8 | Tune warm-start time budget | Profile time budget scaling (current: min(500ms, n*10ms)) vs solution quality and total solve time | src/heuristic/warm_start.h, benchmarks/ | 1.1 |
-| 3.9 | Tune warm-start restart count | Profile number of restarts (current: time-based) vs quality; ties into deterministic solver (#17) | src/heuristic/warm_start.h, benchmarks/ | 1.1 |
+| 3.8 | Tune primal heuristic (warm-start) time budget | Profile time budget scaling (current: min(500ms, n*10ms)) vs solution quality and total solve time | src/heuristic/warm_start.h, benchmarks/ | 1.1 |
+| 3.9 | Tune primal heuristic (warm-start) restart count | Profile number of restarts (current: time-based) vs quality; ties into deterministic solver (#17) | src/heuristic/warm_start.h, benchmarks/ | 1.1 |
 | 3.10 | Tune local search neighbourhood | Profile 2-opt vs or-opt vs combined; measure move acceptance rates and time per move | src/heuristic/warm_start.h, benchmarks/ | 1.1 |
 
 **3.1, 3.2, 3.3 are parallel** (independent parameter sweeps on separation).

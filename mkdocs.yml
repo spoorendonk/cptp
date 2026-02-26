@@ -87,5 +87,5 @@ nav:
     - Cut Separation: separation.md
     - Preprocessing: preprocessing.md
     - Domain Propagator: domain-propagator.md
-    - Warm-Start Heuristic: warm-start-heuristic.md
+  - Primal Heuristic: primal-heuristic.md
   - Benchmarks: benchmarks.md

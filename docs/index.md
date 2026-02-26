@@ -96,7 +96,7 @@ flowchart TD
     A[Load instance] --> B[Preprocessing]
     B --> B1[Demand-reachability<br/>filtering]
     B --> B2[Labeling-based<br/>edge elimination]
-    B --> B3[Warm-start<br/>heuristic]
+    B --> B3[Primal heuristic (warm-start)]
     B1 & B2 & B3 --> C[Build MIP]
     C --> D[HiGHS Branch-and-Cut]
     D --> E{LP solved}

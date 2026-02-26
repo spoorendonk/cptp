@@ -27,7 +27,7 @@ The primary application is as a **pricing solver in branch-and-price for CVRP**.
 - **Gomory-Hu tree** (Gusfield's algorithm) shared across separators for efficient min-cut computation
 - **Domain propagator**: labeling-based edge fixing and Lagrangian reduced-cost fixing during branch-and-bound
 - **Preprocessing**: demand-reachability filtering and labeling-based edge elimination
-- **Warm-start heuristic**: parallel greedy construction + local search (2-opt, or-opt, node drop/add) via TBB
+- **Primal heuristic (warm-start)**: parallel greedy construction + local search (2-opt, or-opt, node drop/add) via TBB
 - **Batteries-included HiGHS integration** — full branch-and-cut solver out of the box
 - **Python bindings** via nanobind (optional), with algorithm API available without HiGHS
 
@@ -35,7 +35,7 @@ The primary application is as a **pricing solver in branch-and-price for CVRP**.
 
 The project is split into two layers:
 
-1. **`rcspp_algorithms`** — solver-independent library containing all cutting-plane separators, bound propagation, warm-start heuristic, and preprocessing. Only depends on TBB. Can be used standalone from any MIP solver's cut callback.
+1. **`rcspp_algorithms`** — solver-independent library containing all cutting-plane separators, bound propagation, primal heuristic (warm-start), and preprocessing. Only depends on TBB. Can be used standalone from any MIP solver's cut callback.
 
 2. **`rcspp_model`** (optional) — HiGHS integration that wires the algorithms into HiGHS's branch-and-cut framework. Three callback interfaces are patched into HiGHS (see `third_party/highs_patch/`):
    - **User separator** (`HighsUserSeparator`) — cut separation at fractional and integer-feasible nodes
@@ -170,7 +170,7 @@ if (!oracle.is_feasible(x_int, y_int, x_offset, y_offset)) {
     // reject incumbent — subtour violation
 }
 
-// --- Warm-start heuristic ---
+// --- Primal heuristic ---
 auto warm = rcspp::heuristic::build_warm_start(prob, /*budget_ms=*/500.0);
 // warm.col_values — initial solution, warm.objective — objective value
 
@@ -205,7 +205,7 @@ for cut in cuts:
     # cut.indices (int32), cut.values (float64), cut.rhs — add to solver
     pass
 
-# Warm-start heuristic
+# Primal heuristic
 warm = build_warm_start(prob, time_budget_ms=500.0)
 
 # Bound propagation
@@ -237,7 +237,7 @@ The algorithm tests (`rcspp_algo_tests`) cover all solver-independent components
 - **Individual separators**: SEC, RCI, Multistar, Comb, RGLM — both violation detection and correctness
 - **BoundPropagator**: Trigger A sweep, Trigger B chain fixings, all-pairs bounds, path mode
 - **Preprocessing**: demand reachability, edge elimination, labeling bounds
-- **Warm-start heuristic**: tour/path construction, degree/capacity consistency
+- **Primal heuristic**: tour/path construction, degree/capacity consistency
 - **Core**: Dinitz max-flow, Gomory-Hu tree, Problem accessors, IO parsing
 
 Python algorithm tests mirror the C++ coverage for the `rcspp_bac` package bindings.
@@ -248,7 +248,7 @@ Python algorithm tests mirror the C++ coverage for the `rcspp_bac` package bindi
 src/core/        Problem definition, IO (TSPLIB & numeric), Dinitz max-flow, Gomory-Hu tree
 src/sep/         Cut separators (SEC, RCI, Multistar, RGLM, Comb) + SeparationOracle
 src/preprocess/  BoundPropagator, demand-reachability, edge elimination
-src/heuristic/   Warm-start construction + local search
+src/heuristic/   Primal heuristic (warm-start) construction + local search
 src/model/       HiGHS MIP integration (optional — separators, propagator, callbacks)
 src/cli/         Command-line solver (requires HiGHS)
 src/util/        Utilities (Logger, Timer)
@@ -274,7 +274,7 @@ docs/            Algorithm documentation
 - [Cut separation](docs/separation.md) — SEC, RCI, Multistar/GLM, RGLM, Comb, SeparationOracle
 - [Preprocessing](docs/preprocessing.md) — demand-reachability filtering, labeling-based edge elimination
 - [Domain propagator](docs/domain-propagator.md) — BoundPropagator, labeling-based edge fixing
-- [Primal heuristic](docs/warm-start-heuristic.md) — initial solution, LP-guided callback, local search
+- [Primal heuristic](docs/primal-heuristic.md) — initial solution, LP-guided callback, local search
 - [Benchmark results](docs/benchmarks.md) — SPPRCLIB and Roberti instance results
 - [Roadmap](docs/ROADMAP.md) — planned work units and priorities
 
