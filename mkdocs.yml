@@ -77,11 +77,9 @@ extra:
 nav:
   - Home: index.md
   - Getting Started:
-    - Installation: getting-started.md
+    - CLI Usage: cli.md
     - Instance Formats: instance-formats.md
-  - API:
-    - Python: python-api.md
-    - C++: cpp-api.md
+  - API: api.md
   - Algorithms:
     - Overview: algorithms.md
     - ng/DSSR Bounds: ng-dssr-labelling.md
