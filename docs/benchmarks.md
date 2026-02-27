@@ -128,7 +128,7 @@ cmake --build build -j$(nproc)
 ./build/rcspp-solve benchmarks/instances/roberti/E-n76-k8_b.vrp --time_limit 3600
 ```
 
-Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are in [`benchmarks/progress.csv`](../benchmarks/progress.csv).
+Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are available in `benchmarks/progress.csv`.
 
 ## Step 0.5 — RC Fixing Policy Study
 
@@ -138,7 +138,7 @@ We added a targeted RC-fixing study script:
 ./benchmarks/experiment_rc_fixing.sh 8
 ```
 
-Output CSV: [`benchmarks/rc_fixing_study.csv`](../benchmarks/rc_fixing_study.csv)
+Output CSV: `benchmarks/rc_fixing_study.csv`
 
 Compared settings on representative SPPRCLIB instances (`B-n45-k6-54`,
 `P-n50-k7-92`, `A-n63-k9-157`) with `dssr_async` on/off:

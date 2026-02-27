@@ -3,3 +3,5 @@ build*/
 .claude/
 __pycache__/
 benchmarks/.pathwyse/
+.venv-mkdocs/
+site/
