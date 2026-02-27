@@ -82,7 +82,6 @@ nav:
   - API:
     - Python: python-api.md
     - C++: cpp-api.md
-  - Applications: applications.md
   - Algorithms:
     - Overview: algorithms.md
     - ng/DSSR Bounds: ng-dssr-labelling.md
@@ -90,4 +89,5 @@ nav:
     - Preprocessing: preprocessing.md
     - Domain Propagator: domain-propagator.md
   - Primal Heuristic: primal-heuristic.md
+  - Applications: applications.md
   - Benchmarks: benchmarks.md
