@@ -49,10 +49,10 @@ def test_local_editable_install_and_use(tmp_path: Path):
 
     smoke = textwrap.dedent(
         f"""
-        from rcspp_bac import load, forward_labeling, has_highs
+        from rcspp_bac import load, Model, has_highs
         prob = load(r"{DATA_DIR / 'tiny4.txt'}")
-        bounds = forward_labeling(prob, prob.source)
-        assert bounds.shape[0] == prob.num_nodes
+        model = Model()
+        model.set_problem(prob)
         print("has_highs", has_highs)
         print("ok")
         """

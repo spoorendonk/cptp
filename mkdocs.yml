@@ -81,11 +81,11 @@ nav:
   - API:
     - Python: python-api.md
     - C++: cpp-api.md
-  - Applications: applications.md
   - Algorithms:
     - Overview: algorithms.md
     - Cut Separation: separation.md
     - Preprocessing: preprocessing.md
     - Domain Propagator: domain-propagator.md
   - Primal Heuristic: primal-heuristic.md
+  - Applications: applications.md
   - Benchmarks: benchmarks.md
