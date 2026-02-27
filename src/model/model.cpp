@@ -3,7 +3,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cmath>
+#include <mutex>
+#include <set>
 #include <thread>
 
 #include <tbb/task_group.h>
@@ -28,6 +31,58 @@
 namespace rcspp {
 
 namespace {
+
+class SolveConcurrencyGuard {
+ public:
+    explicit SolveConcurrencyGuard(int32_t limit)
+        : active_(false),
+          requested_limit_(limit > 0 ? limit : kNoCap),
+          limited_(requested_limit_ != kNoCap) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        // Register finite limits before waiting so pending strict requests
+        // immediately constrain subsequent arrivals.
+        if (limited_) {
+            limit_it_ = active_limits_.insert(requested_limit_);
+        }
+        cv_.wait(lock, [&] {
+            return active_solves_ < std::min(requested_limit_, current_cap_locked());
+        });
+        ++active_solves_;
+        active_ = true;
+    }
+
+    ~SolveConcurrencyGuard() {
+        if (!active_) return;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (limited_) {
+                active_limits_.erase(limit_it_);
+            }
+            --active_solves_;
+        }
+        cv_.notify_all();
+    }
+
+ private:
+    static constexpr int32_t kNoCap = std::numeric_limits<int32_t>::max();
+    static int32_t current_cap_locked() {
+        return active_limits_.empty() ? kNoCap : *active_limits_.begin();
+    }
+
+    bool active_;
+    int32_t requested_limit_;
+    bool limited_;
+    std::multiset<int32_t>::iterator limit_it_;
+    static std::mutex mutex_;
+    static std::condition_variable cv_;
+    static int32_t active_solves_;
+    static std::multiset<int32_t> active_limits_;
+};
+
+std::mutex SolveConcurrencyGuard::mutex_;
+std::condition_variable SolveConcurrencyGuard::cv_;
+int32_t SolveConcurrencyGuard::active_solves_ = 0;
+std::multiset<int32_t> SolveConcurrencyGuard::active_limits_;
 
 heuristic::HeuristicResult build_ng_path_start(const Problem& problem,
                                                std::span<const int32_t> path) {
@@ -175,12 +230,46 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::string branch_hyper = "off";
     bool output_flag = true;
     bool deterministic = true;
+    int64_t heuristic_node_interval = 200;
+    bool heuristic_async_injection = true;
+    int32_t max_concurrent_solves = 0;
+    bool enable_sec = true;
+    bool enable_rci = true;
+    bool enable_multistar = true;
+    bool enable_comb = true;
+    bool enable_spi = true;
+    bool edge_elimination = true;
+    bool edge_elimination_nodes = true;
     double cutoff = std::numeric_limits<double>::infinity();
     bool disable_heuristics = false;
     bool dssr_async = true;
+    int32_t hyper_sb_max_depth = 0;
+    int32_t hyper_sb_iter_limit = 100;
+    int32_t hyper_sb_min_reliable = 4;
+    int32_t hyper_sb_max_candidates = 3;
     preprocess::ng::DssrOptions dssr_options;
     RCFixingSettings rc_settings;
+    int32_t max_cuts_sec = -1;
+    int32_t max_cuts_rci = -1;
+    int32_t max_cuts_multistar = -1;
+    int32_t max_cuts_comb = -1;
+    int32_t max_cuts_rglm = -1;
+    int32_t max_cuts_spi = -1;
+    double min_violation_sec = -1.0;
+    double min_violation_rci = -1.0;
+    double min_violation_multistar = -1.0;
+    double min_violation_comb = -1.0;
+    double min_violation_rglm = -1.0;
+    double min_violation_spi = -1.0;
     for (const auto& [key, value] : options) {
+        if (key == "presolve") {
+            // Our callback/cut plumbing assumes original column space and
+            // stable row/col mappings; keep presolve disabled for now.
+            if (value != "off" && value != "false" && value != "0") {
+                logger_.log("Warning: option presolve={} requested, but rcspp-bac currently forces presolve=off", value);
+            }
+            continue;
+        }
         if (key == "separation_interval") {
             separation_interval = std::stoi(value);
             continue;
@@ -217,6 +306,14 @@ SolveResult Model::solve(const SolverOptions& options) {
             heuristic_strategy = std::stoi(value);
             continue;
         }
+        if (key == "heuristic_node_interval") {
+            heuristic_node_interval = std::stoll(value);
+            continue;
+        }
+        if (key == "heuristic_async_injection") {
+            heuristic_async_injection = (value == "true" || value == "1");
+            continue;
+        }
         if (key == "deterministic") {
             deterministic = (value == "true" || value == "1");
             continue;
@@ -227,6 +324,38 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "cutoff") {
             cutoff = std::stod(value);
+            continue;
+        }
+        if (key == "max_concurrent_solves") {
+            max_concurrent_solves = std::stoi(value);
+            continue;
+        }
+        if (key == "enable_sec") {
+            enable_sec = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "enable_rci") {
+            enable_rci = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "enable_multistar") {
+            enable_multistar = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "enable_comb") {
+            enable_comb = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "enable_spi") {
+            enable_spi = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "edge_elimination") {
+            edge_elimination = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "edge_elimination_nodes") {
+            edge_elimination_nodes = (value == "true" || value == "1");
             continue;
         }
         if (key == "disable_heuristics") {
@@ -273,6 +402,70 @@ SolveResult Model::solve(const SolverOptions& options) {
             rc_settings.fix_to_one = (value == "true" || value == "1");
             continue;
         }
+        if (key == "branch_hyper_sb_max_depth") {
+            hyper_sb_max_depth = std::stoi(value);
+            continue;
+        }
+        if (key == "branch_hyper_sb_iter_limit") {
+            hyper_sb_iter_limit = std::stoi(value);
+            continue;
+        }
+        if (key == "branch_hyper_sb_min_reliable") {
+            hyper_sb_min_reliable = std::stoi(value);
+            continue;
+        }
+        if (key == "branch_hyper_sb_max_candidates") {
+            hyper_sb_max_candidates = std::stoi(value);
+            continue;
+        }
+        if (key == "max_cuts_sec") {
+            max_cuts_sec = std::stoi(value);
+            continue;
+        }
+        if (key == "max_cuts_rci") {
+            max_cuts_rci = std::stoi(value);
+            continue;
+        }
+        if (key == "max_cuts_multistar") {
+            max_cuts_multistar = std::stoi(value);
+            continue;
+        }
+        if (key == "max_cuts_comb") {
+            max_cuts_comb = std::stoi(value);
+            continue;
+        }
+        if (key == "max_cuts_rglm") {
+            max_cuts_rglm = std::stoi(value);
+            continue;
+        }
+        if (key == "max_cuts_spi") {
+            max_cuts_spi = std::stoi(value);
+            continue;
+        }
+        if (key == "min_violation_sec") {
+            min_violation_sec = std::stod(value);
+            continue;
+        }
+        if (key == "min_violation_rci") {
+            min_violation_rci = std::stod(value);
+            continue;
+        }
+        if (key == "min_violation_multistar") {
+            min_violation_multistar = std::stod(value);
+            continue;
+        }
+        if (key == "min_violation_comb") {
+            min_violation_comb = std::stod(value);
+            continue;
+        }
+        if (key == "min_violation_rglm") {
+            min_violation_rglm = std::stod(value);
+            continue;
+        }
+        if (key == "min_violation_spi") {
+            min_violation_spi = std::stod(value);
+            continue;
+        }
         if (key == "output_flag") {
             output_flag = (value == "true" || value == "1");
             continue;
@@ -288,6 +481,14 @@ SolveResult Model::solve(const SolverOptions& options) {
                                                  dssr_options.max_ng_size);
     dssr_options.dssr_iterations = std::max<int32_t>(1, dssr_options.dssr_iterations);
     dssr_options.max_labels_per_node = std::max<int32_t>(1, dssr_options.max_labels_per_node);
+    heuristic_node_interval = std::max<int64_t>(1, heuristic_node_interval);
+    max_concurrent_solves = std::max<int32_t>(0, max_concurrent_solves);
+    hyper_sb_iter_limit = std::max<int32_t>(1, hyper_sb_iter_limit);
+    hyper_sb_min_reliable = std::max<int32_t>(1, hyper_sb_min_reliable);
+    hyper_sb_max_candidates = std::max<int32_t>(1, hyper_sb_max_candidates);
+    hyper_sb_max_depth = std::max<int32_t>(0, hyper_sb_max_depth);
+
+    SolveConcurrencyGuard solve_guard(max_concurrent_solves);
 
     // When cutoff is provided, set HiGHS objective_bound for node pruning.
     // This sets the initial upper_limit in the MIP solver, enabling pruning
@@ -299,6 +500,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (disable_heuristics) {
         highs.setOptionValue("mip_heuristic_effort", 0.0);
     }
+    // Enforce disabled presolve even if user passed --presolve.
+    highs.setOptionValue("presolve", "off");
 
     // Suppress HiGHS console output; forward through our logger if enabled
     highs.setOptionValue("output_flag", false);
@@ -425,6 +628,22 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_submip_separation(submip_separation);
     bridge.set_upper_bound(warm_start_ub);
     bridge.set_rc_fixing(rc_settings);
+    bridge.set_edge_elimination(edge_elimination);
+    bridge.set_edge_elimination_nodes(edge_elimination_nodes);
+    bridge.set_heuristic_node_interval(heuristic_node_interval);
+    bridge.set_heuristic_async_injection(heuristic_async_injection);
+    if (max_cuts_sec >= 0) bridge.set_separator_max_cuts("SEC", max_cuts_sec);
+    if (max_cuts_rci >= 0) bridge.set_separator_max_cuts("RCI", max_cuts_rci);
+    if (max_cuts_multistar >= 0) bridge.set_separator_max_cuts("Multistar", max_cuts_multistar);
+    if (max_cuts_comb >= 0) bridge.set_separator_max_cuts("Comb", max_cuts_comb);
+    if (max_cuts_rglm >= 0) bridge.set_separator_max_cuts("RGLM", max_cuts_rglm);
+    if (max_cuts_spi >= 0) bridge.set_separator_max_cuts("SPI", max_cuts_spi);
+    if (min_violation_sec >= 0.0) bridge.set_separator_min_violation("SEC", min_violation_sec);
+    if (min_violation_rci >= 0.0) bridge.set_separator_min_violation("RCI", min_violation_rci);
+    if (min_violation_multistar >= 0.0) bridge.set_separator_min_violation("Multistar", min_violation_multistar);
+    if (min_violation_comb >= 0.0) bridge.set_separator_min_violation("Comb", min_violation_comb);
+    if (min_violation_rglm >= 0.0) bridge.set_separator_min_violation("RGLM", min_violation_rglm);
+    if (min_violation_spi >= 0.0) bridge.set_separator_min_violation("SPI", min_violation_spi);
 
     auto shared_bounds = std::make_shared<preprocess::SharedBoundsStore>(
         preprocess::BoundSnapshot{
@@ -453,15 +672,19 @@ SolveResult Model::solve(const SolverOptions& options) {
     // Add separators.
     // NOTE: SEC is path-safe. Other families below are currently validated for
     // tour mode only; keep them disabled for s-t path to avoid invalid cuts.
-    bridge.add_separator(std::make_unique<sep::SECSeparator>());
+    if (enable_sec)
+        bridge.add_separator(std::make_unique<sep::SECSeparator>());
     if (problem_.is_tour()) {
-        bridge.add_separator(std::make_unique<sep::RCISeparator>());
-        bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
+        if (enable_rci)
+            bridge.add_separator(std::make_unique<sep::RCISeparator>());
+        if (enable_multistar)
+            bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
         if (enable_rglm)
             bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
-        bridge.add_separator(std::make_unique<sep::CombSeparator>());
+        if (enable_comb)
+            bridge.add_separator(std::make_unique<sep::CombSeparator>());
     }
-    if (all_pairs_propagation)
+    if (all_pairs_propagation && enable_spi)
         bridge.add_separator(std::make_unique<sep::SPISeparator>());
 
     bridge.build_formulation();
@@ -477,6 +700,13 @@ SolveResult Model::solve(const SolverOptions& options) {
         branch_hyper = "off";
     }
     if (branch_hyper != "off") {
+        HighsUserSeparator::StrongBranchConfig sb_cfg;
+        sb_cfg.max_depth = hyper_sb_max_depth;
+        sb_cfg.iter_limit = hyper_sb_iter_limit;
+        sb_cfg.min_reliable = hyper_sb_min_reliable;
+        sb_cfg.max_sb_candidates = hyper_sb_max_candidates;
+        HighsUserSeparator::setStrongBranchConfig(sb_cfg);
+
         const int32_t n = bridge.num_nodes();
         const int32_t y_off = bridge.y_offset();
         const auto& graph = problem_.graph();

@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "Highs.h"
@@ -61,6 +62,12 @@ class HiGHSBridge {
     /// Max cuts to add per separator per round (0 = unlimited).
     /// Jepsen et al. recommend 1: add only the most-violated cut.
     void set_max_cuts_per_separator(int32_t max_cuts) { max_cuts_per_sep_ = max_cuts; }
+    void set_separator_max_cuts(const std::string& name, int32_t max_cuts) {
+        per_separator_max_cuts_[name] = max_cuts;
+    }
+    void set_separator_min_violation(const std::string& name, double min_violation) {
+        per_separator_min_violation_[name] = min_violation;
+    }
 
     /// Enable SEC separation inside HiGHS sub-MIPs (RENS/RINS).
     /// Requires column mapping via undoPrimal to translate between reduced/original space.
@@ -71,6 +78,8 @@ class HiGHSBridge {
 
     /// Configure Lagrangian reduced-cost fixing in the propagator.
     void set_rc_fixing(RCFixingSettings settings) { rc_settings_ = settings; }
+    void set_edge_elimination(bool enable) { edge_elimination_enabled_ = enable; }
+    void set_edge_elimination_nodes(bool enable) { edge_elimination_nodes_ = enable; }
 
     /// Set pre-computed labeling bounds for edge elimination and propagation.
     /// f = forward bounds (source → v), b = backward bounds (v → target).
@@ -110,6 +119,8 @@ class HiGHSBridge {
 
     /// Set heuristic strategy: 0=all, 1=LP-threshold, 2=RINS, 3=neighborhood.
     void set_heuristic_strategy(int s) { heuristic_strategy_ = s; }
+    void set_heuristic_node_interval(int64_t interval) { heuristic_node_interval_ = interval; }
+    void set_heuristic_async_injection(bool enable) { heuristic_async_injection_ = enable; }
 
  private:
     /// Order the visited nodes by following edges from source.
@@ -128,8 +139,12 @@ class HiGHSBridge {
     // Amortized separation: skip rounds to reduce overhead
     int32_t separation_interval_ = 1;  // 1 = every round (no skipping)
     int32_t max_cuts_per_sep_ = 3;     // max cuts per separator per round (0 = unlimited)
+    std::unordered_map<std::string, int32_t> per_separator_max_cuts_;
+    std::unordered_map<std::string, double> per_separator_min_violation_;
     bool submip_separation_ = true;    // SEC separation at sub-MIP root node
     double upper_bound_ = std::numeric_limits<double>::infinity();
+    bool edge_elimination_enabled_ = true;
+    bool edge_elimination_nodes_ = true;
 
     // Labeling bounds for edge elimination and propagation
     std::vector<double> fwd_bounds_;   // f[v]: forward bounds (source → v)
@@ -167,6 +182,8 @@ class HiGHSBridge {
     bool heuristic_callback_ = true;
     double heuristic_budget_ms_ = 20.0;
     int heuristic_strategy_ = 0;  // 0=all, 1=threshold, 2=RINS, 3=neighborhood
+    int64_t heuristic_node_interval_ = 200;
+    bool heuristic_async_injection_ = true;
 
     // Cached LP relaxation from separator callback (shared with heuristic)
     std::shared_ptr<std::vector<double>> cached_x_lp_;

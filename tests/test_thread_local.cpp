@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <barrier>
+#include <chrono>
 #include <thread>
 #include <vector>
 
@@ -328,4 +329,157 @@ TEST_CASE("Concurrent Model::solve with different instances",
     REQUIRE(ok_path.load());
     REQUIRE_THAT(obj_tour.load(), WithinAbs(-11.0, 1.0));
     REQUIRE_THAT(obj_path.load(), WithinAbs(-13.0, 1.0));
+}
+
+TEST_CASE("Concurrent Model::solve respects max_concurrent_solves=1",
+          "[thread_local][integration][slow][options]") {
+    std::atomic<bool> ok_a{false};
+    std::atomic<bool> ok_b{false};
+
+    auto solve_with_gate = [&](const char* path, std::atomic<bool>& ok) {
+        auto prob = rcspp::io::load(path);
+        rcspp::Model model;
+        model.set_problem(std::move(prob));
+        auto opts = quiet;
+        opts.push_back({"max_concurrent_solves", "1"});
+        auto result = model.solve(opts);
+        ok = result.has_solution() && result.is_optimal();
+    };
+
+    std::thread t_a([&] { solve_with_gate("tests/data/tiny4.txt", ok_a); });
+    std::thread t_b([&] { solve_with_gate("tests/data/tiny4_path.txt", ok_b); });
+
+    t_a.join();
+    t_b.join();
+
+    REQUIRE(ok_a.load());
+    REQUIRE(ok_b.load());
+}
+
+TEST_CASE("Pending strict solve cap blocks later loose arrivals",
+          "[thread_local][integration][slow][options]") {
+    using namespace std::chrono_literals;
+
+    std::atomic<bool> a_done{false};
+    std::atomic<bool> ok_a{false};
+    std::atomic<bool> ok_b{false};
+    std::atomic<bool> ok_c{false};
+    std::atomic<bool> c_finished_before_a{false};
+
+    // A: long-ish solve with loose cap=2 (keeps one slot busy for ~2s).
+    std::thread t_a([&] {
+        auto prob = rcspp::io::load("benchmarks/instances/spprclib/B-n50-k8-40.sppcc");
+        rcspp::Model model;
+        model.set_problem(std::move(prob));
+        auto opts = quiet;
+        opts.push_back({"time_limit", "2"});
+        opts.push_back({"disable_heuristics", "true"});
+        opts.push_back({"max_concurrent_solves", "2"});
+        auto result = model.solve(opts);
+        ok_a = result.has_solution();
+        a_done = true;
+    });
+
+    // Let A enter solve and acquire the admission slot.
+    std::this_thread::sleep_for(100ms);
+
+    // B: strict cap=1 (should wait while A is active).
+    std::thread t_b([&] {
+        auto prob = rcspp::io::load("tests/data/tiny4.txt");
+        rcspp::Model model;
+        model.set_problem(std::move(prob));
+        auto opts = quiet;
+        opts.push_back({"max_concurrent_solves", "1"});
+        auto result = model.solve(opts);
+        ok_b = result.has_solution() && result.is_optimal();
+    });
+
+    // Let B register/pending before C arrives.
+    std::this_thread::sleep_for(100ms);
+
+    // C: loose cap=2. Must not bypass pending strict B.
+    std::thread t_c([&] {
+        auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
+        rcspp::Model model;
+        model.set_problem(std::move(prob));
+        auto opts = quiet;
+        opts.push_back({"max_concurrent_solves", "2"});
+        auto result = model.solve(opts);
+        if (!a_done.load(std::memory_order_relaxed)) {
+            c_finished_before_a = true;
+        }
+        ok_c = result.has_solution() && result.is_optimal();
+    });
+
+    t_a.join();
+    t_b.join();
+    t_c.join();
+
+    REQUIRE(ok_a.load());
+    REQUIRE(ok_b.load());
+    REQUIRE(ok_c.load());
+    REQUIRE_FALSE(c_finished_before_a.load());
+}
+
+TEST_CASE("Pending strict solve cap also blocks later uncapped arrivals",
+          "[thread_local][integration][slow][options]") {
+    using namespace std::chrono_literals;
+
+    std::atomic<bool> a_done{false};
+    std::atomic<bool> ok_a{false};
+    std::atomic<bool> ok_b{false};
+    std::atomic<bool> ok_c{false};
+    std::atomic<bool> c_finished_before_a{false};
+
+    // A: long-ish solve with loose cap=2 (keeps one slot busy for ~2s).
+    std::thread t_a([&] {
+        auto prob = rcspp::io::load("benchmarks/instances/spprclib/B-n50-k8-40.sppcc");
+        rcspp::Model model;
+        model.set_problem(std::move(prob));
+        auto opts = quiet;
+        opts.push_back({"time_limit", "2"});
+        opts.push_back({"disable_heuristics", "true"});
+        opts.push_back({"max_concurrent_solves", "2"});
+        auto result = model.solve(opts);
+        ok_a = result.has_solution();
+        a_done = true;
+    });
+
+    std::this_thread::sleep_for(100ms);
+
+    // B: strict cap=1 (should wait while A is active).
+    std::thread t_b([&] {
+        auto prob = rcspp::io::load("tests/data/tiny4.txt");
+        rcspp::Model model;
+        model.set_problem(std::move(prob));
+        auto opts = quiet;
+        opts.push_back({"max_concurrent_solves", "1"});
+        auto result = model.solve(opts);
+        ok_b = result.has_solution() && result.is_optimal();
+    });
+
+    std::this_thread::sleep_for(100ms);
+
+    // C: uncapped caller (0). Must not bypass pending strict B.
+    std::thread t_c([&] {
+        auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
+        rcspp::Model model;
+        model.set_problem(std::move(prob));
+        auto opts = quiet;
+        opts.push_back({"max_concurrent_solves", "0"});
+        auto result = model.solve(opts);
+        if (!a_done.load(std::memory_order_relaxed)) {
+            c_finished_before_a = true;
+        }
+        ok_c = result.has_solution() && result.is_optimal();
+    });
+
+    t_a.join();
+    t_b.join();
+    t_c.join();
+
+    REQUIRE(ok_a.load());
+    REQUIRE(ok_b.load());
+    REQUIRE(ok_c.load());
+    REQUIRE_FALSE(c_finished_before_a.load());
 }
