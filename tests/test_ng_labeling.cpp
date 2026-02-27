@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "core/io.h"
+#include "model/async_incumbent.h"
 #include "preprocess/edge_elimination.h"
 #include "preprocess/ng_labeling.h"
 #include "preprocess/shared_bounds.h"
@@ -93,4 +94,15 @@ TEST_CASE("ng DSSR reports finite elementary path bound on tiny path",
     REQUIRE_FALSE(bounds.elementary_path.empty());
     REQUIRE(bounds.elementary_path.front() == prob.source());
     REQUIRE(bounds.elementary_path.back() == prob.target());
+}
+
+TEST_CASE("async incumbent store keeps best objective", "[labeling][async_incumbent]") {
+    rcspp::model::AsyncIncumbentStore store;
+    REQUIRE(store.publish_if_better({1.0, 0.0, 1.0}, -10.0));
+    REQUIRE_FALSE(store.publish_if_better({0.0, 1.0, 0.0}, -5.0));
+    REQUIRE(store.publish_if_better({0.0, 1.0, 1.0}, -12.0));
+    auto snap = store.snapshot();
+    REQUIRE_THAT(snap.objective, WithinAbs(-12.0, 1e-12));
+    REQUIRE(snap.version == 2);
+    REQUIRE(snap.col_values.size() == 3);
 }

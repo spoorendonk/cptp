@@ -11,6 +11,7 @@
 #include "Highs.h"
 #include "core/problem.h"
 #include "core/solution.h"
+#include "model/async_incumbent.h"
 #include "preprocess/shared_bounds.h"
 #include "sep/separation_context.h"
 #include "sep/separation_oracle.h"
@@ -23,10 +24,10 @@ namespace rcspp {
 using SolverOptions = std::vector<std::pair<std::string, std::string>>;
 
 /// Strategy for Lagrangian reduced-cost fixing in the propagator.
-enum class RCFixingStrategy { off, root_only, on_ub_improvement, periodic };
+enum class RCFixingStrategy { off, root_only, on_ub_improvement, periodic, adaptive };
 
 struct RCFixingSettings {
-    RCFixingStrategy strategy = RCFixingStrategy::on_ub_improvement;
+    RCFixingStrategy strategy = RCFixingStrategy::adaptive;
     int32_t periodic_interval = 100;
     bool fix_to_one = false;
 };
@@ -90,6 +91,11 @@ class HiGHSBridge {
         async_upper_bound_ = std::move(ub);
     }
 
+    /// Optional async incumbent produced outside HiGHS callbacks.
+    void set_async_incumbent_store(std::shared_ptr<model::AsyncIncumbentStore> store) {
+        async_incumbent_store_ = std::move(store);
+    }
+
     /// Install domain propagator that fixes edges during B&C based on labeling bounds.
     void install_propagator();
 
@@ -134,12 +140,15 @@ class HiGHSBridge {
     std::vector<double> all_pairs_;    // flat n×n: d(s,v) = all_pairs_[s*n+v]
     std::shared_ptr<preprocess::SharedBoundsStore> shared_bounds_;
     std::shared_ptr<std::atomic<double>> async_upper_bound_;
+    std::shared_ptr<model::AsyncIncumbentStore> async_incumbent_store_;
 
     // RC fixing settings and statistics
     RCFixingSettings rc_settings_;
     std::shared_ptr<int64_t> rc_fix0_count_;
     std::shared_ptr<int64_t> rc_fix1_count_;
     std::shared_ptr<int64_t> rc_label_runs_;
+    std::shared_ptr<int64_t> rc_callback_runs_;
+    std::shared_ptr<double> rc_time_seconds_;
 
     // Propagator statistics (shared with callback lambda)
     std::shared_ptr<int64_t> propagator_fixings_;

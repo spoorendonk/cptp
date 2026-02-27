@@ -10,6 +10,7 @@
 #include <tbb/parallel_for.h>
 
 #include "heuristic/primal_heuristic.h"
+#include "model/async_incumbent.h"
 #include "preprocess/edge_elimination.h"
 #include "preprocess/ng_labeling.h"
 #include "preprocess/shared_bounds.h"
@@ -260,6 +261,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             if (value == "root_only") rc_settings.strategy = RCFixingStrategy::root_only;
             else if (value == "on_ub_improvement") rc_settings.strategy = RCFixingStrategy::on_ub_improvement;
             else if (value == "periodic") rc_settings.strategy = RCFixingStrategy::periodic;
+            else if (value == "adaptive" || value == "auto") rc_settings.strategy = RCFixingStrategy::adaptive;
             else rc_settings.strategy = RCFixingStrategy::off;
             continue;
         }
@@ -433,8 +435,15 @@ SolveResult Model::solve(const SolverOptions& options) {
             .version = 0,
         });
     auto async_upper_bound = std::make_shared<std::atomic<double>>(warm_start_ub);
+    auto async_incumbent_store = std::make_shared<model::AsyncIncumbentStore>();
+    if (!warm_start.col_values.empty()) {
+        async_incumbent_store->publish_if_better(
+            std::vector<double>(warm_start.col_values.begin(), warm_start.col_values.end()),
+            warm_start.objective);
+    }
     bridge.set_shared_bounds_store(shared_bounds);
     bridge.set_async_upper_bound(async_upper_bound);
+    bridge.set_async_incumbent_store(async_incumbent_store);
 
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
     if (all_pairs_propagation) {
@@ -672,6 +681,13 @@ SolveResult Model::solve(const SolverOptions& options) {
                     while (bounds.elementary_path_cost + 1e-9 < prev &&
                            !async_upper_bound->compare_exchange_weak(
                                prev, bounds.elementary_path_cost, std::memory_order_relaxed)) {
+                    }
+                    if (!bounds.elementary_path.empty()) {
+                        auto start = build_ng_path_start(problem_, bounds.elementary_path);
+                        if (!start.col_values.empty()) {
+                            async_incumbent_store->publish_if_better(
+                                std::move(start.col_values), start.objective);
+                        }
                     }
                 }
             }
