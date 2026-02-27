@@ -129,3 +129,23 @@ cmake --build build -j$(nproc)
 ```
 
 Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are in [`benchmarks/progress.csv`](../benchmarks/progress.csv).
+
+## Step 0.5 — RC Fixing Policy Study
+
+We added a targeted RC-fixing study script:
+
+```bash
+./benchmarks/experiment_rc_fixing.sh 8
+```
+
+Output CSV: [`benchmarks/rc_fixing_study.csv`](../benchmarks/rc_fixing_study.csv)
+
+Compared settings on representative SPPRCLIB instances (`B-n45-k6-54`,
+`P-n50-k7-92`, `A-n63-k9-157`) with `dssr_async` on/off:
+
+- `off` has no RC fixings and generally weaker dual progress
+- `root_only` is cheap but leaves many potential fixings unused
+- `on_ub_improvement` and `adaptive` achieve similar fixing gains on tested runs
+- `adaptive` now self-throttles/turns off after repeated low-yield rounds
+
+**Policy decision**: default `rc_fixing` is now `adaptive`.

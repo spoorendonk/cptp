@@ -213,7 +213,7 @@ SPPRCLIB instances).
 
 | Flag | Default | Description |
 |---|---|---|
-| `--rc_fixing <strategy>` | `on_ub_improvement` | Lagrangian RC fixing: `off`, `root_only`, `on_ub_improvement`, `periodic` |
+| `--rc_fixing <strategy>` | `adaptive` | Lagrangian RC fixing: `off`, `root_only`, `on_ub_improvement`, `periodic`, `adaptive` |
 | `--rc_fixing_interval N` | 100 | Interval for `periodic` strategy |
 | `--rc_fixing_to_one true` | false | Enable Trigger D (fix nodes to 1) |
 | `--all_pairs_propagation true` | false | Use all-pairs labeling for stronger Trigger B |
@@ -242,3 +242,12 @@ These bounds serve double duty:
 With async DSSR enabled, a background worker publishes tighter snapshots while
 branch-and-bound is running, and the same Trigger A/B logic consumes the
 refreshed arrays.
+
+When an async ng/DSSR run finds a full feasible path, it is published as an
+external incumbent candidate and injected via the MIP user-solution callback.
+If its objective matches/exceeds the current dual proof condition, HiGHS is
+interrupted and the solve is reported as optimal when primal and dual bounds
+coincide.
+
+`adaptive` RC fixing policy runs on UB-improvement events and self-disables
+after repeated low-yield rounds.

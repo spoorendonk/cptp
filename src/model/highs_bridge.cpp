@@ -443,6 +443,8 @@ void HiGHSBridge::install_propagator() {
     rc_fix0_count_ = std::make_shared<int64_t>(0);
     rc_fix1_count_ = std::make_shared<int64_t>(0);
     rc_label_runs_ = std::make_shared<int64_t>(0);
+    rc_callback_runs_ = std::make_shared<int64_t>(0);
+    rc_time_seconds_ = std::make_shared<double>(0.0);
     auto propagator_fixings = propagator_fixings_;
     auto sweep_fixings = sweep_fixings_;
     auto chain_fixings = chain_fixings_;
@@ -451,7 +453,11 @@ void HiGHSBridge::install_propagator() {
     auto rc_fix0 = rc_fix0_count_;
     auto rc_fix1 = rc_fix1_count_;
     auto rc_runs = rc_label_runs_;
+    auto rc_callbacks = rc_callback_runs_;
+    auto rc_time = rc_time_seconds_;
     auto rc_settings = rc_settings_;
+    auto rc_adaptive_disabled = std::make_shared<bool>(false);
+    auto rc_low_yield_streak = std::make_shared<int32_t>(0);
 
     // Mutable snapshot consumed by callback; refreshed from shared store.
     auto bounds_snapshot = std::make_shared<preprocess::BoundSnapshot>(std::move(initial_snapshot));
@@ -665,11 +671,17 @@ void HiGHSBridge::install_propagator() {
                     case RCFixingStrategy::periodic:
                         run_rc = (*propagator_calls % rc_settings.periodic_interval) == 0;
                         break;
+                    case RCFixingStrategy::adaptive:
+                        run_rc = ub_improved && !*rc_adaptive_disabled;
+                        break;
                     default:
                         break;
                 }
 
                 if (run_rc && lp.getStatus() == HighsLpRelaxation::Status::kOptimal) {
+                    auto rc_t0 = std::chrono::steady_clock::now();
+                    int64_t fix0_before = *rc_fix0;
+                    int64_t fix1_before = *rc_fix1;
                     const auto& lp_sol = lp.getSolution();
                     double z_LP = lp.getObjective();
                     int32_t ncols = static_cast<int32_t>(lp_sol.col_dual.size());
@@ -836,6 +848,26 @@ void HiGHSBridge::install_propagator() {
                             }
                         }
                     }
+
+                    (*rc_callbacks)++;
+                    auto rc_t1 = std::chrono::steady_clock::now();
+                    *rc_time += std::chrono::duration<double>(rc_t1 - rc_t0).count();
+
+                    if (rc_settings.strategy == RCFixingStrategy::adaptive &&
+                        *rc_callbacks >= 2) {
+                        const int64_t delta_fix =
+                            (*rc_fix0 - fix0_before) + (*rc_fix1 - fix1_before);
+                        if (delta_fix < 5) {
+                            (*rc_low_yield_streak)++;
+                        } else {
+                            *rc_low_yield_streak = 0;
+                        }
+
+                        // Two low-yield UB-improvement rounds in a row => disable.
+                        if (*rc_low_yield_streak >= 2) {
+                            *rc_adaptive_disabled = true;
+                        }
+                    }
                 }
             }
         });
@@ -858,16 +890,28 @@ void HiGHSBridge::install_heuristic_callback() {
     auto cached_x = cached_x_lp_;
     auto cached_y = cached_y_lp_;
     auto cache_mtx = lp_cache_mutex_;
+    auto async_store = async_incumbent_store_;
+    auto last_async_version = std::make_shared<uint64_t>(0);
     highs_.setCallback(
         [this, cached_x, cached_y, cache_mtx, calls, solutions, budget_ms,
-         last_node_count, strategy](
+         last_node_count, strategy, async_store, last_async_version](
             int callback_type, const std::string& /*message*/,
             const HighsCallbackOutput* data_out,
             HighsCallbackInput* data_in,
             void* /*user_data*/) {
-            // Only handle kCallbackMipUserSolution
-            if (callback_type != static_cast<int>(
-                    HighsCallbackType::kCallbackMipUserSolution)) {
+            if (callback_type == static_cast<int>(HighsCallbackType::kCallbackMipInterrupt)) {
+                // Only stop when HiGHS has already accepted an incumbent.
+                // Otherwise we may terminate before an async candidate is injected.
+                if (std::isfinite(data_out->mip_primal_bound) &&
+                    std::isfinite(data_out->mip_dual_bound) &&
+                    data_out->mip_primal_bound <= data_out->mip_dual_bound + 1e-6) {
+                    data_in->user_interrupt = true;
+                }
+                return;
+            }
+
+            // Only handle kCallbackMipUserSolution below.
+            if (callback_type != static_cast<int>(HighsCallbackType::kCallbackMipUserSolution)) {
                 return;
             }
 
@@ -875,6 +919,22 @@ void HiGHSBridge::install_heuristic_callback() {
             if (data_out->external_solution_query_origin ==
                 kExternalMipSolutionQueryOriginAfterSetup) {
                 return;
+            }
+
+            // Inject asynchronous incumbent (e.g., ng/DSSR path) as soon as a
+            // newer candidate is available.
+            if (async_store) {
+                auto snap = async_store->snapshot();
+                if (snap.version > *last_async_version) {
+                    *last_async_version = snap.version;
+                    if (!snap.col_values.empty() &&
+                        snap.objective < data_out->mip_primal_bound - 1e-6) {
+                        data_in->user_has_solution = true;
+                        data_in->user_solution = std::move(snap.col_values);
+                        (*solutions)++;
+                        return;
+                    }
+                }
             }
 
             // Rate-limit: skip if not enough nodes since last call
@@ -915,6 +975,7 @@ void HiGHSBridge::install_heuristic_callback() {
         nullptr);
 
     highs_.startCallback(HighsCallbackType::kCallbackMipUserSolution);
+    highs_.startCallback(HighsCallbackType::kCallbackMipInterrupt);
     logger_.log("Installed LP-guided heuristic callback (budget={}ms)", budget_ms);
 }
 
@@ -988,6 +1049,10 @@ SolveResult HiGHSBridge::extract_result() const {
         case HighsModelStatus::kObjectiveTarget:
             result.status = SolveResult::Status::Feasible;
             break;
+        case HighsModelStatus::kInterrupt:
+        case HighsModelStatus::kHighsInterrupt:
+            result.status = SolveResult::Status::Feasible;
+            break;
         case HighsModelStatus::kTimeLimit:
         case HighsModelStatus::kIterationLimit:
             result.status = SolveResult::Status::TimeLimit;
@@ -1004,6 +1069,13 @@ SolveResult HiGHSBridge::extract_result() const {
     double mip_gap = 0.0;
     highs_.getInfoValue("mip_gap", mip_gap);
     result.gap = mip_gap / 100.0;
+
+    if (result.status == SolveResult::Status::Feasible &&
+        std::isfinite(result.objective) && std::isfinite(result.bound) &&
+        result.objective <= result.bound + 1e-6) {
+        result.status = SolveResult::Status::Optimal;
+        result.gap = 0.0;
+    }
 
     // Extract visited nodes and active edges
     const auto& sol = highs_.getSolution();
@@ -1034,8 +1106,10 @@ SolveResult HiGHSBridge::extract_result() const {
                     *sweep_fixings_, *chain_fixings_);
     }
     if (rc_fix0_count_ && (*rc_fix0_count_ > 0 || *rc_fix1_count_ > 0)) {
-        logger_.log("RC fixing: {} edges fixed to 0, {} nodes fixed to 1, {} labeling runs",
-                    *rc_fix0_count_, *rc_fix1_count_, *rc_label_runs_);
+        logger_.log("RC fixing: {} edges fixed to 0, {} nodes fixed to 1, {} labeling runs, {} callback runs, {:.3f}s",
+                    *rc_fix0_count_, *rc_fix1_count_, *rc_label_runs_,
+                    rc_callback_runs_ ? *rc_callback_runs_ : 0,
+                    rc_time_seconds_ ? *rc_time_seconds_ : 0.0);
     }
 
     // Print heuristic callback statistics (debug_entered_ is set during install)

@@ -3,9 +3,13 @@
 Branch-and-cut solver for the Resource Constrained Shortest Path Problem (RCSPP).
 
 Current state: production-quality solver with SEC, RCI, Multistar, RGLM, Comb
-separators, demand-reachability preprocessing, edge elimination via labeling,
+separators, demand-reachability preprocessing, edge elimination via ng-labeling,
 domain propagation, and parallel primal heuristic (warm-start). Solves 45/45 SPPRCLIB
 instances and 26/31 Roberti Set 3 instances to optimality.
+
+Latest update (2026-02-27): Step 0.5 and 0.6 completed — adaptive RC-fixing
+policy study + defaults, and async incumbent/proof handoff from ng/DSSR into
+HiGHS callbacks.
 
 ---
 
@@ -13,7 +17,7 @@ instances and 26/31 Roberti Set 3 instances to optimality.
 
 ```
 src/core/        — Problem, static_graph, IO, Dinitz max-flow, Gomory-Hu tree
-src/preprocess/  — Demand-reachability, edge elimination (label-correcting)
+src/preprocess/  — Demand-reachability, ng/DSSR labeling, edge elimination
 src/sep/         — SEC, RCI, Multistar, RGLM, Comb separators
 src/model/       — HiGHS integration (Model, HiGHSBridge, propagator)
 src/heuristic/   — Primal heuristic (warm-start) construction + local search
@@ -67,15 +71,15 @@ Deliverable: stronger RCSPP bounds pipeline using iterative ng growth, faster
 dominance, and asynchronous bound updates during B&B.
 ```
 
-| ID | PR title | Deliverable | Files | Depends on |
-|----|----------|-------------|-------|------------|
-| 0.1 | Cross-project design sync (baldes + pathwyse) | Import dominance/data-layout ideas from `../blades` and DSSR growth strategy from `../pathwyse`; document target architecture and invariants | docs/, src/preprocess/ | — |
-| 0.2 | SoA + SIMD dominance baseline | Refactor labeling dominance path to SoA layout with AVX/scalar fallback; add deterministic microbench and correctness parity tests | src/preprocess/, tests/ | 0.1 |
-| 0.3 | Shared bound store for async updates | Add versioned shared store for forward/backward cost bounds so background DSSR workers can publish snapshots while B&B consumes them safely | src/model/, src/preprocess/ | 0.1 |
-| 0.4 | Parallel DSSR schedule during B&B | Start DSSR with max ng size 4, grow toward 8-12 on background threads, and wire snapshot consumption into propagation/fixing callbacks | src/model/, src/preprocess/, src/util/ | 0.2, 0.3 |
-| 0.5 | Reduced-cost fixing cost/benefit study | Quantify DSSR vs 2-cycle elimination for reduced-cost fixing (fixings gained, runtime, node-count impact), then choose dynamic policy | benchmarks/, docs/benchmarks.md, src/model/ | 0.4 |
-| 0.6 | Incumbent/optimal handoff from ng solver | When ng/DSSR finds full feasible path, inject incumbent; if global proof condition is met, stop B&B and report optimal | src/model/highs_bridge.cpp, src/preprocess/ | 0.4 |
-| 0.7 | Iterative LB reuse and monotone pruning | Reuse DSSR bounds across iterations, enforce monotone tightening, and apply updated bounds in subsequent pruning passes | src/preprocess/, src/model/ | 0.4 |
+| ID | Status | PR title | Deliverable | Files | Depends on |
+|----|--------|----------|-------------|-------|------------|
+| 0.1 | [x] | Cross-project design sync (baldes + pathwyse) | Import dominance/data-layout ideas from `../blades` and DSSR growth strategy from `../pathwyse`; document target architecture and invariants | docs/, src/preprocess/ | — |
+| 0.2 | [x] | SoA + SIMD dominance baseline | Refactor labeling dominance path to SoA layout with AVX/scalar fallback; add deterministic microbench and correctness parity tests | src/preprocess/, tests/ | 0.1 |
+| 0.3 | [x] | Shared bound store for async updates | Add versioned shared store for forward/backward cost bounds so background DSSR workers can publish snapshots while B&B consumes them safely | src/model/, src/preprocess/ | 0.1 |
+| 0.4 | [x] | Parallel DSSR schedule during B&B | Start DSSR with max ng size 4, grow toward 8-12 on background threads, and wire snapshot consumption into propagation/fixing callbacks | src/model/, src/preprocess/, src/util/ | 0.2, 0.3 |
+| 0.5 | [x] | Reduced-cost fixing cost/benefit study | Quantify DSSR vs 2-cycle elimination for reduced-cost fixing (fixings gained, runtime, node-count impact), then choose dynamic policy | benchmarks/, docs/benchmarks.md, src/model/ | 0.4 |
+| 0.6 | [x] | Incumbent/optimal handoff from ng solver | When ng/DSSR finds full feasible path, inject incumbent; if global proof condition is met, stop B&B and report optimal | src/model/highs_bridge.cpp, src/preprocess/ | 0.4 |
+| 0.7 | [x] | Iterative LB reuse and monotone pruning | Reuse DSSR bounds across iterations, enforce monotone tightening, and apply updated bounds in subsequent pruning passes | src/preprocess/, src/model/ | 0.4 |
 
 ### Step 1 — Immediate Next Steps
 
