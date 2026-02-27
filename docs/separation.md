@@ -218,17 +218,6 @@ CLI:
 ./build/rcspp-solve instance.sppcc --enable_rglm true
 ```
 
-C++ API:
-```cpp
-rcspp::SolverOptions opts = {{"enable_rglm", "true"}};
-auto result = model.solve(opts);
-```
-
-Python:
-```python
-model.solve({"enable_rglm": "true"})
-```
-
 ### Benchmark
 
 Tested on 24 A/B/E SPPRCLIB instances (60s time limit):
@@ -357,20 +346,9 @@ CLI:
 ./build/rcspp-solve instance.sppcc --all_pairs_propagation true
 ```
 
-C++ API:
-```cpp
-rcspp::SolverOptions opts = {{"all_pairs_propagation", "true"}};
-auto result = model.solve(opts);
-```
-
-Python:
-```python
-model.solve({"all_pairs_propagation": "true"})
-```
-
 ### Testing
 
-7 C++ tests under the `[spi]` tag:
+7 direct C++ tests under the `[spi]` tag in `tests/test_separators.cpp`:
 
 | Test | Coverage |
 |---|---|
@@ -382,9 +360,7 @@ model.solve({"all_pairs_propagation": "true"})
 | Greedy extension | Grow finds set cuts of size ≥ 3 |
 | Shrink minimality | Shrink phase finds smallest infeasible subsets |
 
-```bash
-./build/rcspp_algo_tests [spi]
-```
+These direct separator tests are not part of the default `rcspp_tests` target.
 
 ### Benchmark
 
@@ -492,28 +468,22 @@ Each `Cut` returned by `separate()`:
 
 ### Testing
 
-The SeparationOracle and individual separators are covered by 31 C++ tests (`[oracle]`, `[sec]`, `[rci]`, `[multistar]`, `[comb]`, `[rglm]`, `[spi]`, `[separator]` tags) and 9 Python tests:
+The SeparationOracle and individual separators are covered by direct C++
+separator tests in `tests/test_oracle.cpp` and `tests/test_separators.cpp`
+(`oracle`, `sec`, `rci`, `multistar`, `comb`, `rglm`, `spi`, `separator`
+tags).
 
-| Component | Tests | Coverage |
-|---|---|---|
-| SeparationOracle | 13 C++ + 9 Python | Tour/path cuts, feasibility, offsets, limits, no-separator edge case, cut struct validation |
-| SEC separator | 7 C++ | Violated/feasible (tour + path), target-in-S rhs handling, multi-disconnected |
-| RCI separator | 2 C++ | Basic + high-demand fractional solution |
-| Multistar | 1 C++ | Basic execution |
-| Comb | 1 C++ | Basic execution |
-| RGLM | 1 C++ | Basic execution |
-| SPI | 7 C++ | Pairs, lifting, loose UB, missing data, path, grow, shrink |
+| Component | Coverage |
+|---|---|
+| SeparationOracle | Tour/path cuts, feasibility, offsets, limits, no-separator edge case, cut struct validation |
+| SEC separator | Violated/feasible (tour + path), target-in-S rhs handling, multi-disconnected |
+| RCI separator | Basic + high-demand fractional solution |
+| Multistar | Basic execution |
+| Comb | Basic execution |
+| RGLM | Basic execution |
+| SPI | Pairs, lifting, loose UB, missing data, path, grow, shrink |
 
-```bash
-./build/rcspp_algo_tests [oracle]     # SeparationOracle tests
-./build/rcspp_algo_tests [sec]        # SEC separator
-./build/rcspp_algo_tests [rci]        # RCI separator
-./build/rcspp_algo_tests [multistar]  # Multistar
-./build/rcspp_algo_tests [comb]       # Comb
-./build/rcspp_algo_tests [rglm]       # RGLM
-./build/rcspp_algo_tests [spi]        # SPI (Shortest Path Inequalities)
-./build/rcspp_algo_tests [separator]  # Separator name() accessors
-```
+Direct separator tests are currently outside the default `rcspp_tests` target.
 
 ## Cut Management (HiGHS)
 
@@ -525,8 +495,68 @@ and wraps the same separation pipeline for HiGHS's user separator callback.
 
 1. Build fractional support graph from LP relaxation
 2. Build Gomory-Hu tree (shared, n-1 max-flows)
-3. Run all separators **in parallel** (TBB task group)
-4. For each separator: sort cuts by violation (descending), keep top-k
+3. Build `SeparationContext` (LP values, offsets, tolerance, UB, optional all-pairs matrix)
+4. Main MIP: run configured separators **in parallel** (TBB task group)
+5. Sub-MIP root: run SEC only, translate original indices back to reduced space
+6. For each separator: sort cuts by violation (descending), keep top-k
+
+Current separator registration in `Model::solve()`:
+- Always: SEC
+- Tour mode only: RCI, Multistar, optional RGLM, Comb
+- Optional when `all_pairs_propagation=true`: SPI
+
+### Flow
+
+```mermaid
+flowchart TD
+    A[User separator callback] --> B{Sub MIP}
+    B -->|yes| C{Sub MIP root and enabled}
+    C -->|no| Z[Return]
+    C -->|yes| D[Undo presolve map to original columns]
+    B -->|no| E{Separation interval hit}
+    E -->|no| Z
+    E -->|yes| F[Read LP x and y]
+    D --> F
+    F --> G[Build support graph and Gomory Hu tree]
+    G --> H{Sub MIP path}
+    H -->|yes| I[Run SEC only]
+    I --> J[Map cuts back to reduced columns and adjust rhs]
+    H -->|no| K[Run separators in parallel]
+    K --> L[Per separator sort by violation]
+    J --> M[Add top k cuts]
+    L --> M
+    M --> N[Update cut stats]
+```
+
+### Pseudocode
+
+```text
+on user_separator_callback(lp_solution, mipsolver):
+    if submip:
+        if not submip_separation or not root_node: return
+        expand reduced columns to original columns
+        build orig_to_reduced map
+    else:
+        if interval_skip: return
+        cache LP x/y for heuristic callback
+
+    build support graph from x > graph_tol
+    build Gomory-Hu tree
+    build SeparationContext(tol, offsets, upper_bound, all_pairs?)
+
+    if submip:
+        cuts <- SEC.separate(ctx)
+        for cut in top_k(cuts):
+            translate indices to reduced space
+            shift rhs for eliminated columns
+            add cut
+    else:
+        run each configured separator in parallel
+        for each separator:
+            sort cuts by violation
+            add top_k cuts
+            update per-separator timing and counts
+```
 
 ### Parameters
 

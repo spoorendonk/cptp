@@ -1,176 +1,189 @@
 # Primal Heuristic
 
-File: `src/heuristic/primal_heuristic.h` (header-only)
+Files:
+- `src/heuristic/primal_heuristic.h`
+- Integration points: `src/model/model.cpp`, `src/model/highs_bridge.cpp`
 
 ## Purpose
 
-Two heuristic components:
-1. **Initial solution** (`build_initial_solution`): runs before MIP solve on the complete graph, provides an initial feasible solution to HiGHS via `setSolution()`. Solver-independent — can be used standalone or fed to any MIP solver as a warm-start.
-2. **LP-guided callback** (`lp_guided_heuristic`): runs during MIP solve via `kCallbackMipUserSolution`, builds reduced graphs from LP relaxation values and runs construction + local search on them
+The solver uses two heuristic layers:
 
-## Algorithm
+1. **Pre-solve initial solution** (`build_initial_solution`): constructs a feasible route and injects it into HiGHS via `setSolution()` (unless heuristics are disabled).
+2. **LP-guided callback heuristic** (`lp_guided_heuristic`): runs during MIP search from `kCallbackMipUserSolution`, using LP-driven reduced graphs.
 
-### Construction (greedy insertion)
+Both optimize the same objective:
 
-Given an ordering of customers, insert each one at the cheapest position in the route:
+\[
+\min\; \sum_{e \in E} c_e x_e - \sum_{i \in V} p_i y_i
+\]
 
-1. Initialize:
-   - **Tour** (source == target): route = [depot, depot]
-   - **Path** (source != target): route = [source, target]
-2. For each customer c in the given order:
-   - Find position p in route minimizing $\text{cost}(prev,c) + \text{cost}(c,next) - \text{cost}(prev,next)$
-   - Insert if capacity allows
-3. If too few customers inserted, force-insert the cheapest (tours need at least 2 customers for distinct edges)
+## How It Is Used In `Model::solve()`
 
-The insertion order determines which customers get added first (and consume capacity).
-Three deterministic orderings are used:
-- **Profit/demand ratio** (descending) -- best value per unit capacity
-- **Absolute profit** (descending)
-- **Distance from source** (ascending) -- short detour customers first
+1. Preprocessing and initial heuristic run in parallel.
+2. The best known initial UB is selected from:
+   - heuristic result
+   - optional cutoff
+   - optional ng/DSSR elementary path incumbent
+3. If `disable_heuristics=false`, initial solution is passed to HiGHS using `setSolution()`.
+4. `HiGHSBridge::install_heuristic_callback()` installs LP-guided heuristic callback(s).
 
-Additional restarts use random permutations.
+## Initial Solution Heuristic
 
-### Local search
+### Construction
 
-After construction, run improving moves until no improvement found (max 200 iterations):
+- Customer candidates exclude source/target and must satisfy `demand <= Q`.
+- Start route:
+  - Tour: `[source, source]`
+  - s-t path: `[source, target]`
+- Mandatory endpoint demands are subtracted from remaining capacity.
+- Greedy cheapest insertion is applied over a customer ordering.
+- If too short, force-insert best feasible customers to satisfy minimum structure:
+  - Tour needs at least 4 nodes in sequence (`[depot, a, b, depot]`)
+  - Path needs at least 2 nodes (`[source, target]`)
 
-| Neighborhood | Description |
-|---|---|
-| **2-opt** | Reverse a segment of the route |
-| **Or-opt** | Relocate a chain of 1, 2, or 3 consecutive nodes |
-| **Node drop** | Remove a customer if its insertion cost exceeds its profit |
-| **Node add** | Insert an unvisited customer at its cheapest position if profitable |
+### Local Search Neighborhoods
 
-First-improvement strategy: accept the first improving move found, restart the pass.
+Applied with first-improvement up to iteration limit:
+- 2-opt
+- Or-opt (chain sizes 1, 2, 3)
+- Node drop
+- Node add
 
-### Reduced graph
+### Deterministic vs Opportunistic
 
-For the LP-guided callback, construction and local search operate on a **reduced graph** — a subset of the original problem's edges and nodes, selected based on LP relaxation values. The `edge_active` mask is threaded through `find_edge`, `edge_cost`, `greedy_insert`, and `local_search`; inactive edges return cost=infinity and are skipped.
+Controlled by solver option `deterministic`:
 
-Three reduction strategies are used concurrently:
+- `deterministic=true` (default):
+  - fixed restart count `clamp(num_nodes, 20, 200)`
+  - fixed seeds for random restarts
+  - reproducible across runs
+- `deterministic=false`:
+  - time-budgeted worker loops with non-deterministic seeds
+  - default budget in `Model::solve()` is `min(500ms, max(10ms, n*10ms))`
+  - in all-pairs propagation mode, budget uses `max(10ms, n*10ms)`
 
-**Strategy A: LP-value threshold**
-- Include edges with $x_e > 0.1$ + edges between pairs of nodes with $y_i > 0.5$
-- Simple, focuses on the LP support subgraph
+## LP-Guided Callback Heuristic
 
-**Strategy B: RINS-style**
-- Include edges from incumbent ($x_e > 0.5$) OR fractional LP ($x_e > 0.1$)
-- Falls back to Strategy A when no incumbent exists
-- Searches in the union of incumbent and LP relaxation neighborhoods
+### Callback Behavior
 
-**Strategy C: Neighborhood expansion**
-- Seed nodes: endpoints of edges with $x_e > 0.3$
-- Include seed edges + all edges between pairs of active nodes
-- Focuses on the connected neighborhood around the LP support
+Registered in `HiGHSBridge::install_heuristic_callback()`.
 
-All strategies: source/target always active.
+- Trigger type: `kCallbackMipUserSolution`
+- Skips initial `kExternalMipSolutionQueryOriginAfterSetup`
+- Rate-limited to once every 200 B&B nodes
+- Reads cached LP values `(x_lp, y_lp)` from separator callback cache
+- Optionally uses current incumbent (`data_out->mip_solution`)
+- Injects a heuristic solution only if strictly improving primal bound
 
-### Parallel restarts (TBB)
+Additionally:
+- Async incumbent candidates (e.g., from ng/DSSR) are injected first when newer and better.
+- `kCallbackMipInterrupt` is used to stop solve when bounds close after incumbent acceptance.
 
-The initial heuristic supports two modes, controlled by the `deterministic` solver option (default: `true`):
+### Reduced Graph Strategies
 
-**Deterministic mode** (default):
-- Pre-builds all orderings upfront: 3 deterministic + random shuffles with seeds `0, 1, 2, ...`
-- Runs all restarts via `tbb::parallel_for` over the fixed set
-- Best solution selected by iterating results in index order (deterministic tiebreaking)
-- Restart count: $\text{clamp}(\text{num\_nodes}, 20, 200)$
-- Identical results across runs on any hardware
+`heuristic_strategy` option:
+- `0`: all (default)
+- `1`: LP-threshold
+- `2`: RINS-style
+- `3`: neighborhood expansion
 
-**Opportunistic mode** (`--deterministic false`):
-- Multiple TBB workers race with `std::random_device` seeds
-- Workers run until a time budget expires: $\min(500\text{ms},\; \text{num\_nodes} \times 10\text{ms})$
-- May find better bounds on fast multi-core hardware
-- Results vary between runs
+Strategy details:
+- **LP-threshold**: keep edges with `x_e > 0.1`, plus edges between active high-`y` nodes (`y_i > 0.5`)
+- **RINS-style**: union of incumbent edges (`>0.5`) and fractional LP edges (`>0.1`)
+- **Neighborhood**: seed from edges with `x_e > 0.3`, then expand to active-node pairs
 
-## Standalone Usage
+Source/target are always active.
 
-```cpp
-#include "heuristic/primal_heuristic.h"
+## Flow
 
-// Deterministic (default): fixed restart count, reproducible
-auto warm_start = heuristic::build_initial_solution(problem_, num_restarts);
-
-// Opportunistic: time-based, non-deterministic
-auto warm_start = heuristic::build_initial_solution(problem_, num_restarts, budget_ms);
-
-// warm_start.objective = travel_cost - collected_profit
-// warm_start.col_values = solution vector (edges + nodes)
+```mermaid
+flowchart TD
+    A[Model solve] --> B[Parallel phase]
+    B --> B1[Preprocessing bounds]
+    B --> B2[Initial heuristic]
+    B1 --> C[Choose initial UB]
+    B2 --> C
+    C --> D{Heuristics enabled}
+    D -->|yes| E[Inject warm start with setSolution]
+    D -->|no| F[Skip warm start injection]
+    E --> G[Install LP guided callback]
+    F --> G
+    G --> H[Branch and cut loop]
+    H --> I[Separator callback caches LP values]
+    H --> J[User solution callback]
+    J --> K{200 node interval reached}
+    K -->|no| H
+    K -->|yes| L[Build reduced graphs]
+    L --> M[Run restarts and local search]
+    M --> N{Improves primal bound}
+    N -->|yes| O[Inject user solution]
+    N -->|no| H
+    O --> H
 ```
 
-Python:
-```python
-from rcspp_bac import build_warm_start
-warm = build_warm_start(prob, time_budget_ms=500.0)
+## Pseudocode
+
+### Initial solution
+
+```text
+function BUILD_INITIAL_SOLUTION(prob, num_restarts, time_budget_ms):
+    customers <- feasible non-endpoint nodes
+    fixed_orders <- [ratio_order, profit_order, source_distance_order]
+
+    if time_budget_ms > 0:
+        run parallel workers until deadline:
+            choose fixed or shuffled order
+            (tour, obj) <- SINGLE_RESTART(prob, customers, order)
+            update global best if improved
+    else:
+        append deterministic shuffled orders (fixed seeds)
+        parallel_for each order:
+            results[i] <- SINGLE_RESTART(...)
+        select best result in deterministic index order
+
+    return TOUR_TO_SOLUTION(best_tour), best_obj
 ```
 
-### LP-guided callback (during solve)
-
-Registered via `HiGHSBridge::install_heuristic_callback()`:
-
-1. Separator callback caches LP relaxation values (`x_vals`, `y_vals`) under a mutex
-2. `kCallbackMipUserSolution` callback reads cached LP values, builds reduced graphs, runs heuristic
-3. If improved solution found: `data_in->user_has_solution = true; data_in->user_solution = result`
-4. HiGHS validates via `solutionFeasible()` + our SEC feasibility check in `addIncumbent()`
-
-The callback skips the initial `kExternalMipSolutionQueryOriginAfterSetup` query (pre-solve heuristic already ran). Rate-limited to once per 200 B&B nodes to avoid overhead on hard instances.
-
-The solution vector has size `num_edges + num_nodes`:
-- `col_values[e] = 1` for edges in the route
-- `col_values[m + v] = 1` for visited nodes (including source/target)
-
-## Testing
-
-6 C++ tests (`[heuristic]` tag) and 5 Python tests verify:
-- Tour produces a valid closed loop with correct degree (degree 2 at all visited nodes)
-- Path produces a valid open path (degree 1 at source/target, degree 2 at intermediates)
-- Total demand of visited nodes respects vehicle capacity
-- Source/target y-variables are set to 1
-- Edge count equals visited-node count minus 1 (path) or equals visited-node count (tour)
-- Objective is finite
-
-```bash
-./build/rcspp_algo_tests [heuristic]
+```text
+function SINGLE_RESTART(prob, customers, order):
+    init route as [s,s] for tour or [s,t] for path
+    remaining_cap <- Q - mandatory endpoint demands
+    greedy_insert(order)
+    force_insert until minimum structure reached if possible
+    local_search(2-opt, or-opt, drop, add)
+    return route and objective if valid else +infinity
 ```
 
-## HiGHS Integration
+### LP-guided callback
 
-In `Model::solve()` (model.cpp), the warm-start is fed to HiGHS:
+```text
+on kCallbackMipUserSolution:
+    if initial_query_after_setup: return
+    if async_incumbent newer and better: inject and return
+    if node_count - last_node_count < 200: return
 
-```cpp
-HighsSolution start;
-start.value_valid = true;
-start.col_value = std::move(warm.col_values);
-highs.setSolution(start);
+    read cached (x_lp, y_lp); if empty return
+    incumbent <- current mip solution if available
+
+    result <- lp_guided_heuristic(prob, x_lp, y_lp, incumbent, budget, strategy)
+    if result improves primal bound:
+        inject result as user solution
 ```
 
-### CLI options
+## Solver Options Affecting Heuristic
 
-- `--heuristic_callback true/false` (default: true) — enable/disable LP-guided callback
-- `--heuristic_budget_ms N` (default: 20) — time budget per callback invocation in ms
-- `--heuristic_strategy N` (default: 0) — 0=all strategies, 1=LP-threshold, 2=RINS, 3=neighborhood
+| Option | Default | Effect |
+|---|---:|---|
+| `heuristic_callback` | `true` | Enable LP-guided callback heuristic |
+| `heuristic_budget_ms` | `20` | Callback time budget per invocation |
+| `heuristic_strategy` | `0` | `0=all, 1=LP-threshold, 2=RINS, 3=neighborhood` |
+| `deterministic` | `true` | Deterministic (fixed restarts) vs opportunistic mode |
+| `disable_heuristics` | `false` | Disable warm-start injection and set HiGHS internal heuristic effort to 0 |
 
-## Performance
+## Testing Status
 
-Tested on SPPRCLIB instances (verified against known optimal values from Jepsen et al. 2014):
+Current default test targets focus on solver integration (`rcspp_tests`, Python solver tests). Relevant regression coverage includes:
+- heuristic-disable path behavior (`tests/test_model.cpp`)
+- cutoff/prove-only behavior with heuristics disabled (`tests/test_ubs_cutoff.cpp`)
 
-| Instance | Heuristic obj | Optimal | Gap | Heuristic time |
-|---|---|---|---|---|
-| B-n45-k6-54 | -70,029 | -74,278 | 5.7% | 0.45s |
-| B-n50-k8-40 | -7,412 | -12,832 | 42% | 0.50s |
-| B-n52-k7-15 | -63,789 | -74,998 | 15% | 0.50s |
-| A-n63-k10-44 | -26,280 | -32,561 | 19% | 0.50s |
-| A-n69-k9-42 | -35,613 | -43,290 | 18% | 0.50s |
-
-Solver speedup on B-n45-k6-54: **13.6s -> 8.7s** (261 vs 548 nodes).
-
-## Possible improvements
-
-- **Synchronize + diversify**: After a batch of restarts, collect the k best tours,
-  measure diversity (e.g. symmetric difference of visited nodes), recombine diverse
-  parents to seed the next batch. Essentially a memetic algorithm.
-- **Regret-based insertion**: Instead of cheapest-insert, use regret-2 (insert the
-  customer whose best position advantage over second-best is largest). Standard in VRP.
-- **Perturbation**: After local search converges, perturb (e.g. random segment removal +
-  re-insertion) and re-optimize. Iterated local search.
-- **Edge cost cache**: Precompute n*n distance matrix to avoid repeated `find_edge` scans.
-  Currently ~0.1ms for find_edge on n=69, but would help for n>200.
+Direct heuristic unit tests exist in `tests/test_separators.cpp` (`[heuristic]` tags), but they are not part of the default `rcspp_tests` target.
