@@ -6,7 +6,7 @@ Computational results on two standard RCSPP benchmark sets.
 
 ## SPPRCLIB (45 instances)
 
-Instances from [Jepsen, Petersen, Spoorendonk (2008)](https://or.rwth-aachen.de/research/spprclib), 45--262 nodes.
+Instances from [Jepsen, Petersen, Spoorendonk (2008)](https://di.ku.dk/forskning/Publikationer/tekniske_rapporter/tekniske-rapporter-2008/08-01.pdf), 45--262 nodes.
 Time limit: 60s for easy instances, 3600s for hard ones.
 
 **All 45 instances solved to optimality.**
@@ -61,7 +61,7 @@ Time limit: 60s for easy instances, 3600s for hard ones.
 
 ## Roberti Set 3 (31 instances)
 
-Instances from Roberto Roberti (see [Jepsen et al. (2014)](https://doi.org/10.1016/S1572-5286(14)00036-X), Set 3), derived from CVRP column-generation duals produced by Roberti's implementation of the Baldacci, Mingozzi & Roberti (2011) algorithm. 76--200 nodes.
+Instances from Roberto Roberti (see [Jepsen et al. (2014)](https://doi.org/10.1016/j.disopt.2014.08.001), Set 3), derived from CVRP column-generation duals produced by Roberti's implementation of the Baldacci, Mingozzi & Roberti (2011) algorithm. 76--200 nodes.
 Time limit: 300s for E/F/P instances, 300s for M instances (3600s pending).
 
 **22 of 31 instances solved to optimality** (300s limit). M-series instances need a 3600s run.
@@ -129,23 +129,3 @@ cmake --build build -j$(nproc)
 ```
 
 Detailed per-instance statistics (LP iterations, timing breakdown, per-separator cut counts) are available in `benchmarks/progress.csv`.
-
-## Step 0.5 — RC Fixing Policy Study
-
-We added a targeted RC-fixing study script:
-
-```bash
-./benchmarks/experiment_rc_fixing.sh 8
-```
-
-Output CSV: `benchmarks/rc_fixing_study.csv`
-
-Compared settings on representative SPPRCLIB instances (`B-n45-k6-54`,
-`P-n50-k7-92`, `A-n63-k9-157`) with `dssr_async` on/off:
-
-- `off` has no RC fixings and generally weaker dual progress
-- `root_only` is cheap but leaves many potential fixings unused
-- `on_ub_improvement` and `adaptive` achieve similar fixing gains on tested runs
-- `adaptive` now self-throttles/turns off after repeated low-yield rounds
-
-**Policy decision**: default `rc_fixing` is now `adaptive`.
