@@ -3,6 +3,7 @@ site_description: Branch-and-cut solver for the Resource Constrained Shortest Pa
 site_url: https://spoorendonk.github.io/rcspp-bac/
 repo_url: https://github.com/spoorendonk/rcspp-bac
 repo_name: spoorendonk/rcspp-bac
+exclude_docs: roadmap.md
 
 theme:
   name: material
@@ -84,6 +85,7 @@ nav:
   - Applications: applications.md
   - Algorithms:
     - Overview: algorithms.md
+    - ng/DSSR Bounds: ng-dssr-labelling.md
     - Cut Separation: separation.md
     - Preprocessing: preprocessing.md
     - Domain Propagator: domain-propagator.md
