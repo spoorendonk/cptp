@@ -99,7 +99,8 @@ void HiGHSBridge::build_formulation() {
             elim_corr = snap.correction;
         }
     }
-    if (upper_bound_ < std::numeric_limits<double>::infinity()
+    if (edge_elimination_enabled_ &&
+        upper_bound_ < std::numeric_limits<double>::infinity()
         && !elim_fwd.empty() && !elim_bwd.empty()) {
         auto eliminated = preprocess::edge_elimination(
             prob_, elim_fwd, elim_bwd, upper_bound_, elim_corr);
@@ -112,15 +113,17 @@ void HiGHSBridge::build_formulation() {
         }
         // Also eliminate nodes where all incident edges are eliminated
         int32_t node_elim_count = 0;
-        for (int32_t i = 0; i < n; ++i) {
-            if (i == prob_.source() || i == prob_.target() || col_upper[m + i] == 0.0) continue;
-            bool all_eliminated = true;
-            for (auto e : graph.incident_edges(i)) {
-                if (col_upper[e] > 0.0) { all_eliminated = false; break; }
-            }
-            if (all_eliminated) {
-                col_upper[m + i] = 0.0;
-                node_elim_count++;
+        if (edge_elimination_nodes_) {
+            for (int32_t i = 0; i < n; ++i) {
+                if (i == prob_.source() || i == prob_.target() || col_upper[m + i] == 0.0) continue;
+                bool all_eliminated = true;
+                for (auto e : graph.incident_edges(i)) {
+                    if (col_upper[e] > 0.0) { all_eliminated = false; break; }
+                }
+                if (all_eliminated) {
+                    col_upper[m + i] = 0.0;
+                    node_elim_count++;
+                }
             }
         }
         if (edge_elim_count > 0 || node_elim_count > 0) {
@@ -190,10 +193,13 @@ void HiGHSBridge::build_formulation() {
 }
 
 void HiGHSBridge::install_separators() {
+    const bool sec_enabled_for_callbacks = std::any_of(
+        separators_.begin(), separators_.end(),
+        [](const auto& s) { return s && s->name() == "SEC"; });
     // Capture what the callback needs by pointer/reference.
     // The bridge must outlive the highs.run() call.
     HighsUserSeparator::setCallback(
-        [this](const HighsLpRelaxation& lpRelaxation,
+        [this, sec_enabled_for_callbacks](const HighsLpRelaxation& lpRelaxation,
                HighsCutPool& cutpool,
                const HighsMipSolver& mipsolver) {
             // Sub-MIPs have a different (presolved) column space.
@@ -290,24 +296,31 @@ void HiGHSBridge::install_separators() {
             };
 
             const bool is_submip = !orig_to_reduced.empty();
-
             if (is_submip) {
+                if (!sec_enabled_for_callbacks) return;
                 // Sub-MIP: only run SEC (lazy constraint) to keep overhead low.
                 // Other separators (RCI, Multistar, etc.) add tightening cuts
                 // but aren't needed for feasibility in short-lived sub-MIPs.
                 sep::SECSeparator sec;
                 auto cuts = sec.separate(ctx);
+                const auto it_min = per_separator_min_violation_.find(sec.name());
+                const double min_viol = (it_min != per_separator_min_violation_.end())
+                    ? it_min->second
+                    : 0.0;
+                const auto it_cap = per_separator_max_cuts_.find(sec.name());
+                const int32_t max_cuts = (it_cap != per_separator_max_cuts_.end())
+                    ? it_cap->second
+                    : max_cuts_per_sep_;
 
                 std::stable_sort(cuts.begin(), cuts.end(),
                     [](const sep::Cut& a, const sep::Cut& b) {
                         return a.violation > b.violation;
                     });
-                int32_t limit = (max_cuts_per_sep_ > 0)
-                    ? std::min(static_cast<int32_t>(cuts.size()), max_cuts_per_sep_)
-                    : static_cast<int32_t>(cuts.size());
-
-                for (int32_t j = 0; j < limit; ++j) {
+                int32_t added = 0;
+                for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
+                    if (max_cuts > 0 && added >= max_cuts) break;
                     auto& cut = cuts[j];
+                    if (cut.violation < min_viol) continue;
                     // Translate cut indices from original to reduced space
                     std::vector<HighsInt> red_idx;
                     std::vector<double> red_val;
@@ -334,6 +347,7 @@ void HiGHSBridge::install_separators() {
                                        static_cast<HighsInt>(red_idx.size()),
                                        rhs);
                         total_cuts_++;
+                        added++;
                     }
                 }
             } else {
@@ -354,21 +368,29 @@ void HiGHSBridge::install_separators() {
 
                 // Add cuts to the cutpool (limited per separator)
                 for (size_t i = 0; i < separators_.size(); ++i) {
-                    auto& stats = separator_stats_[separators_[i]->name()];
+                    const std::string sep_name = separators_[i]->name();
+                    auto& stats = separator_stats_[sep_name];
                     stats.time_seconds += elapsed[i];
                     if (!results[i].empty()) stats.rounds_called++;
+                    const auto it_min = per_separator_min_violation_.find(sep_name);
+                    const double min_viol = (it_min != per_separator_min_violation_.end())
+                        ? it_min->second
+                        : 0.0;
+                    const auto it_cap = per_separator_max_cuts_.find(sep_name);
+                    const int32_t max_cuts = (it_cap != per_separator_max_cuts_.end())
+                        ? it_cap->second
+                        : max_cuts_per_sep_;
 
                     auto& cuts = results[i];
                     std::stable_sort(cuts.begin(), cuts.end(),
                         [](const sep::Cut& a, const sep::Cut& b) {
                             return a.violation > b.violation;
                         });
-                    int32_t limit = (max_cuts_per_sep_ > 0)
-                        ? std::min(static_cast<int32_t>(cuts.size()), max_cuts_per_sep_)
-                        : static_cast<int32_t>(cuts.size());
-
-                    for (int32_t j = 0; j < limit; ++j) {
+                    int32_t added = 0;
+                    for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
+                        if (max_cuts > 0 && added >= max_cuts) break;
                         auto& cut = cuts[j];
+                        if (cut.violation < min_viol) continue;
                         std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
                         cutpool.addCut(mipsolver,
                                        hi.data(), cut.values.data(),
@@ -376,6 +398,7 @@ void HiGHSBridge::install_separators() {
                                        cut.rhs);
                         stats.cuts_added++;
                         total_cuts_++;
+                        added++;
                     }
                 }
             }
@@ -392,6 +415,8 @@ void HiGHSBridge::install_separators() {
             const int32_t n = num_nodes_;
             if (static_cast<int32_t>(sol.size()) < m + n) return true;
 
+            // Always enforce SEC feasibility on integer incumbents, even when
+            // SEC cut generation is disabled, to preserve route connectivity.
             sep::SeparationOracle oracle(prob_);
             return oracle.is_feasible(
                 std::span(sol.data(), static_cast<size_t>(m)),
@@ -882,10 +907,11 @@ void HiGHSBridge::install_heuristic_callback() {
     auto solutions = heuristic_solutions_;
     double budget_ms = heuristic_budget_ms_;
     int strategy = heuristic_strategy_;
+    int64_t node_interval = std::max<int64_t>(1, heuristic_node_interval_);
+    bool async_injection = heuristic_async_injection_;
 
     // Rate-limit: run heuristic at most once per N nodes.
     auto last_node_count = std::make_shared<int64_t>(0);
-    constexpr int64_t node_interval = 200;
 
     auto cached_x = cached_x_lp_;
     auto cached_y = cached_y_lp_;
@@ -894,7 +920,8 @@ void HiGHSBridge::install_heuristic_callback() {
     auto last_async_version = std::make_shared<uint64_t>(0);
     highs_.setCallback(
         [this, cached_x, cached_y, cache_mtx, calls, solutions, budget_ms,
-         last_node_count, strategy, async_store, last_async_version](
+         last_node_count, strategy, async_store, last_async_version,
+         node_interval, async_injection](
             int callback_type, const std::string& /*message*/,
             const HighsCallbackOutput* data_out,
             HighsCallbackInput* data_in,
@@ -923,7 +950,7 @@ void HiGHSBridge::install_heuristic_callback() {
 
             // Inject asynchronous incumbent (e.g., ng/DSSR path) as soon as a
             // newer candidate is available.
-            if (async_store) {
+            if (async_injection && async_store) {
                 auto snap = async_store->snapshot();
                 if (snap.version > *last_async_version) {
                     *last_async_version = snap.version;

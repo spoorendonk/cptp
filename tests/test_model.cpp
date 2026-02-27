@@ -279,6 +279,232 @@ TEST_CASE("Model: submip_separation=true produces valid result", "[model]") {
     REQUIRE(result.objective < 0.0);
 }
 
+TEST_CASE("Model: extended tuning options parse and preserve correctness", "[model][options]") {
+    rcspp::Model model;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+
+    model.set_graph(4, edges, costs);
+    model.set_depot(0);
+
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    model.set_profits(profits);
+
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    model.add_capacity_resource(demands, 7.0);
+
+    auto opts = quiet;
+    opts.push_back({"max_concurrent_solves", "1"});
+    opts.push_back({"heuristic_node_interval", "50"});
+    opts.push_back({"heuristic_async_injection", "true"});
+    opts.push_back({"enable_sec", "true"});
+    opts.push_back({"enable_rci", "true"});
+    opts.push_back({"enable_multistar", "true"});
+    opts.push_back({"enable_comb", "true"});
+    opts.push_back({"enable_rglm", "true"});
+    opts.push_back({"edge_elimination", "true"});
+    opts.push_back({"edge_elimination_nodes", "true"});
+    opts.push_back({"max_cuts_sec", "2"});
+    opts.push_back({"max_cuts_rci", "2"});
+    opts.push_back({"min_violation_sec", "0.01"});
+    opts.push_back({"min_violation_rci", "0.01"});
+    opts.push_back({"branch_hyper", "pairs"});
+    opts.push_back({"branch_hyper_sb_max_depth", "1"});
+    opts.push_back({"branch_hyper_sb_iter_limit", "20"});
+    opts.push_back({"branch_hyper_sb_min_reliable", "2"});
+    opts.push_back({"branch_hyper_sb_max_candidates", "2"});
+
+    auto result = model.solve(opts);
+    REQUIRE(result.has_solution());
+    REQUIRE(result.objective <= -10.0);
+}
+
+TEST_CASE("Model: disabling cut families still yields valid tiny solution", "[model][options][cuts]") {
+    rcspp::Model model;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+
+    model.set_graph(4, edges, costs);
+    model.set_depot(0);
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 7.0);
+
+    auto opts = quiet;
+    opts.push_back({"enable_sec", "false"});
+    opts.push_back({"enable_rci", "false"});
+    opts.push_back({"enable_multistar", "false"});
+    opts.push_back({"enable_comb", "false"});
+    opts.push_back({"enable_rglm", "false"});
+    opts.push_back({"enable_spi", "false"});
+
+    auto result = model.solve(opts);
+    REQUIRE(result.has_solution());
+    REQUIRE(result.objective <= -10.0);
+}
+
+TEST_CASE("Model: connectivity still enforced when SEC cut generation is disabled",
+          "[model][options][cuts][feasibility]") {
+    // Two clusters with a very expensive bridge from depot cluster to the
+    // profitable cluster. Without incumbent SEC feasibility checks, disabling
+    // SEC cut generation can accept disconnected subtours with much lower
+    // objective. With feasibility checks active, both runs must agree.
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {1, 2}, {2, 0},  // depot-side cluster
+        {3, 4}, {4, 5}, {5, 3},  // profitable disconnected cluster
+        {0, 3},                  // expensive bridge
+    };
+    std::vector<double> costs = {
+        1.0, 1.0, 1.0,
+        1.0, 1.0, 1.0,
+        100.0,
+    };
+    std::vector<double> profits = {0.0, 0.0, 0.0, 60.0, 60.0, 60.0};
+    std::vector<double> demands = {0.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+
+    rcspp::Model model_sec_on;
+    rcspp::Model model_sec_off;
+    for (auto* m : {&model_sec_on, &model_sec_off}) {
+        m->set_graph(6, edges, costs);
+        m->set_depot(0);
+        m->set_profits(profits);
+        m->add_capacity_resource(demands, 10.0);
+    }
+
+    auto opts_on = quiet;
+    auto r_on = model_sec_on.solve(opts_on);
+
+    auto opts_off = quiet;
+    opts_off.push_back({"enable_sec", "false"});
+    opts_off.push_back({"enable_rci", "false"});
+    opts_off.push_back({"enable_multistar", "false"});
+    opts_off.push_back({"enable_comb", "false"});
+    opts_off.push_back({"enable_rglm", "false"});
+    opts_off.push_back({"enable_spi", "false"});
+    auto r_off = model_sec_off.solve(opts_off);
+
+    REQUIRE(r_on.is_optimal());
+    REQUIRE(r_off.is_optimal());
+    // If disconnected subtours were accepted, this instance would achieve a
+    // very negative objective (about -175). Connected solutions are >= 0.
+    REQUIRE(r_on.objective >= 0.0);
+    REQUIRE(r_off.objective >= 0.0);
+}
+
+TEST_CASE("Model: connectivity check still enforced with SEC off and submip separation off",
+          "[model][options][cuts][feasibility]") {
+    // Same disconnected-cluster construction as above, but with sub-MIP
+    // separation explicitly disabled to ensure incumbent feasibility checks
+    // remain the connectivity safeguard.
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {1, 2}, {2, 0},
+        {3, 4}, {4, 5}, {5, 3},
+        {0, 3},
+    };
+    std::vector<double> costs = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 100.0};
+    std::vector<double> profits = {0.0, 0.0, 0.0, 60.0, 60.0, 60.0};
+    std::vector<double> demands = {0.0, 1.0, 1.0, 1.0, 1.0, 1.0};
+
+    rcspp::Model model;
+    model.set_graph(6, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 10.0);
+
+    auto opts = quiet;
+    opts.push_back({"enable_sec", "false"});
+    opts.push_back({"enable_rci", "false"});
+    opts.push_back({"enable_multistar", "false"});
+    opts.push_back({"enable_comb", "false"});
+    opts.push_back({"enable_rglm", "false"});
+    opts.push_back({"enable_spi", "false"});
+    opts.push_back({"submip_separation", "false"});
+    auto result = model.solve(opts);
+
+    REQUIRE(result.is_optimal());
+    REQUIRE(result.objective >= 0.0);
+}
+
+TEST_CASE("Model: edge elimination toggles preserve tiny optimum", "[model][options][presolve]") {
+    rcspp::Model model_on;
+    rcspp::Model model_off;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+
+    for (auto* m : {&model_on, &model_off}) {
+        m->set_graph(4, edges, costs);
+        m->set_depot(0);
+        m->set_profits(profits);
+        m->add_capacity_resource(demands, 7.0);
+    }
+
+    auto opts_on = quiet;
+    opts_on.push_back({"cutoff", "-11.0"});
+    opts_on.push_back({"disable_heuristics", "true"});
+    opts_on.push_back({"edge_elimination", "true"});
+    opts_on.push_back({"edge_elimination_nodes", "true"});
+
+    auto opts_off = quiet;
+    opts_off.push_back({"cutoff", "-11.0"});
+    opts_off.push_back({"disable_heuristics", "true"});
+    opts_off.push_back({"edge_elimination", "false"});
+    opts_off.push_back({"edge_elimination_nodes", "false"});
+
+    auto r_on = model_on.solve(opts_on);
+    auto r_off = model_off.solve(opts_off);
+
+    REQUIRE(r_on.is_optimal());
+    REQUIRE(r_off.is_optimal());
+    REQUIRE_THAT(r_on.objective, WithinAbs(-11.0, 1e-6));
+    REQUIRE_THAT(r_off.objective, WithinAbs(-11.0, 1e-6));
+}
+
+TEST_CASE("Model: presolve option is captured and forced off", "[model][options][presolve]") {
+    rcspp::Model model_a;
+    rcspp::Model model_b;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+
+    for (auto* m : {&model_a, &model_b}) {
+        m->set_graph(4, edges, costs);
+        m->set_depot(0);
+        m->set_profits(profits);
+        m->add_capacity_resource(demands, 7.0);
+    }
+
+    auto opts_forced = quiet;
+    opts_forced.push_back({"presolve", "true"});  // should be intercepted and ignored
+
+    auto opts_off = quiet;
+    opts_off.push_back({"presolve", "off"});
+
+    auto r_forced = model_a.solve(opts_forced);
+    auto r_off = model_b.solve(opts_off);
+
+    REQUIRE(r_forced.is_optimal());
+    REQUIRE(r_off.is_optimal());
+    REQUIRE_THAT(r_forced.objective, WithinAbs(-11.0, 1e-6));
+    REQUIRE_THAT(r_off.objective, WithinAbs(-11.0, 1e-6));
+    REQUIRE_THAT(r_forced.objective, WithinAbs(r_off.objective, 1e-9));
+}
+
 TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][branching]") {
     std::vector<rcspp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
