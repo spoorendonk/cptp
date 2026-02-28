@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <memory>
 
 #include "core/digraph.h"
 #include "core/gomory_hu.h"
@@ -1082,6 +1083,59 @@ TEST_CASE("Warm-start: opportunistic mode produces valid solution", "[heuristic]
     REQUIRE(result.col_values[prob.num_edges() + prob.source()] == 1.0);
 }
 
+TEST_CASE("WorkUnitBudget enforces cap and reservation", "[heuristic][determinism]") {
+    rcspp::WorkUnitBudget budget(3);
+    REQUIRE(budget.capped());
+    REQUIRE(budget.try_consume(2));
+    REQUIRE(budget.used() == 2);
+    REQUIRE_FALSE(budget.try_consume(2));
+    REQUIRE(budget.reserve_up_to(5) == 1);
+    REQUIRE(budget.used() == 3);
+    REQUIRE(budget.remaining() == 0);
+}
+
+TEST_CASE("Warm-start: work-unit cap yields deterministic prefix",
+          "[heuristic][determinism]") {
+    auto prob = make_small_problem();
+
+    auto budget1 = std::make_shared<rcspp::WorkUnitBudget>(2);
+    auto r1 = rcspp::heuristic::build_warm_start(prob, 50, 0.0, budget1);
+
+    auto budget2 = std::make_shared<rcspp::WorkUnitBudget>(2);
+    auto r2 = rcspp::heuristic::build_warm_start(prob, 50, 0.0, budget2);
+
+    REQUIRE(budget1->used() == 2);
+    REQUIRE(budget2->used() == 2);
+    REQUIRE(r1.objective == r2.objective);
+    REQUIRE(r1.col_values == r2.col_values);
+}
+
+TEST_CASE("LP-guided heuristic: deterministic restarts are reproducible",
+          "[heuristic][determinism]") {
+    auto prob = make_small_problem();
+    int32_t m = prob.num_edges();
+    int32_t n = prob.num_nodes();
+
+    std::vector<double> x_lp(m, 0.3);
+    std::vector<double> y_lp(n, 0.6);
+    std::vector<double> incumbent;
+
+    auto budget1 = std::make_shared<rcspp::WorkUnitBudget>(16);
+    auto r1 = rcspp::heuristic::lp_guided_heuristic(
+        prob, x_lp, y_lp, incumbent,
+        0.0, 0, 16, 7u, budget1);
+
+    auto budget2 = std::make_shared<rcspp::WorkUnitBudget>(16);
+    auto r2 = rcspp::heuristic::lp_guided_heuristic(
+        prob, x_lp, y_lp, incumbent,
+        0.0, 0, 16, 7u, budget2);
+
+    REQUIRE(budget1->used() == 16);
+    REQUIRE(budget2->used() == 16);
+    REQUIRE(r1.objective == r2.objective);
+    REQUIRE(r1.col_values == r2.col_values);
+}
+
 // =====================================================================
 // SPI separator: Shortest Path Inequalities
 // =====================================================================
@@ -1512,4 +1566,3 @@ TEST_CASE("SPI separator: shrinking produces minimal sets", "[spi]") {
         REQUIRE(cut.rhs < static_cast<double>(cut.size()));
     }
 }
-

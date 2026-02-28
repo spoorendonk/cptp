@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -18,6 +19,7 @@
 #include "sep/separation_oracle.h"
 #include "sep/separator.h"
 #include "util/logger.h"
+#include "util/work_unit_budget.h"
 
 namespace rcspp {
 
@@ -105,6 +107,11 @@ class HiGHSBridge {
         async_incumbent_store_ = std::move(store);
     }
 
+    /// Optional deterministic checkpoint hook called at propagator callbacks.
+    void set_deterministic_checkpoint_hook(std::function<void()> hook) {
+        deterministic_checkpoint_hook_ = std::move(hook);
+    }
+
     /// Install domain propagator that fixes edges during B&C based on labeling bounds.
     void install_propagator();
 
@@ -121,6 +128,13 @@ class HiGHSBridge {
     void set_heuristic_strategy(int s) { heuristic_strategy_ = s; }
     void set_heuristic_node_interval(int64_t interval) { heuristic_node_interval_ = interval; }
     void set_heuristic_async_injection(bool enable) { heuristic_async_injection_ = enable; }
+    void set_heuristic_deterministic_mode(bool enable) { heuristic_deterministic_mode_ = enable; }
+    void set_heuristic_deterministic_restarts(int32_t restarts) {
+        heuristic_deterministic_restarts_ = restarts;
+    }
+    void set_work_unit_budget(std::shared_ptr<WorkUnitBudget> budget) {
+        work_unit_budget_ = std::move(budget);
+    }
 
  private:
     /// Order the visited nodes by following edges from source.
@@ -156,6 +170,7 @@ class HiGHSBridge {
     std::shared_ptr<preprocess::SharedBoundsStore> shared_bounds_;
     std::shared_ptr<std::atomic<double>> async_upper_bound_;
     std::shared_ptr<model::AsyncIncumbentStore> async_incumbent_store_;
+    std::function<void()> deterministic_checkpoint_hook_;
 
     // RC fixing settings and statistics
     RCFixingSettings rc_settings_;
@@ -184,6 +199,9 @@ class HiGHSBridge {
     int heuristic_strategy_ = 0;  // 0=all, 1=threshold, 2=RINS, 3=neighborhood
     int64_t heuristic_node_interval_ = 200;
     bool heuristic_async_injection_ = true;
+    bool heuristic_deterministic_mode_ = false;
+    int32_t heuristic_deterministic_restarts_ = 32;
+    std::shared_ptr<WorkUnitBudget> work_unit_budget_;
 
     // Cached LP relaxation from separator callback (shared with heuristic)
     std::shared_ptr<std::vector<double>> cached_x_lp_;

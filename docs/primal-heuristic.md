@@ -51,13 +51,13 @@ Applied with first-improvement up to iteration limit:
 
 ### Deterministic vs Opportunistic
 
-Controlled by solver option `deterministic`:
+Controlled by solver option `parallel_mode`:
 
-- `deterministic=true` (default):
+- `parallel_mode=deterministic` (default):
   - fixed restart count `clamp(num_nodes, 20, 200)`
   - fixed seeds for random restarts
   - reproducible across runs
-- `deterministic=false`:
+- `parallel_mode=opportunistic`:
   - time-budgeted worker loops with non-deterministic seeds
   - default budget in `Model::solve()` is `min(500ms, max(10ms, n*10ms))`
   - in all-pairs propagation mode, budget uses `max(10ms, n*10ms)`
@@ -177,7 +177,7 @@ on kCallbackMipUserSolution:
 | `heuristic_callback` | `true` | Enable LP-guided callback heuristic |
 | `heuristic_budget_ms` | `20` | Callback time budget per invocation |
 | `heuristic_strategy` | `0` | `0=all, 1=LP-threshold, 2=RINS, 3=neighborhood` |
-| `deterministic` | `true` | Deterministic (fixed restarts) vs opportunistic mode |
+| `parallel_mode` | `deterministic` | Deterministic (fixed restarts) vs opportunistic mode |
 | `disable_heuristics` | `false` | Disable warm-start injection and set HiGHS internal heuristic effort to 0 |
 
 ## Testing Status

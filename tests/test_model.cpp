@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "model/deterministic_checkpoint.h"
 #include "model/model.h"
 
 using Catch::Matchers::WithinAbs;
@@ -162,7 +163,7 @@ TEST_CASE("Model path: async incumbent proof handoff does not stop without solut
 
     auto opts = quiet;
     opts.push_back({"disable_heuristics", "true"});  // no initial setSolution
-    opts.push_back({"dssr_async", "true"});
+    opts.push_back({"dssr_background_updates", "true"});
     opts.push_back({"ng_initial_size", "4"});
     opts.push_back({"ng_max_size", "8"});
     opts.push_back({"ng_dssr_iters", "4"});
@@ -298,8 +299,15 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
 
     auto opts = quiet;
     opts.push_back({"max_concurrent_solves", "1"});
+    opts.push_back({"deterministic_work_units", "128"});
+    opts.push_back({"heuristic_deterministic_restarts", "8"});
+    opts.push_back({"parallel_mode", "deterministic"});
     opts.push_back({"heuristic_node_interval", "50"});
     opts.push_back({"heuristic_async_injection", "true"});
+    opts.push_back({"dssr_background_policy", "auto"});
+    opts.push_back({"dssr_background_max_epochs", "4"});
+    opts.push_back({"dssr_background_auto_min_epochs", "2"});
+    opts.push_back({"dssr_background_auto_no_progress_limit", "3"});
     opts.push_back({"enable_sec", "true"});
     opts.push_back({"enable_rci", "true"});
     opts.push_back({"enable_multistar", "true"});
@@ -320,6 +328,162 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
     auto result = model.solve(opts);
     REQUIRE(result.has_solution());
     REQUIRE(result.objective <= -10.0);
+}
+
+TEST_CASE("Model: deterministic work-unit settings produce stable repeated solves",
+          "[model][options][determinism]") {
+    rcspp::Model model;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+
+    model.set_graph(4, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 7.0);
+
+    auto opts = quiet;
+    opts.push_back({"threads", "1"});
+    opts.push_back({"parallel_mode", "deterministic"});
+    opts.push_back({"deterministic_work_units", "64"});
+    opts.push_back({"heuristic_deterministic_restarts", "8"});
+    opts.push_back({"dssr_background_updates", "false"});
+
+    auto r1 = model.solve(opts);
+    auto r2 = model.solve(opts);
+
+    REQUIRE(r1.status == r2.status);
+    REQUIRE_THAT(r1.bound, WithinAbs(r2.bound, 1e-9));
+    if (r1.has_solution() && r2.has_solution()) {
+        REQUIRE_THAT(r1.objective, WithinAbs(r2.objective, 1e-9));
+        REQUIRE(r1.tour == r2.tour);
+    }
+}
+
+TEST_CASE("Model: deterministic DSSR epoch commits are replay-equivalent",
+          "[model][options][determinism][dssr]") {
+    rcspp::Model model;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {0, 4},
+        {1, 2}, {1, 3}, {1, 4},
+        {2, 3}, {2, 4},
+        {3, 4},
+    };
+    std::vector<double> costs = {
+        6.0, 8.0, 9.0, 10.0,
+        3.0, 4.0, 7.0,
+        5.0, 6.0,
+        4.0,
+    };
+    std::vector<double> profits = {0.0, 11.0, 10.0, 9.0, 8.0};
+    std::vector<double> demands = {0.0, 2.0, 2.0, 3.0, 3.0};
+
+    model.set_graph(5, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 8.0);
+
+    auto opts = quiet;
+    opts.push_back({"threads", "1"});
+    opts.push_back({"parallel_mode", "deterministic"});
+    opts.push_back({"random_seed", "0"});
+    opts.push_back({"dssr_background_updates", "true"});
+    opts.push_back({"ng_initial_size", "1"});
+    opts.push_back({"ng_max_size", "6"});
+    opts.push_back({"ng_dssr_iters", "1"});
+
+    auto r1 = model.solve(opts);
+    auto r2 = model.solve(opts);
+
+    REQUIRE(r1.status == r2.status);
+    REQUIRE_THAT(r1.bound, WithinAbs(r2.bound, 1e-9));
+    if (r1.has_solution() && r2.has_solution()) {
+        REQUIRE_THAT(r1.objective, WithinAbs(r2.objective, 1e-9));
+        REQUIRE(r1.tour == r2.tour);
+    }
+
+    REQUIRE(r1.dssr_epochs_enqueued == r2.dssr_epochs_enqueued);
+    REQUIRE(r1.dssr_epochs_committed == r2.dssr_epochs_committed);
+    REQUIRE(r1.dssr_epochs_committed == r1.dssr_epochs_enqueued);
+    REQUIRE(r2.dssr_epochs_committed == r2.dssr_epochs_enqueued);
+    REQUIRE(r1.dssr_checkpoint_count == r2.dssr_checkpoint_count);
+    REQUIRE(r1.dssr_commit_signature == r2.dssr_commit_signature);
+}
+
+TEST_CASE("Model: deterministic DSSR max-epoch cap and auto policy are replay-stable",
+          "[model][options][determinism][dssr]") {
+    rcspp::Model model;
+
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {0, 4},
+        {1, 2}, {1, 3}, {1, 4},
+        {2, 3}, {2, 4},
+        {3, 4},
+    };
+    std::vector<double> costs = {
+        6.0, 8.0, 9.0, 10.0,
+        3.0, 4.0, 7.0,
+        5.0, 6.0,
+        4.0,
+    };
+    std::vector<double> profits = {0.0, 11.0, 10.0, 9.0, 8.0};
+    std::vector<double> demands = {0.0, 2.0, 2.0, 3.0, 3.0};
+
+    model.set_graph(5, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 8.0);
+
+    auto opts = quiet;
+    opts.push_back({"threads", "1"});
+    opts.push_back({"parallel_mode", "deterministic"});
+    opts.push_back({"random_seed", "0"});
+    opts.push_back({"dssr_background_updates", "true"});
+    opts.push_back({"dssr_background_policy", "auto"});
+    opts.push_back({"dssr_background_max_epochs", "2"});
+    opts.push_back({"dssr_background_auto_min_epochs", "1"});
+    opts.push_back({"dssr_background_auto_no_progress_limit", "1"});
+    opts.push_back({"ng_initial_size", "1"});
+    opts.push_back({"ng_max_size", "8"});
+    opts.push_back({"ng_dssr_iters", "1"});
+
+    auto r1 = model.solve(opts);
+    auto r2 = model.solve(opts);
+
+    REQUIRE(r1.status == r2.status);
+    REQUIRE_THAT(r1.bound, WithinAbs(r2.bound, 1e-9));
+    if (r1.has_solution() && r2.has_solution()) {
+        REQUIRE_THAT(r1.objective, WithinAbs(r2.objective, 1e-9));
+        REQUIRE(r1.tour == r2.tour);
+    }
+
+    REQUIRE(r1.dssr_epochs_enqueued == r1.dssr_epochs_committed);
+    REQUIRE(r2.dssr_epochs_enqueued == r2.dssr_epochs_committed);
+    REQUIRE(r1.dssr_epochs_enqueued <= 2);
+    REQUIRE(r2.dssr_epochs_enqueued <= 2);
+    REQUIRE(r1.dssr_epochs_enqueued == r2.dssr_epochs_enqueued);
+    REQUIRE(r1.dssr_commit_signature == r2.dssr_commit_signature);
+}
+
+TEST_CASE("Model: DSSR auto-stop tracker stops on deterministic no-progress path",
+          "[model][options][determinism][dssr]") {
+    rcspp::model_detail::DssrAutoStopTracker tracker(
+        /*min_epochs_before_stop=*/4,
+        /*no_progress_epoch_limit=*/2);
+
+    // With checkpoint activity present, stopping should come from no-progress
+    // streak, not from the no-checkpoint fast-stop path.
+    REQUIRE_FALSE(tracker.observe_stage(
+        /*improved=*/false, /*checkpoint_active=*/true, /*produced_epochs=*/1));
+    REQUIRE(tracker.observe_stage(
+        /*improved=*/false, /*checkpoint_active=*/true, /*produced_epochs=*/2));
+    REQUIRE(tracker.had_checkpoint_activity());
+    REQUIRE(tracker.no_progress_epochs() == 2);
 }
 
 TEST_CASE("Model: disabling cut families still yields valid tiny solution", "[model][options][cuts]") {
