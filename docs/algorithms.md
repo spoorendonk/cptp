@@ -43,10 +43,25 @@ $$\min \sum_e c_e \, x_e - \sum_i p_i \, y_i$$
 Load instance
     |
     v
-Preprocessing (parallel via TBB)
-    |-- Forward labeling (bounds from source)
-    |-- Backward labeling (bounds from target; same as forward for tour)
-    '-- Initial heuristic (greedy + local search)
+Stage 1 preprocessing (parallel via TBB)
+    |-- Forward 2-cycle labeling from source  -> fwd bounds
+    |-- Backward 2-cycle labeling from target -> bwd bounds (or fwd for tour)
+    '-- Fast warm-start (quick UB, no bounds required)
+    |
+    v
+First edge-elimination pass
+    '-- Uses (Stage-1 bounds, fast UB)
+    |
+    v
+Stage 2 preprocessing (parallel via TBB)
+    |-- Second warm-start on reduced graph (adaptive, optional)
+    |-- s-t ng/DSSR refinement (optional)
+    '-- All-pairs 2-cycle bounds (optional)
+    |
+    v
+Select final preprocessing artifacts
+    |-- Final bounds snapshot (prefer refined ng, else all-pairs rows, else Stage-1)
+    '-- Initial incumbent + UB
     |
     v
 Build MIP formulation
@@ -63,6 +78,11 @@ Install HiGHS callbacks
     '-- LP-guided heuristic callback --> primal-heuristic.md
     |
     v
+Async ng/DSSR worker (optional, runs during HiGHS)
+    |-- Publishes tighter (fwd,bwd,ng_size) snapshots
+    '-- Publishes improved incumbents when found
+    |
+    v
 HiGHS MIP solve
     |
     v
@@ -70,6 +90,53 @@ Extract result (tour/path, objective, bound, gap)
 ```
 
 Orchestrated by `Model::solve()` in `src/model/model.cpp`.
+
+## High-Level Pseudocode
+
+```text
+function solve(problem, options):
+    configure_highs(options)
+
+    # Stage 1: bounds + fast UB in parallel
+    parallel:
+        fwd = forward_labeling(problem, source)
+        bwd = backward_labeling(problem, target)  # bwd=fwd in tour mode
+        ws_fast = build_initial_solution(problem, fast_budget)
+
+    if source == target:
+        bwd = fwd
+    ub_fast = min(cutoff_if_any, ws_fast.objective)
+
+    # First elimination estimate from (LB, UB)
+    eliminated_stage1 = edge_elimination(problem, fwd, bwd, ub_fast, correction)
+    run_second_ws = adaptive_decision(eliminated_stage1, n, ub_fast, options)
+
+    # Stage 2: refinement and optional second warm-start
+    parallel:
+        if run_second_ws:
+            ws_second = build_initial_solution(problem, full_budget, fwd, bwd,
+                                              correction, ub_fast)
+        if options.all_pairs_propagation:
+            all_pairs = all_pairs_forward_labeling(problem)
+        if ng_refinement_enabled(options):
+            ng_bounds, ng_path = ng_compute_bounds(problem, source, target, options)
+
+    (fwd_final, bwd_final, ng_size_used) = choose_bounds_snapshot(
+        ng_bounds, all_pairs, fwd, bwd)
+    warm_start = best_of(ws_fast, ws_second, ng_path_start_if_any)
+    warm_start_ub = best_objective(cutoff_if_any, warm_start, ng_path)
+
+    build_formulation_with_static_elimination(fwd_final, bwd_final, warm_start_ub)
+    install_callbacks(separator, propagator, lp_heuristic)
+    set_initial_solution(warm_start)
+
+    if dssr_async and not all_pairs_propagation and ng_size_used < ng_max:
+        launch_async_ng_worker(shared_bounds_store, async_incumbent_store)
+
+    highs.run()
+    stop_async_ng_worker()
+    return extract_result()
+```
 
 ## Cut Separation
 
@@ -96,7 +163,7 @@ Demand-reachability filtering and labeling-based edge elimination. See [preproce
 
 Parallel construction + local search heuristic using Intel TBB. See [primal-heuristic.md](primal-heuristic.md) for full details.
 
-**Initial solution** (`build_initial_solution`): Greedy cheapest-insertion with three deterministic orderings (profit/demand ratio, absolute profit, distance from source) plus random restarts on the complete graph. Time budget: $\min(500\text{ms},\; n \times 10\text{ms})$.
+**Initial solution** (`build_initial_solution`): Greedy cheapest-insertion with three deterministic orderings (profit/demand ratio, absolute profit, distance from source) plus random restarts. It is used in two startup roles: a fast first pass to get an early UB, and an optional second pass on a bound-filtered reduced graph after the first elimination step.
 
 **LP-guided callback** (`lp_guided_heuristic`): During MIP solve, builds reduced graphs from LP relaxation values using three strategies (LP-value threshold, RINS-style agreement, neighborhood expansion) and runs construction + local search on each. Registered via `kCallbackMipUserSolution`. Time budget: 20ms per invocation.
 

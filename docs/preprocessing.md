@@ -4,13 +4,15 @@ Files: `src/preprocess/reachability.h`, `src/preprocess/edge_elimination.h`, `sr
 
 ## Overview
 
-Two preprocessing phases run in parallel (via TBB) before the MIP is built:
+Preprocessing is staged before the MIP is built:
 
-1. demand-reachability node filtering
-2. ng-route/DSSR labeling bounds for edge elimination and propagation
+1. parallel: fast source/target 2-cycle labeling (forward/backward) + fast warm-start
+2. edge-elimination trigger computation from Stage-1 bounds and fast UB
+3. parallel second warm-start (optional, adaptive), all-pairs 2-cycle
+   propagation (optional), and s-t ng/DSSR refinement
+4. hand final `(fwd, bwd, UB)` to model build and propagator
 
-The warm-start heuristic runs in parallel with these phases and provides the
-initial upper bound used by elimination.
+An async ng/DSSR worker can continue tightening during branch-and-bound.
 
 ## Demand-Reachability
 
@@ -41,8 +43,16 @@ Main options (from `Model::solve` options map):
 - `ng_initial_size` (default 4)
 - `ng_max_size` (default 12)
 - `ng_dssr_iters` (default 6)
-- `ng_label_budget` (default 50)
 - `ng_simd` (default true)
+- `preproc_adaptive` (default true)
+- `preproc_fast_restarts` (default 12)
+- `preproc_fast_budget_ms` (default 30)
+- `preproc_second_ws_large_n` (default 60)
+- `preproc_second_ws_min_elim` (default 0.05)
+- `preproc_second_ws_min_elim_large` (default 0.02)
+- `preproc_second_ws_budget_ms_min` (default 20)
+- `preproc_second_ws_budget_ms_max` (default 400)
+- `preproc_second_ws_budget_scale` (default 8)
 
 ## Edge Elimination
 

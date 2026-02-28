@@ -21,7 +21,6 @@ struct DssrOptions {
     int32_t initial_ng_size = 4;
     int32_t max_ng_size = 12;
     int32_t dssr_iterations = 6;
-    int32_t max_labels_per_node = 50;
     bool enable_simd = true;
 };
 
@@ -225,17 +224,15 @@ inline LabelingRun run_labeling(const Problem& prob,
                                 std::span<const double> edge_costs,
                                 std::span<const double> profits,
                                 const std::vector<uint64_t>& ng_masks,
-                                int32_t max_labels_per_node,
                                 bool enable_simd) {
     const int32_t n = prob.num_nodes();
     const double Q = prob.capacity();
-    constexpr double inf = std::numeric_limits<double>::infinity();
     const int32_t words = bitmap_words(n);
     const auto& graph = prob.graph();
 
     LabelingRun run;
     run.nodes.resize(n);
-    run.best_cost.assign(n, inf);
+    run.best_cost.assign(n, std::numeric_limits<double>::infinity());
     run.best_slot.assign(n, -1);
     run.root = root;
     run.words = words;
@@ -305,23 +302,6 @@ inline LabelingRun run_labeling(const Problem& prob,
                         dst_store.active[idx] = 0;
                         dst_store.active_count--;
                     }
-                }
-            }
-
-            if (dst_store.active_count >= max_labels_per_node) {
-                int32_t worst_idx = -1;
-                double worst_cost = -inf;
-                for (int32_t idx = 0; idx < static_cast<int32_t>(dst_store.cost.size()); ++idx) {
-                    if (!dst_store.active[idx]) continue;
-                    if (dst_store.cost[idx] > worst_cost) {
-                        worst_cost = dst_store.cost[idx];
-                        worst_idx = idx;
-                    }
-                }
-                if (worst_idx >= 0 && new_cost >= worst_cost - kTol) continue;
-                if (worst_idx >= 0 && dst_store.active[worst_idx]) {
-                    dst_store.active[worst_idx] = 0;
-                    dst_store.active_count--;
                 }
             }
 
@@ -449,7 +429,6 @@ inline DssrBoundsResult compute_bounds(const Problem& prob,
     const int32_t init_ng = std::max<int32_t>(1, std::min(opts.initial_ng_size, opts.max_ng_size));
     const int32_t max_ng = std::max<int32_t>(init_ng, opts.max_ng_size);
     const int32_t max_iter = std::max<int32_t>(1, opts.dssr_iterations);
-    const int32_t max_labels = std::max<int32_t>(1, opts.max_labels_per_node);
 
     std::vector<uint64_t> ng_masks;
     detail::initialize_ng_masks(ng_masks, n, words, init_ng, nearest);
@@ -461,14 +440,14 @@ inline DssrBoundsResult compute_bounds(const Problem& prob,
 
     for (int32_t it = 0; it < max_iter; ++it) {
         auto fwd_run = detail::run_labeling(
-            prob, source, edge_costs, profits, ng_masks, max_labels, opts.enable_simd);
+            prob, source, edge_costs, profits, ng_masks, opts.enable_simd);
         result.fwd = fwd_run.best_cost;
 
         if (source == target) {
             result.bwd = result.fwd;
         } else {
             auto bwd_run = detail::run_labeling(
-                prob, target, edge_costs, profits, ng_masks, max_labels, opts.enable_simd);
+                prob, target, edge_costs, profits, ng_masks, opts.enable_simd);
             result.bwd = bwd_run.best_cost;
             if (fwd_run.best_slot[target] >= 0) {
                 auto path = detail::reconstruct_best_path(fwd_run, target);
@@ -506,7 +485,7 @@ inline DssrBoundsResult compute_bounds(const Problem& prob,
 
     if (result.fwd.empty()) {
         auto fwd_run = detail::run_labeling(
-            prob, source, edge_costs, profits, ng_masks, max_labels, opts.enable_simd);
+            prob, source, edge_costs, profits, ng_masks, opts.enable_simd);
         result.fwd = std::move(fwd_run.best_cost);
     }
     if (result.bwd.empty()) {
@@ -514,7 +493,7 @@ inline DssrBoundsResult compute_bounds(const Problem& prob,
             result.bwd = result.fwd;
         } else {
             auto bwd_run = detail::run_labeling(
-                prob, target, edge_costs, profits, ng_masks, max_labels, opts.enable_simd);
+                prob, target, edge_costs, profits, ng_masks, opts.enable_simd);
             result.bwd = std::move(bwd_run.best_cost);
         }
     }

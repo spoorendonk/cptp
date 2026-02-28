@@ -22,7 +22,6 @@ TEST_CASE("ng DSSR with ng_size=1 matches 2-cycle labeling baseline",
     opts.initial_ng_size = 1;
     opts.max_ng_size = 1;
     opts.dssr_iterations = 1;
-    opts.max_labels_per_node = 50;
 
     auto bounds = rcspp::preprocess::ng::compute_bounds(
         prob, prob.source(), prob.target(), opts);

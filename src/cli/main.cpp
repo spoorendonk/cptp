@@ -18,7 +18,7 @@ static void print_usage(const char* prog) {
               << "  --disable_heuristics true  Disable warm-start and HiGHS MIP heuristics\n"
               << "\nSolver options:\n"
               << "  --rc_fixing <strategy> Lagrangian reduced-cost fixing strategy:\n"
-              << "                         off | root_only | on_ub_improvement | periodic | adaptive (default)\n"
+              << "                         off (default) | root_only | on_ub_improvement | periodic | adaptive\n"
               << "  --rc_fixing_interval N Interval for periodic strategy (default 100)\n"
               << "  --rc_fixing_to_one true  Enable fix-to-1 for node variables (expensive)\n"
               << "  --parallel_mode <mode> Parallel behavior mode:\n"

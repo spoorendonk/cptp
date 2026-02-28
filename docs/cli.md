@@ -90,8 +90,16 @@ Related existing knobs in the same area:
 - `ng_initial_size` (default `4`)
 - `ng_max_size` (default `12`)
 - `ng_dssr_iters` (default `6`)
-- `ng_label_budget` (default `50`)
 - `ng_simd` (default `true`)
+- `preproc_adaptive` (default `true`)
+- `preproc_fast_restarts` (default `12`)
+- `preproc_fast_budget_ms` (default `30`)
+- `preproc_second_ws_large_n` (default `60`)
+- `preproc_second_ws_min_elim` (default `0.05`)
+- `preproc_second_ws_min_elim_large` (default `0.02`)
+- `preproc_second_ws_budget_ms_min` (default `20`)
+- `preproc_second_ws_budget_ms_max` (default `400`)
+- `preproc_second_ws_budget_scale` (default `8`)
 
 Note:
 - Edge elimination requires a finite incumbent upper bound plus labeling bounds; if no UB is available yet, elimination is skipped.
@@ -102,7 +110,7 @@ Use when tightening domains from LP reduced costs during propagation.
 
 | Option | Default | Values | Effect |
 |---|---:|---|---|
-| `rc_fixing` | `adaptive` | `off/root_only/on_ub_improvement/periodic/adaptive` | Selects reduced-cost fixing trigger policy. |
+| `rc_fixing` | `off` | `off/root_only/on_ub_improvement/periodic/adaptive` | Selects reduced-cost fixing trigger policy. |
 | `rc_fixing_interval` | `100` | integer (`>=1` recommended) | Period for `periodic` mode. |
 | `rc_fixing_to_one` | `false` | `true/false` | Also tries fix-to-1 on node variables (more expensive). |
 
@@ -167,7 +175,7 @@ This is intentional for now because callback/cut plumbing assumes stable origina
 --parallel_mode opportunistic \
 --all_pairs_propagation true \
 --edge_elimination true --edge_elimination_nodes true \
---ng_initial_size 4 --ng_max_size 16 --ng_dssr_iters 8 --ng_label_budget 100 --dssr_background_updates true
+--ng_initial_size 4 --ng_max_size 16 --ng_dssr_iters 8 --dssr_background_updates true
 ```
 
 ### C2. Easy-instance guarded async DSSR profile

@@ -213,7 +213,7 @@ SPPRCLIB instances).
 
 | Flag | Default | Description |
 |---|---|---|
-| `--rc_fixing <strategy>` | `adaptive` | Lagrangian RC fixing: `off`, `root_only`, `on_ub_improvement`, `periodic`, `adaptive` |
+| `--rc_fixing <strategy>` | `off` | Lagrangian RC fixing: `off`, `root_only`, `on_ub_improvement`, `periodic`, `adaptive` |
 | `--rc_fixing_interval N` | 100 | Interval for `periodic` strategy |
 | `--rc_fixing_to_one true` | false | Enable Trigger D (fix nodes to 1) |
 | `--all_pairs_propagation true` | false | Use all-pairs labeling for stronger Trigger B |
@@ -225,21 +225,39 @@ SPPRCLIB instances).
 | `--ng_initial_size N` | 4 | Initial ng neighborhood size |
 | `--ng_max_size N` | 12 | Maximum ng neighborhood size |
 | `--ng_dssr_iters N` | 6 | DSSR iterations per labeling run |
-| `--ng_label_budget N` | 50 | Max active labels per node in ng labeling |
 | `--ng_simd true` | true | Enable AVX2 prefilter path for dominance candidate scans |
+| `--preproc_adaptive true` | true | Enable adaptive two-stage warm-start before HiGHS |
+| `--preproc_fast_restarts N` | 12 | Restart count for fast Stage-1 warm-start |
+| `--preproc_fast_budget_ms T` | 30 | Time budget for fast Stage-1 warm-start (non-deterministic mode) |
+| `--preproc_second_ws_large_n N` | 60 | Switch threshold regime for large instances (`preproc_second_ws_min_elim_large`) |
+| `--preproc_second_ws_min_elim R` | 0.05 | Minimum elimination ratio to trigger second warm-start on small instances |
+| `--preproc_second_ws_min_elim_large R` | 0.02 | Minimum elimination ratio to trigger second warm-start on large instances |
+| `--preproc_second_ws_budget_ms_min T` | 20 | Minimum time budget for second warm-start (non-deterministic mode) |
+| `--preproc_second_ws_budget_ms_max T` | 400 | Maximum time budget for second warm-start (non-deterministic mode) |
+| `--preproc_second_ws_budget_scale S` | 8 | Scale factor in second warm-start budget formula `min + S * n * elim_ratio` |
 
 ## Preprocessing Pipeline
 
-The propagator reuses labeling bounds computed in `Model::solve()` during the
-parallel preprocessing phase:
+The propagator reuses bounds computed in the staged startup flow in
+`Model::solve()`:
 
 ```
-tbb::task_group
-├─ ng::compute_bounds(problem, source, target, opts)  → fwd_bounds, bwd_bounds
-└─ build_initial_solution(problem, budget)            → initial solution
+Stage 1 (always, parallel)
+├─ forward_labeling(source)  // 2-cycle
+├─ backward_labeling(target) // 2-cycle (or copy fwd in tours)
+└─ fast warm-start on Stage-1 bounds
+   └─ yields fast UB used to evaluate elimination potential
+
+Stage 2 (parallel, adaptive)
+├─ second warm-start on Stage-1 bounds + UB (optional)
+├─ all-pairs 2-cycle labeling (optional: --all_pairs_propagation)
+└─ s-t ng/DSSR refinement (optional: ng size/iters > 1)
+
+Finalize
+└─ choose one coherent bound snapshot (prefer refined ng, else all-pairs rows, else Stage-1)
 ```
 
-These bounds serve double duty:
+These final bounds serve double duty:
 1. **Static edge elimination** in `build_formulation()` — fix variables before solve
 2. **Dynamic propagation** during solve — fix variables as UB tightens and edges get fixed
 

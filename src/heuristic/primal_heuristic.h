@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -17,6 +18,7 @@
 #include <tbb/task_group.h>
 
 #include "core/problem.h"
+#include "preprocess/edge_elimination.h"
 #include "util/work_unit_budget.h"
 
 namespace rcspp::heuristic {
@@ -463,11 +465,38 @@ inline ReducedGraph reduce_neighborhood(const Problem& prob,
 inline HeuristicResult build_initial_solution(const Problem& prob,
                                               int num_restarts = 50,
                                               double time_budget_ms = 0.0,
-                                              const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr) {
+                                              const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr,
+                                              std::span<const double> fwd_bounds = {},
+                                              std::span<const double> bwd_bounds = {},
+                                              double correction = 0.0,
+                                              double upper_bound = std::numeric_limits<double>::infinity()) {
     const int32_t n = prob.num_nodes();
+    const int32_t m = prob.num_edges();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
     const double Q = prob.capacity();
+
+    std::vector<bool> edge_active;
+    if (!fwd_bounds.empty() && !bwd_bounds.empty()
+        && fwd_bounds.size() == static_cast<size_t>(n)
+        && bwd_bounds.size() == static_cast<size_t>(n)
+        && std::isfinite(upper_bound)) {
+        std::vector<double> fwd_vec(fwd_bounds.begin(), fwd_bounds.end());
+        std::vector<double> bwd_vec(bwd_bounds.begin(), bwd_bounds.end());
+        auto eliminated = preprocess::edge_elimination(
+            prob, fwd_vec, bwd_vec, upper_bound, correction);
+        edge_active.assign(m, true);
+        int32_t inactive = 0;
+        for (int32_t e = 0; e < m; ++e) {
+            if (eliminated[e]) {
+                edge_active[e] = false;
+                inactive++;
+            }
+        }
+        if (inactive == 0) {
+            edge_active.clear();
+        }
+    }
 
     // Build candidate list (exclude source and target)
     std::vector<int32_t> customers;
@@ -503,8 +532,8 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
     {
         auto order = customers;
         std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
-            return detail::edge_cost(prob, source, a)
-                 < detail::edge_cost(prob, source, b);
+            return detail::edge_cost(prob, source, a, edge_active)
+                 < detail::edge_cost(prob, source, b, edge_active);
         });
         fixed_orders.push_back(std::move(order));
     }
@@ -533,7 +562,8 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
                     order = customers;
                     std::shuffle(order.begin(), order.end(), rng);
                 }
-                auto [tour, obj] = detail::single_restart(prob, customers, order);
+                auto [tour, obj] = detail::single_restart(
+                    prob, customers, order, edge_active);
                 if (obj < best_obj) {
                     std::lock_guard lock(best_mtx);
                     if (obj < best_obj) {
@@ -582,7 +612,7 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
 
         tbb::parallel_for(0, total_restarts, [&](int i) {
             auto [tour, obj] = detail::single_restart(
-                prob, customers, fixed_orders[i]);
+                prob, customers, fixed_orders[i], edge_active);
             results[i] = {std::move(tour), obj};
         });
 
@@ -603,8 +633,14 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
 inline HeuristicResult build_warm_start(const Problem& prob,
                                         int num_restarts = 50,
                                         double time_budget_ms = 0.0,
-                                        const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr) {
-    return build_initial_solution(prob, num_restarts, time_budget_ms, work_budget);
+                                        const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr,
+                                        std::span<const double> fwd_bounds = {},
+                                        std::span<const double> bwd_bounds = {},
+                                        double correction = 0.0,
+                                        double upper_bound = std::numeric_limits<double>::infinity()) {
+    return build_initial_solution(
+        prob, num_restarts, time_budget_ms, work_budget,
+        fwd_bounds, bwd_bounds, correction, upper_bound);
 }
 
 /// LP-guided primal heuristic: builds reduced graphs from LP relaxation

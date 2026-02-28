@@ -705,3 +705,52 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
         }
     }
 }
+
+TEST_CASE("Model: deterministic parallel settings preserve objective",
+          "[model][parallel]") {
+    auto setup_path_model = [](rcspp::Model& model) {
+        std::vector<rcspp::Edge> edges = {
+            {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+        };
+        std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+        model.set_graph(4, edges, costs);
+        model.set_source(0);
+        model.set_target(3);
+        std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+        std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+        model.set_profits(profits);
+        model.add_capacity_resource(demands, 7.0);
+    };
+
+    rcspp::Model base_model;
+    setup_path_model(base_model);
+    auto base_opts = quiet;
+    base_opts.push_back({"parallel_mode", "deterministic"});
+    base_opts.push_back({"dssr_background_updates", "false"});
+    auto base = base_model.solve(base_opts);
+    REQUIRE(base.has_solution());
+
+    rcspp::Model staged_model;
+    setup_path_model(staged_model);
+    auto staged_opts = quiet;
+    staged_opts.push_back({"parallel_mode", "deterministic"});
+    staged_opts.push_back({"dssr_background_updates", "false"});
+    staged_opts.push_back({"deterministic_work_units", "64"});
+    staged_opts.push_back({"heuristic_deterministic_restarts", "8"});
+    staged_opts.push_back({"ng_initial_size", "1"});
+    staged_opts.push_back({"ng_max_size", "4"});
+    staged_opts.push_back({"ng_dssr_iters", "2"});
+    staged_opts.push_back({"preproc_adaptive", "true"});
+    staged_opts.push_back({"preproc_fast_restarts", "4"});
+    staged_opts.push_back({"preproc_fast_budget_ms", "5"});
+    staged_opts.push_back({"preproc_second_ws_large_n", "4"});
+    staged_opts.push_back({"preproc_second_ws_min_elim", "0.0"});
+    staged_opts.push_back({"preproc_second_ws_min_elim_large", "0.0"});
+    staged_opts.push_back({"preproc_second_ws_budget_ms_min", "5"});
+    staged_opts.push_back({"preproc_second_ws_budget_ms_max", "10"});
+    staged_opts.push_back({"preproc_second_ws_budget_scale", "1.0"});
+    staged_opts.push_back({"ng_label_budget", "5"});  // deprecated no-op
+    auto staged = staged_model.solve(staged_opts);
+    REQUIRE(staged.has_solution());
+    REQUIRE_THAT(staged.objective, WithinAbs(base.objective, 1e-6));
+}
