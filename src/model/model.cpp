@@ -669,21 +669,17 @@ SolveResult Model::solve(const SolverOptions& options) {
         bridge.set_all_pairs_bounds(std::move(all_pairs));
     }
 
-    // Add separators.
-    // NOTE: SEC is path-safe. Other families below are currently validated for
-    // tour mode only; keep them disabled for s-t path to avoid invalid cuts.
+    // Add separators (same default families for tour and s-t path).
     if (enable_sec)
         bridge.add_separator(std::make_unique<sep::SECSeparator>());
-    if (problem_.is_tour()) {
-        if (enable_rci)
-            bridge.add_separator(std::make_unique<sep::RCISeparator>());
-        if (enable_multistar)
-            bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
-        if (enable_rglm)
-            bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
-        if (enable_comb)
-            bridge.add_separator(std::make_unique<sep::CombSeparator>());
-    }
+    if (enable_rci)
+        bridge.add_separator(std::make_unique<sep::RCISeparator>());
+    if (enable_multistar)
+        bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
+    if (enable_rglm)
+        bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
+    if (enable_comb)
+        bridge.add_separator(std::make_unique<sep::CombSeparator>());
     if (all_pairs_propagation && enable_spi)
         bridge.add_separator(std::make_unique<sep::SPISeparator>());
 

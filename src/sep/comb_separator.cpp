@@ -13,6 +13,8 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
     const int32_t n = prob.num_nodes();
     const double tol = ctx.tol;
     const int32_t depot = prob.source();
+    const bool is_tour = prob.is_tour();
+    const int32_t path_target = prob.target();
 
     std::vector<Cut> cuts;
 
@@ -23,6 +25,11 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
         std::vector<int32_t> queue;
         queue.push_back(depot);
         in_handle[depot] = true;
+        if (!is_tour && path_target != depot) {
+            // In s-t mode, treat the split depot terminals as one root.
+            queue.push_back(path_target);
+            in_handle[path_target] = true;
+        }
 
         for (size_t qi = 0; qi < queue.size(); ++qi) {
             int32_t u = queue[qi];
@@ -66,6 +73,7 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
             } else {
                 continue;
             }
+            if (!is_tour && out == path_target) continue;
 
             teeth.push_back({ins, out, e, xval - ctx.y_values[out]});
         }
@@ -82,11 +90,17 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
         std::vector<bool> used_outside(n, false);
         std::vector<Tooth> selected;
 
+        auto inside_key = [&](int32_t node) {
+            if (!is_tour && node == path_target) return depot;
+            return node;
+        };
+
         for (const auto& tooth : teeth) {
-            if (used_inside[tooth.inside] || used_outside[tooth.outside])
+            const int32_t in_key = inside_key(tooth.inside);
+            if (used_inside[in_key] || used_outside[tooth.outside])
                 continue;
             selected.push_back(tooth);
-            used_inside[tooth.inside] = true;
+            used_inside[in_key] = true;
             used_outside[tooth.outside] = true;
         }
 
@@ -102,6 +116,11 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
         for (auto e : graph.edges()) {
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);
+            if (!is_tour &&
+                ((u == depot && v == path_target) ||
+                 (u == path_target && v == depot))) {
+                continue;
+            }
             if (in_handle[u] && in_handle[v]) {
                 lhs += ctx.x_values[e];
             }
@@ -112,6 +131,7 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
         }
 
         for (int32_t i = 0; i < n; ++i) {
+            if (!is_tour && i == path_target) continue;
             if (in_handle[i]) lhs -= ctx.y_values[i];
         }
 
@@ -131,6 +151,11 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
         for (auto e : graph.edges()) {
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);
+            if (!is_tour &&
+                ((u == depot && v == path_target) ||
+                 (u == path_target && v == depot))) {
+                continue;
+            }
             if (in_handle[u] && in_handle[v]) {
                 cut.indices.push_back(ctx.x_offset + e);
                 cut.values.push_back(1.0);
@@ -145,6 +170,7 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
 
         // y_j for j in H: coeff -1.
         for (int32_t i = 0; i < n; ++i) {
+            if (!is_tour && i == path_target) continue;
             if (in_handle[i]) {
                 cut.indices.push_back(ctx.y_offset + i);
                 cut.values.push_back(-1.0);

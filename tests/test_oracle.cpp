@@ -185,7 +185,7 @@ TEST_CASE("SeparationOracle: path mode works", "[oracle][path]") {
 
     rcspp::sep::SeparationOracle oracle(prob);
     oracle.add_default_separators();
-    REQUIRE(oracle.separators().size() == 1);  // SEC only in path mode
+    REQUIRE(oracle.separators().size() == 4);
 
     // Disconnected solution — node 2 not connected to source
     std::vector<double> x_values(m, 0.0);

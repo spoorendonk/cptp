@@ -66,7 +66,9 @@ if(RCSPP_BUILD_TESTS)
     add_executable(rcspp_tests
         tests/test_model.cpp
         tests/test_optimal.cpp
+        tests/test_path_cut_validity.cpp
         tests/test_propagator.cpp
+        tests/test_spi.cpp
         tests/test_thread_local.cpp
         tests/test_ubs_cutoff.cpp
     )
