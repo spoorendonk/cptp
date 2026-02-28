@@ -104,6 +104,21 @@ Parallel construction + local search heuristic using Intel TBB. See [primal-heur
 
 **Parallelism**: By default (deterministic mode), all restarts are pre-built with deterministic seeds and executed via `tbb::parallel_for`, giving identical results across runs. With `--deterministic false`, the solver uses time-based workers with random seeds for potentially better bounds on fast hardware.
 
+## Hyperplane Branching
+
+Optional hyperplane candidate branching over `y` variables is available via
+`--branch_hyper` (`off/pairs/clusters/demand/cardinality/all`) with
+strong-branch tuning parameters `branch_hyper_sb_*`.
+
+See [hyperplane-branching.md](hyperplane-branching.md) for full details.
+
+## Solve Concurrency
+
+In-process solve admission can be controlled with
+`--max_concurrent_solves`, independent from HiGHS thread count.
+
+See [solve-concurrency.md](solve-concurrency.md) for full details.
+
 ## References
 
 - Jepsen, M., Petersen, B., Spoorendonk, S., & Pisinger, D. (2014). A branch-and-cut algorithm for the capacitated profitable tour problem. *Discrete Optimization*, 14, 78-96.

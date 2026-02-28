@@ -71,15 +71,16 @@ This allows stronger pruning without restarting the solve.
 
 ## Testing
 
-Key coverage:
+Relevant coverage:
 
-- parity test (`ng_size=1`) against legacy 2-cycle labeling
-- shared-bounds monotonic tightening behavior
-- elementary s-t path detection from ng labeling
+- labeling and propagation regression tests in `tests/test_propagator.cpp`
+- preprocessing/propagation behavior exercised through `Model::solve()` integration tests
+  in `tests/test_model.cpp` and `tests/test_propagator.cpp`
+- end-to-end solver validation in Python tests (`tests/python/test_solver.py`)
 
 Run:
 
 ```bash
-./build/rcspp_algo_tests [ng]
-./build/rcspp_algo_tests [shared_bounds]
+./build/rcspp_tests
+pytest tests/python/test_solver.py
 ```

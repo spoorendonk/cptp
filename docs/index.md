@@ -26,5 +26,7 @@ Continue with:
 - [Cut Separation](separation.md)
 - [Preprocessing](preprocessing.md)
 - [Domain Propagator](domain-propagator.md)
+- [Hyperplane Branching](hyperplane-branching.md)
+- [Solve Concurrency](solve-concurrency.md)
 - [Primal Heuristic](primal-heuristic.md)
 - [ng/DSSR Bounds](ng-dssr-labelling.md)
