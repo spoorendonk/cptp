@@ -411,7 +411,7 @@ LP relaxation solution.
 #include "sep/separation_oracle.h"
 
 rcspp::sep::SeparationOracle oracle(prob);
-oracle.add_default_separators();  // Tour: SEC+RCI+Multistar+Comb, Path: SEC
+oracle.add_default_separators();  // SEC+RCI+Multistar+Comb
 
 // In your solver's cut callback:
 auto cuts = oracle.separate(x_values, y_values, x_offset, y_offset);
@@ -443,8 +443,7 @@ constraints. Used as a lazy-constraint callback on integer-feasible solutions.
 
 Default set via `add_default_separators()`:
 
-- **Tour** (`source == target`): SEC, RCI, Multistar, Comb
-- **Path** (`source != target`): SEC
+- SEC, RCI, Multistar, Comb (same defaults for tour and s-t path)
 
 Individual separators:
 ```cpp
@@ -477,13 +476,14 @@ tags).
 |---|---|
 | SeparationOracle | Tour/path cuts, feasibility, offsets, limits, no-separator edge case, cut struct validation |
 | SEC separator | Violated/feasible (tour + path), target-in-S rhs handling, multi-disconnected |
-| RCI separator | Basic + high-demand fractional solution |
-| Multistar | Basic execution |
-| Comb | Basic execution |
-| RGLM | Basic execution |
+| RCI separator | Basic + high-demand fractional solution + exhaustive path-validity checks |
+| Multistar | Basic execution + exhaustive path-validity checks |
+| Comb | Basic execution + path-mode validity checks when cuts are generated |
+| RGLM | Basic execution + exhaustive path-validity checks |
 | SPI | Pairs, lifting, loose UB, missing data, path, grow, shrink |
 
-Direct separator tests are currently outside the default `rcspp_tests` target.
+Legacy separator micro-tests in `tests/test_separators.cpp` are outside the
+default `rcspp_tests` target; path-validity and SPI tests run in `rcspp_tests`.
 
 ## Cut Management (HiGHS)
 
@@ -501,8 +501,8 @@ and wraps the same separation pipeline for HiGHS's user separator callback.
 6. For each separator: sort cuts by violation (descending), keep top-k
 
 Current separator registration in `Model::solve()`:
-- Always: SEC
-- Tour mode only: RCI, Multistar, optional RGLM, Comb
+- Always: SEC, RCI, Multistar, Comb
+- Optional: RGLM (`enable_rglm=true`)
 - Optional when `all_pairs_propagation=true`: SPI
 
 ### Flow

@@ -14,19 +14,26 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
     const double tol = ctx.tol;
     const double Q = prob.capacity();
     const int32_t depot = prob.source();
+    const bool is_tour = prob.is_tour();
+    const int32_t path_target = prob.target();
 
     if (Q <= 0 || Q >= 1e17) return {};
 
     // Precompute total demand (constant across all targets).
     double d_total = 0.0;
     for (int32_t i = 0; i < n; ++i) {
-        if (i != depot) d_total += prob.demand(i);
+        if (i != depot && (is_tour || i != path_target)) {
+            d_total += prob.demand(i);
+        }
     }
 
     std::vector<Cut> all_cuts;
 
     for (int32_t target = 0; target < n; ++target) {
-        if (target == depot || ctx.y_values[target] <= tol) continue;
+        if (target == depot || (!is_tour && target == path_target) ||
+            ctx.y_values[target] <= tol) {
+            continue;
+        }
 
         auto [flow, reachable] = ctx.flow_tree->min_cut(target);
 
@@ -34,7 +41,9 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
         // Compute d_S = sum of demands in S.
         double d_S = 0.0;
         for (int32_t i = 0; i < n; ++i) {
-            if (!reachable[i]) d_S += prob.demand(i);
+            if (!reachable[i] && (is_tour || i != path_target)) {
+                d_S += prob.demand(i);
+            }
         }
 
         // alpha = d_S + 2*(d_total - d_S) = 2*d_total - d_S
@@ -52,8 +61,8 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
         for (auto e : graph.edges()) {
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);
-            bool u_in_S = !reachable[u];
-            bool v_in_S = !reachable[v];
+            bool u_in_S = !reachable[u] && (is_tour || u != path_target);
+            bool v_in_S = !reachable[v] && (is_tour || v != path_target);
             if (u_in_S == v_in_S) continue;
 
             int32_t outside = u_in_S ? v : u;
@@ -67,7 +76,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
         double d_NmS = d_total - d_S;
         double beta_y_part = 0.0;
         for (int32_t i = 0; i < n; ++i) {
-            if (!reachable[i]) {
+            if (!reachable[i] && (is_tour || i != path_target)) {
                 beta_y_part += prob.demand(i) * (1.0 - ctx.y_values[i]);
             }
         }
@@ -86,8 +95,8 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
         for (auto e : graph.edges()) {
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);
-            bool u_in_S = !reachable[u];
-            bool v_in_S = !reachable[v];
+            bool u_in_S = !reachable[u] && (is_tour || u != path_target);
+            bool v_in_S = !reachable[v] && (is_tour || v != path_target);
             if (u_in_S == v_in_S) continue;
 
             int32_t outside = u_in_S ? v : u;
@@ -99,7 +108,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
         }
 
         for (int32_t i = 0; i < n; ++i) {
-            if (reachable[i]) continue;
+            if (reachable[i] || (!is_tour && i == path_target)) continue;
             double d_i = prob.demand(i);
             if (d_i <= 0) continue;
 

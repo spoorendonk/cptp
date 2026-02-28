@@ -46,6 +46,8 @@ RCICandidate make_candidate(const gomory_hu_tree& tree, int32_t cut_node,
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
     const int32_t depot = prob.source();
+    const bool is_tour = prob.is_tour();
+    const int32_t path_target = prob.target();
 
     bool depot_on_source = !tree.on_root_side(cut_node, depot);
 
@@ -60,7 +62,7 @@ RCICandidate make_candidate(const gomory_hu_tree& tree, int32_t cut_node,
         bool on_source_side = !tree.on_root_side(cut_node, i);
         bool in_S = (depot_on_source) ? !on_source_side : on_source_side;
 
-        if (in_S && i != depot) {
+        if (in_S && i != depot && (is_tour || i != path_target)) {
             c.in_S[i] = true;
             c.d_S += prob.demand(i);
             c.served_demand += prob.demand(i) * ctx.y_values[i];
@@ -130,6 +132,8 @@ double add_drop_search(RCICandidate& c, const Problem& prob,
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
     const int32_t depot = prob.source();
+    const bool is_tour = prob.is_tour();
+    const int32_t path_target = prob.target();
 
     double best_viol = compute_violation(c, Q, tol);
     bool improved = true;
@@ -145,7 +149,7 @@ double add_drop_search(RCICandidate& c, const Problem& prob,
             double best_drop_viol = best_viol;
 
             for (int32_t i = 0; i < n; ++i) {
-                if (!c.in_S[i] || i == depot) continue;
+                if (!c.in_S[i] || i == depot || (!is_tour && i == path_target)) continue;
 
                 remove_node(c, i, prob, ctx);
                 double v = compute_violation(c, Q, tol);
@@ -172,7 +176,7 @@ double add_drop_search(RCICandidate& c, const Problem& prob,
             double best_add_viol = best_viol;
 
             for (int32_t i = 0; i < n; ++i) {
-                if (c.in_S[i] || i == depot) continue;
+                if (c.in_S[i] || i == depot || (!is_tour && i == path_target)) continue;
 
                 bool adjacent = false;
                 for (int32_t e : graph.incident_edges(i)) {
@@ -289,6 +293,8 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     const double tol = ctx.tol;
     const double Q = prob.capacity();
     const int32_t depot = prob.source();
+    const bool is_tour = prob.is_tour();
+    const int32_t path_target = prob.target();
 
     if (Q <= 0 || !ctx.flow_tree) return {};
 
@@ -299,7 +305,10 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
 
     std::vector<gomory_hu_tree::CutRef> candidates;
     for (int32_t target = 0; target < n; ++target) {
-        if (target == depot || ctx.y_values[target] <= tol) continue;
+        if (target == depot || (!is_tour && target == path_target) ||
+            ctx.y_values[target] <= tol) {
+            continue;
+        }
 
         auto path_cuts = tree.all_cuts_on_path(target);
         for (auto& cr : path_cuts) {
