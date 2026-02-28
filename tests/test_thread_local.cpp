@@ -11,6 +11,7 @@
 #include "mip/HighsUserPropagator.h"
 #include "core/io.h"
 #include "model/model.h"
+#include "model/solve_concurrency_guard.h"
 
 using Catch::Matchers::WithinAbs;
 
@@ -266,6 +267,24 @@ static const rcspp::SolverOptions quiet = {
     {"output_flag", "false"},
 };
 
+template <typename Predicate>
+static bool wait_for_condition(Predicate&& predicate,
+                               std::chrono::milliseconds timeout =
+                                   std::chrono::milliseconds(5000)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (!predicate()) {
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        std::this_thread::yield();
+    }
+    return true;
+}
+
+static bool wait_for_flag(const std::atomic<bool>& flag,
+                          std::chrono::milliseconds timeout = std::chrono::milliseconds(5000)) {
+    return wait_for_condition(
+        [&] { return flag.load(std::memory_order_acquire); }, timeout);
+}
+
 TEST_CASE("Concurrent Model::solve on different threads",
           "[thread_local][integration][slow]") {
     // Two threads solve the same instance concurrently.
@@ -358,8 +377,10 @@ TEST_CASE("Concurrent Model::solve respects max_concurrent_solves=1",
 
 TEST_CASE("Pending strict solve cap blocks later loose arrivals",
           "[thread_local][integration][slow][options]") {
-    using namespace std::chrono_literals;
+    using Guard = rcspp::model_detail::SolveConcurrencyGuard;
 
+    std::atomic<bool> a_started{false};
+    std::atomic<bool> b_started{false};
     std::atomic<bool> a_done{false};
     std::atomic<bool> ok_a{false};
     std::atomic<bool> ok_b{false};
@@ -375,13 +396,14 @@ TEST_CASE("Pending strict solve cap blocks later loose arrivals",
         opts.push_back({"time_limit", "2"});
         opts.push_back({"disable_heuristics", "true"});
         opts.push_back({"max_concurrent_solves", "2"});
+        a_started = true;
         auto result = model.solve(opts);
         ok_a = result.has_solution();
         a_done = true;
     });
 
-    // Let A enter solve and acquire the admission slot.
-    std::this_thread::sleep_for(100ms);
+    REQUIRE(wait_for_flag(a_started));
+    REQUIRE(wait_for_condition([&] { return Guard::active_solves_for_testing() == 1; }));
 
     // B: strict cap=1 (should wait while A is active).
     std::thread t_b([&] {
@@ -390,12 +412,16 @@ TEST_CASE("Pending strict solve cap blocks later loose arrivals",
         model.set_problem(std::move(prob));
         auto opts = quiet;
         opts.push_back({"max_concurrent_solves", "1"});
+        b_started = true;
         auto result = model.solve(opts);
         ok_b = result.has_solution() && result.is_optimal();
     });
 
-    // Let B register/pending before C arrives.
-    std::this_thread::sleep_for(100ms);
+    REQUIRE(wait_for_flag(b_started));
+    REQUIRE(wait_for_condition([&] {
+        return Guard::active_solves_for_testing() == 1 &&
+               Guard::current_cap_for_testing() == 1;
+    }));
 
     // C: loose cap=2. Must not bypass pending strict B.
     std::thread t_c([&] {
@@ -423,8 +449,10 @@ TEST_CASE("Pending strict solve cap blocks later loose arrivals",
 
 TEST_CASE("Pending strict solve cap also blocks later uncapped arrivals",
           "[thread_local][integration][slow][options]") {
-    using namespace std::chrono_literals;
+    using Guard = rcspp::model_detail::SolveConcurrencyGuard;
 
+    std::atomic<bool> a_started{false};
+    std::atomic<bool> b_started{false};
     std::atomic<bool> a_done{false};
     std::atomic<bool> ok_a{false};
     std::atomic<bool> ok_b{false};
@@ -440,12 +468,14 @@ TEST_CASE("Pending strict solve cap also blocks later uncapped arrivals",
         opts.push_back({"time_limit", "2"});
         opts.push_back({"disable_heuristics", "true"});
         opts.push_back({"max_concurrent_solves", "2"});
+        a_started = true;
         auto result = model.solve(opts);
         ok_a = result.has_solution();
         a_done = true;
     });
 
-    std::this_thread::sleep_for(100ms);
+    REQUIRE(wait_for_flag(a_started));
+    REQUIRE(wait_for_condition([&] { return Guard::active_solves_for_testing() == 1; }));
 
     // B: strict cap=1 (should wait while A is active).
     std::thread t_b([&] {
@@ -454,11 +484,16 @@ TEST_CASE("Pending strict solve cap also blocks later uncapped arrivals",
         model.set_problem(std::move(prob));
         auto opts = quiet;
         opts.push_back({"max_concurrent_solves", "1"});
+        b_started = true;
         auto result = model.solve(opts);
         ok_b = result.has_solution() && result.is_optimal();
     });
 
-    std::this_thread::sleep_for(100ms);
+    REQUIRE(wait_for_flag(b_started));
+    REQUIRE(wait_for_condition([&] {
+        return Guard::active_solves_for_testing() == 1 &&
+               Guard::current_cap_for_testing() == 1;
+    }));
 
     // C: uncapped caller (0). Must not bypass pending strict B.
     std::thread t_c([&] {

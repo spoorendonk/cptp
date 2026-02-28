@@ -488,6 +488,7 @@ void HiGHSBridge::install_propagator() {
     auto bounds_snapshot = std::make_shared<preprocess::BoundSnapshot>(std::move(initial_snapshot));
     auto shared_bounds = shared_bounds_;
     auto async_ub = async_upper_bound_;
+    auto checkpoint_hook = deterministic_checkpoint_hook_;
 
     // All-pairs bounds for stronger Trigger B (empty if not computed)
     auto ap = std::make_shared<std::vector<double>>(std::move(all_pairs_));
@@ -520,6 +521,8 @@ void HiGHSBridge::install_propagator() {
                            const HighsLpRelaxation& lp) {
             // Skip sub-MIPs: different column space
             if (mipsolver.submip) return;
+
+            if (checkpoint_hook) checkpoint_hook();
 
             if (shared_bounds) {
                 auto snap = shared_bounds->snapshot();
@@ -909,6 +912,9 @@ void HiGHSBridge::install_heuristic_callback() {
     int strategy = heuristic_strategy_;
     int64_t node_interval = std::max<int64_t>(1, heuristic_node_interval_);
     bool async_injection = heuristic_async_injection_;
+    bool deterministic_mode = heuristic_deterministic_mode_;
+    int deterministic_restarts = std::max<int32_t>(1, heuristic_deterministic_restarts_);
+    auto work_budget = work_unit_budget_;
 
     // Rate-limit: run heuristic at most once per N nodes.
     auto last_node_count = std::make_shared<int64_t>(0);
@@ -921,7 +927,8 @@ void HiGHSBridge::install_heuristic_callback() {
     highs_.setCallback(
         [this, cached_x, cached_y, cache_mtx, calls, solutions, budget_ms,
          last_node_count, strategy, async_store, last_async_version,
-         node_interval, async_injection](
+         node_interval, async_injection, deterministic_mode,
+         deterministic_restarts, work_budget](
             int callback_type, const std::string& /*message*/,
             const HighsCallbackOutput* data_out,
             HighsCallbackInput* data_in,
@@ -989,8 +996,19 @@ void HiGHSBridge::install_heuristic_callback() {
 
             (*calls)++;
 
-            auto result = heuristic::lp_guided_heuristic(
-                prob_, x_lp, y_lp, incumbent, budget_ms, strategy);
+            heuristic::HeuristicResult result;
+            if (deterministic_mode) {
+                result = heuristic::lp_guided_heuristic(
+                    prob_, x_lp, y_lp, incumbent,
+                    0.0, strategy,
+                    deterministic_restarts,
+                    static_cast<uint32_t>(current_nodes),
+                    work_budget);
+            } else {
+                result = heuristic::lp_guided_heuristic(
+                    prob_, x_lp, y_lp, incumbent,
+                    budget_ms, strategy, 0, 0u, work_budget);
+            }
 
             if (!result.col_values.empty() &&
                 result.objective < data_out->mip_primal_bound - 1e-6) {

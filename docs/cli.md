@@ -1,39 +1,25 @@
-# rcspp-solve CLI
+# rcspp-solve CLI (Future Reference)
 
-This document tracks RCSPP-specific options intercepted by `Model::solve()`
-and CLI overrides handled in `src/cli/main.cpp`.
+This document tracks the RCSPP-specific tuning options currently intercepted by `Model::solve` and intended for CLI exposure.
 
-All options use `--key value`. Boolean values accept `true|false` (or `1|0`).
+All options use `--key value` form. Boolean values should be passed as `true|false` (or `1|0`).
 
 ## Scope and forwarding
 
-- RCSPP options listed here are intercepted by `rcspp-bac`.
+- RCSPP options listed here are intercepted and handled by `rcspp-bac`.
 - Any other `--key value` pair is forwarded to HiGHS.
-- `presolve` is intercepted and always forced to `off`.
-
-## Invocation and runtime controls
-
-| Option | Default | Values | Effect |
-|---|---:|---|---|
-| `source` | from instance | node id | CLI-only override for source node (`--source`). |
-| `target` | from instance | node id | CLI-only override for target node (`--target`). |
-| `cutoff` | unset | finite double | Sets known UB/prove-only bound (`objective_bound` in HiGHS). |
-| `output_flag` | `true` | `true/false` | Enables/disables solver log forwarding to rcspp logger. |
-| `presolve` | forced off | any | Any user request is ignored; solver runs with `presolve=off`. |
-
-Notes:
-- `--source/--target` are parsed by `main.cpp`, not by `Model::solve()` options.
-- The solver internally sets HiGHS `output_flag=false` and forwards logs through
-  the logger only when `output_flag=true`.
+- `presolve` is a special case: it is intercepted and forced to `off` (details below).
 
 ## 1) Cut-separation policy
+
+Use when you want to enable/disable cut families or tune cut aggressiveness per family.
 
 | Option | Default | Values | Effect |
 |---|---:|---|---|
 | `enable_sec` | `true` | `true/false` | Enable SEC cut generation in main MIP and sub-MIP separation paths. |
-| `enable_rci` | `true` | `true/false` | Enable RCI separator. |
-| `enable_multistar` | `true` | `true/false` | Enable Multistar separator. |
-| `enable_comb` | `true` | `true/false` | Enable Comb separator. |
+| `enable_rci` | `true` | `true/false` | Enable RCI separator (tour mode only). |
+| `enable_multistar` | `true` | `true/false` | Enable Multistar separator (tour mode only). |
+| `enable_comb` | `true` | `true/false` | Enable Comb separator (tour mode only). |
 | `enable_spi` | `true` | `true/false` | Enable SPI separator when `all_pairs_propagation=true`. |
 | `max_cuts_sec` | unset | integer (`>=0`) | Per-round cap for SEC cuts. |
 | `max_cuts_rci` | unset | integer (`>=0`) | Per-round cap for RCI cuts. |
@@ -47,89 +33,121 @@ Notes:
 | `min_violation_comb` | unset | double (`>=0`) | Minimum Comb violation required before adding cut. |
 | `min_violation_rglm` | unset | double (`>=0`) | Minimum RGLM violation required before adding cut. |
 | `min_violation_spi` | unset | double (`>=0`) | Minimum SPI violation required before adding cut. |
-| `enable_rglm` | `false` | `true/false` | Enable RGLM separator. |
-| `separation_interval` | `1` | integer (`>=1` effective) | Run separation every Nth separator callback. |
-| `max_cuts_per_separator` | `3` | integer (`>=0`) | Global per-separator cut cap (`0` means unlimited). |
-| `separation_tol` | `0.1` | nonnegative double | Fractional violation threshold. |
-| `submip_separation` | `true` | `true/false` | Enable SEC separation in sub-MIP root. |
 
 Notes:
-- Per-family caps fall back to `max_cuts_per_separator`.
-- Per-family min-violation thresholds fall back to `0.0`.
-- Even with `enable_sec=false`, SEC feasibility checks still protect incumbent acceptance.
+- If a per-family cap is unset, it falls back to `max_cuts_per_separator`.
+- If a per-family min violation is unset, it falls back to `0.0` for that family.
+- Even with `enable_sec=false`, incumbent feasibility still checks SEC connectivity before accepting solutions.
+- In `s-t` path mode, `RCI/Multistar/Comb/RGLM` are not added (tour-focused families).
+- `SPI` is only active when `all_pairs_propagation=true`.
 
-See also: [Cut Separation](separation.md).
+Related existing knobs:
+- `enable_rglm` (default `false`)
+- `separation_interval` (default `1`)
+- `max_cuts_per_separator` (default `3`)
+- `separation_tol` (default `0.1`)
+- `submip_separation` (default `true`)
 
 ## 2) Heuristics (warm start + in-search)
 
-| Option | Default | Values | Effect |
-|---|---:|---|---|
-| `disable_heuristics` | `false` | `true/false` | Disable warm-start injection and set `mip_heuristic_effort=0`. |
-| `deterministic` | `true` | `true/false` | Deterministic vs opportunistic preprocessing/heuristic behavior. |
-| `heuristic_callback` | `true` | `true/false` | Enable LP-guided callback heuristic. |
-| `heuristic_budget_ms` | `20.0` | positive double | Callback time budget (ms). |
-| `heuristic_strategy` | `0` | `0/1/2/3` | `0=all, 1=LP-threshold, 2=RINS, 3=neighborhood`. |
-| `heuristic_node_interval` | `200` | integer | Callback cadence in B&B nodes (clamped to `>=1`). |
-| `heuristic_async_injection` | `true` | `true/false` | Allow async incumbent injection from background updates. |
-
-See also: [Primal Heuristic](primal-heuristic.md).
-
-## 3) Propagation, ng bounds, and preprocessing
+Use when balancing startup quality, determinism, and heuristic overhead inside B&B.
 
 | Option | Default | Values | Effect |
 |---|---:|---|---|
-| `edge_elimination` | `true` | `true/false` | Enable UB-based edge elimination preprocessing. |
-| `edge_elimination_nodes` | `true` | `true/false` | Also fix node vars when all incident edges are eliminated. |
-| `all_pairs_propagation` | `false` | `true/false` | Enable all-pairs Trigger B propagation (and SPI availability). |
-| `dssr_async` | `true` | `true/false` | Background DSSR bound tightening during B&B. |
-| `ng_initial_size` | `4` | integer | Initial ng size (clamped to `>=1`). |
-| `ng_max_size` | `12` | integer | Max ng size (clamped to `>= ng_initial_size`). |
-| `ng_dssr_iters` | `6` | integer | DSSR iterations (clamped to `>=1`). |
-| `ng_label_budget` | `50` | integer | Max active labels per node (clamped to `>=1`). |
-| `ng_simd` | `true` | `true/false` | Enable AVX2 prefilter path in labeling dominance scans. |
+| `disable_heuristics` | `false` | `true/false` | Disables initial warm-start injection and disables HiGHS built-in MIP heuristics (`mip_heuristic_effort=0`). |
+| `parallel_mode` | `deterministic` | `deterministic/opportunistic` | Controls solver-side parallel behavior policy. `deterministic`: fixed-restart deterministic heuristics/setup. `opportunistic`: randomized/time-budgeted behavior. |
+| `deterministic_work_units` | `0` | integer (`>=0`) | Global non-HiGHS work budget for warm-start, callback heuristics, and async DSSR stages. `0` = uncapped count-only. |
+| `heuristic_deterministic_restarts` | `32` | integer (`>=1`) | Fixed restart count per LP-guided callback invocation in deterministic mode. |
+| `heuristic_node_interval` | `200` | integer (`>=1`) | Run LP-guided heuristic callback every N B&B nodes. |
+| `heuristic_async_injection` | `true` | `true/false` | Allow async incumbent injection from background improvements in callback. |
+
+Related existing knobs:
+- `heuristic_callback` (default `true`)
+- `heuristic_budget_ms` (default `20.0`)
+- `heuristic_strategy` (`0=all, 1=LP-threshold, 2=RINS, 3=neighborhood`)
 
 Notes:
-- Async DSSR worker is only launched when `dssr_async=true` and
-  `all_pairs_propagation=false`.
+- `deterministic_work_units` counts and optionally caps non-HiGHS activity only; HiGHS internal work is still controlled by HiGHS options (`threads`, limits, etc.).
+- In deterministic mode, callback heuristics switch from wall-clock budgets to fixed restart counts.
+- Legacy boolean mode flags `deterministic` and `opportunistic` are removed; use `parallel_mode`.
 
-See also: [Preprocessing](preprocessing.md), [Domain Propagator](domain-propagator.md), [ng/DSSR Bounds](ng-dssr-labelling.md).
+## 3) Propagation, NG bounds, and preprocessing
+
+Use when tuning bound-tightening strength vs overhead.
+
+| Option | Default | Values | Effect |
+|---|---:|---|---|
+| `edge_elimination` | `true` | `true/false` | Enables UB-based edge elimination preprocessing before solve. |
+| `edge_elimination_nodes` | `true` | `true/false` | Also fixes node vars when all incident edges are eliminated. |
+
+Related existing knobs in the same area:
+- `all_pairs_propagation` (default `false`)
+- `dssr_background_updates` (default `false` when `parallel_mode=deterministic`, `true` otherwise)
+- `dssr_background_policy` (default `fixed`): `fixed` runs all planned async stages (subject to caps/budget); `auto` stops background DSSR early when there is no observed search/checkpoint activity or no recent DSSR improvements.
+- `dssr_background_max_epochs` (default `0`): hard cap on async DSSR stages (`0` = uncapped)
+- `dssr_background_auto_min_epochs` (default `4`): minimum async DSSR stages before `auto` early-stop checks
+- `dssr_background_auto_no_progress_limit` (default `6`): `auto` stops after this many non-improving stages
+- `ng_initial_size` (default `4`)
+- `ng_max_size` (default `12`)
+- `ng_dssr_iters` (default `6`)
+- `ng_label_budget` (default `50`)
+- `ng_simd` (default `true`)
+
+Note:
+- Edge elimination requires a finite incumbent upper bound plus labeling bounds; if no UB is available yet, elimination is skipped.
 
 ## 4) Reduced-cost fixing
 
-| Option | Default | Values | Effect |
-|---|---:|---|---|
-| `rc_fixing` | `adaptive` | `off/root_only/on_ub_improvement/periodic/adaptive` | Reduced-cost fixing trigger policy. |
-| `rc_fixing_interval` | `100` | integer | Period for `periodic` mode (use `>=1`). |
-| `rc_fixing_to_one` | `false` | `true/false` | Enable expensive node fix-to-1 pass. |
-
-See also: [Domain Propagator](domain-propagator.md).
-
-## 5) Hyperplane branching
+Use when tightening domains from LP reduced costs during propagation.
 
 | Option | Default | Values | Effect |
 |---|---:|---|---|
-| `branch_hyper` | `off` | `off/pairs/clusters/demand/cardinality/all` | Select hyperplane candidate family. |
-| `branch_hyper_sb_max_depth` | `0` | integer | Depth cap for hyperplane strong-branch probing (clamped to `>=0`). |
-| `branch_hyper_sb_iter_limit` | `100` | integer | LP iteration cap per strong-branch trial (clamped to `>=1`). |
-| `branch_hyper_sb_min_reliable` | `4` | integer | Pseudocost reliability threshold (clamped to `>=1`). |
-| `branch_hyper_sb_max_candidates` | `3` | integer | Max strong-branch candidate count (clamped to `>=1`). |
+| `rc_fixing` | `adaptive` | `off/root_only/on_ub_improvement/periodic/adaptive` | Selects reduced-cost fixing trigger policy. |
+| `rc_fixing_interval` | `100` | integer (`>=1` recommended) | Period for `periodic` mode. |
+| `rc_fixing_to_one` | `false` | `true/false` | Also tries fix-to-1 on node variables (more expensive). |
 
-See also: [Hyperplane Branching](hyperplane-branching.md).
+## 5) Hyperplane branching strong-branch tuning
+
+Use when `branch_hyper != off` and you want to change strong-branch effort.
+
+| Option | Default | Values | Effect |
+|---|---:|---|---|
+| `branch_hyper_sb_max_depth` | `0` | integer (`>=0`) | Depth cap for hyperplane strong-branch probing. |
+| `branch_hyper_sb_iter_limit` | `100` | integer (`>=1`) | LP iteration limit per hyperplane strong-branch trial. |
+| `branch_hyper_sb_min_reliable` | `4` | integer (`>=1`) | Pseudocost reliability threshold before reducing strong branching. |
+| `branch_hyper_sb_max_candidates` | `3` | integer (`>=1`) | Max hyperplane candidates tested with strong branching. |
+
+Related existing knob:
+- `branch_hyper`: `off/pairs/clusters/demand/cardinality/all`
 
 ## 6) Concurrent solve admission
 
+Use when multiple threads/process components call `Model::solve` concurrently in the same process.
+
 | Option | Default | Values | Effect |
 |---|---:|---|---|
-| `max_concurrent_solves` | `0` | integer | In-process concurrent solve cap (`0` means no per-call cap; clamped to `>=0`). |
+| `max_concurrent_solves` | `0` | integer (`>=0`) | Per-call cap for in-process solve admission. `0` means this caller adds no cap. |
 
-See also: [Solve Concurrency](solve-concurrency.md).
+Behavior:
+- A stricter cap requested by any active or waiting solve call constrains later arrivals.
+- Effective admission behaves like a shared strict-cap gate (minimum active/pending finite cap).
+- This is independent from HiGHS `threads` (internal parallelism of one solve).
+
+## 7) Presolve capture behavior
+
+| Option | Effective behavior |
+|---|---|
+| `presolve` | Captured by RCSPP layer. Any request to enable presolve is ignored and a warning is logged. Solve always runs with HiGHS `presolve=off`. |
+
+This is intentional for now because callback/cut plumbing assumes stable original row/column mappings.
 
 ## Example bundles
 
 ### A. Conservative/stable debug profile
 
 ```bash
---deterministic true \
+--parallel_mode deterministic \
+--deterministic_work_units 500 \
 --max_concurrent_solves 1 \
 --enable_sec true --enable_rci false --enable_multistar false --enable_comb false --enable_spi false \
 --max_cuts_sec 1 --min_violation_sec 1e-4
@@ -146,9 +164,19 @@ See also: [Solve Concurrency](solve-concurrency.md).
 ### C. Propagation-heavy profile
 
 ```bash
+--parallel_mode opportunistic \
 --all_pairs_propagation true \
 --edge_elimination true --edge_elimination_nodes true \
---ng_initial_size 4 --ng_max_size 16 --ng_dssr_iters 8 --ng_label_budget 100 --dssr_async true
+--ng_initial_size 4 --ng_max_size 16 --ng_dssr_iters 8 --ng_label_budget 100 --dssr_background_updates true
+```
+
+### C2. Easy-instance guarded async DSSR profile
+
+```bash
+--parallel_mode opportunistic \
+--dssr_background_updates true \
+--dssr_background_policy auto \
+--dssr_background_max_epochs 8
 ```
 
 ### D. Reduced-cost fixing profile

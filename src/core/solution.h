@@ -31,6 +31,10 @@ struct SolveResult {
     std::map<std::string, SeparatorStats> separator_stats;
     int64_t total_cuts = 0;
     int64_t separation_rounds = 0;
+    int64_t dssr_epochs_enqueued = 0;
+    int64_t dssr_epochs_committed = 0;
+    uint64_t dssr_checkpoint_count = 0;
+    uint64_t dssr_commit_signature = 0;
 
     bool is_optimal() const { return status == Status::Optimal; }
     bool has_solution() const {

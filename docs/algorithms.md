@@ -102,7 +102,7 @@ Parallel construction + local search heuristic using Intel TBB. See [primal-heur
 
 **Local search**: 2-opt, or-opt (1/2/3 chains), node drop, node add with first-improvement.
 
-**Parallelism**: By default (deterministic mode), all restarts are pre-built with deterministic seeds and executed via `tbb::parallel_for`, giving identical results across runs. With `--deterministic false`, the solver uses time-based workers with random seeds for potentially better bounds on fast hardware.
+**Parallelism**: By default (`--parallel_mode deterministic`), all restarts are pre-built with deterministic seeds and executed via `tbb::parallel_for`, giving identical results across runs. With `--parallel_mode opportunistic`, the solver uses time-based workers with random seeds for potentially better bounds on fast hardware.
 
 ## Hyperplane Branching
 

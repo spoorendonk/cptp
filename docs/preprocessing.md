@@ -60,8 +60,18 @@ If `lb(u,v) > UB`, edge `(u,v)` is fixed to zero before MIP build.
 Files: `src/preprocess/shared_bounds.h`, `src/model/model.cpp`,
 `src/model/highs_bridge.cpp`
 
-If `dssr_async=true`, a background worker runs tighter fixed-ng labeling stages
-while HiGHS branch-and-bound is running:
+If `dssr_background_updates=true`, a background worker runs tighter fixed-ng
+labeling stages while HiGHS branch-and-bound is running:
+
+- `dssr_background_policy=fixed` runs all planned stages (subject to budget/caps)
+- `dssr_background_policy=auto` stops early when there is no observed search
+  checkpoint activity or no recent DSSR-stage improvements
+- `dssr_background_max_epochs=N` hard-caps the number of async DSSR stages
+  (`0` means uncapped)
+- `dssr_background_auto_min_epochs=N` sets the minimum stages before `auto`
+  early-stop checks (default 4)
+- `dssr_background_auto_no_progress_limit=N` sets consecutive non-improving
+  stage limit for `auto` (default 6)
 
 - publishes improved `(f,b)` snapshots via `SharedBoundsStore`
 - snapshots are monotone tightened element-wise

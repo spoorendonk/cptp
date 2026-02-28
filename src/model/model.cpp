@@ -1,12 +1,16 @@
 #include "model/model.h"
+#include "model/deterministic_checkpoint.h"
 #include "model/highs_bridge.h"
+#include "model/solve_concurrency_guard.h"
 
 #include <algorithm>
 #include <atomic>
-#include <condition_variable>
+#include <bit>
+#include <cctype>
 #include <cmath>
+#include <condition_variable>
+#include <memory>
 #include <mutex>
-#include <set>
 #include <thread>
 
 #include <tbb/task_group.h>
@@ -31,58 +35,6 @@
 namespace rcspp {
 
 namespace {
-
-class SolveConcurrencyGuard {
- public:
-    explicit SolveConcurrencyGuard(int32_t limit)
-        : active_(false),
-          requested_limit_(limit > 0 ? limit : kNoCap),
-          limited_(requested_limit_ != kNoCap) {
-        std::unique_lock<std::mutex> lock(mutex_);
-        // Register finite limits before waiting so pending strict requests
-        // immediately constrain subsequent arrivals.
-        if (limited_) {
-            limit_it_ = active_limits_.insert(requested_limit_);
-        }
-        cv_.wait(lock, [&] {
-            return active_solves_ < std::min(requested_limit_, current_cap_locked());
-        });
-        ++active_solves_;
-        active_ = true;
-    }
-
-    ~SolveConcurrencyGuard() {
-        if (!active_) return;
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (limited_) {
-                active_limits_.erase(limit_it_);
-            }
-            --active_solves_;
-        }
-        cv_.notify_all();
-    }
-
- private:
-    static constexpr int32_t kNoCap = std::numeric_limits<int32_t>::max();
-    static int32_t current_cap_locked() {
-        return active_limits_.empty() ? kNoCap : *active_limits_.begin();
-    }
-
-    bool active_;
-    int32_t requested_limit_;
-    bool limited_;
-    std::multiset<int32_t>::iterator limit_it_;
-    static std::mutex mutex_;
-    static std::condition_variable cv_;
-    static int32_t active_solves_;
-    static std::multiset<int32_t> active_limits_;
-};
-
-std::mutex SolveConcurrencyGuard::mutex_;
-std::condition_variable SolveConcurrencyGuard::cv_;
-int32_t SolveConcurrencyGuard::active_solves_ = 0;
-std::multiset<int32_t> SolveConcurrencyGuard::active_limits_;
 
 heuristic::HeuristicResult build_ng_path_start(const Problem& problem,
                                                std::span<const int32_t> path) {
@@ -126,6 +78,22 @@ heuristic::HeuristicResult build_ng_path_start(const Problem& problem,
     result.col_values = std::move(col_values);
     result.objective = objective;
     return result;
+}
+
+constexpr uint64_t kDssrSigOffset = 1469598103934665603ull;
+constexpr uint64_t kDssrSigPrime = 1099511628211ull;
+
+uint64_t dssr_sig_mix(uint64_t sig, uint64_t value) {
+    sig ^= value;
+    sig *= kDssrSigPrime;
+    return sig;
+}
+
+uint64_t dssr_sig_quantize(double value) {
+    if (!std::isfinite(value)) {
+        return std::numeric_limits<uint64_t>::max();
+    }
+    return std::bit_cast<uint64_t>(value);
 }
 
 }  // namespace
@@ -229,7 +197,10 @@ SolveResult Model::solve(const SolverOptions& options) {
     int heuristic_strategy = 0;
     std::string branch_hyper = "off";
     bool output_flag = true;
+    std::string parallel_mode = "deterministic";
     bool deterministic = true;
+    int64_t deterministic_work_units = 0;
+    int32_t heuristic_deterministic_restarts = 32;
     int64_t heuristic_node_interval = 200;
     bool heuristic_async_injection = true;
     int32_t max_concurrent_solves = 0;
@@ -242,7 +213,12 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool edge_elimination_nodes = true;
     double cutoff = std::numeric_limits<double>::infinity();
     bool disable_heuristics = false;
-    bool dssr_async = true;
+    bool dssr_background_updates = true;
+    bool dssr_background_updates_explicit = false;
+    std::string dssr_background_policy = "fixed";
+    int32_t dssr_background_max_epochs = 0;
+    int32_t dssr_background_auto_min_epochs = 4;
+    int32_t dssr_background_auto_no_progress_limit = 6;
     int32_t hyper_sb_max_depth = 0;
     int32_t hyper_sb_iter_limit = 100;
     int32_t hyper_sb_min_reliable = 4;
@@ -314,8 +290,25 @@ SolveResult Model::solve(const SolverOptions& options) {
             heuristic_async_injection = (value == "true" || value == "1");
             continue;
         }
-        if (key == "deterministic") {
-            deterministic = (value == "true" || value == "1");
+        if (key == "parallel_mode") {
+            std::string mode = value;
+            std::transform(mode.begin(), mode.end(), mode.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (mode == "deterministic" || mode == "opportunistic") {
+                parallel_mode = mode;
+            } else {
+                logger_.log("Warning: unknown parallel_mode='{}' (expected deterministic|opportunistic), using deterministic",
+                            value);
+                parallel_mode = "deterministic";
+            }
+            continue;
+        }
+        if (key == "deterministic_work_units") {
+            deterministic_work_units = std::stoll(value);
+            continue;
+        }
+        if (key == "heuristic_deterministic_restarts") {
+            heuristic_deterministic_restarts = std::stoi(value);
             continue;
         }
         if (key == "branch_hyper") {
@@ -362,8 +355,34 @@ SolveResult Model::solve(const SolverOptions& options) {
             disable_heuristics = (value == "true" || value == "1");
             continue;
         }
-        if (key == "dssr_async") {
-            dssr_async = (value == "true" || value == "1");
+        if (key == "dssr_background_updates") {
+            dssr_background_updates = (value == "true" || value == "1");
+            dssr_background_updates_explicit = true;
+            continue;
+        }
+        if (key == "dssr_background_policy") {
+            std::string policy = value;
+            std::transform(policy.begin(), policy.end(), policy.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (policy == "fixed" || policy == "auto") {
+                dssr_background_policy = policy;
+            } else {
+                logger_.log("Warning: unknown dssr_background_policy='{}' (expected fixed|auto), using fixed",
+                            value);
+                dssr_background_policy = "fixed";
+            }
+            continue;
+        }
+        if (key == "dssr_background_max_epochs") {
+            dssr_background_max_epochs = std::stoi(value);
+            continue;
+        }
+        if (key == "dssr_background_auto_min_epochs") {
+            dssr_background_auto_min_epochs = std::stoi(value);
+            continue;
+        }
+        if (key == "dssr_background_auto_no_progress_limit") {
+            dssr_background_auto_no_progress_limit = std::stoi(value);
             continue;
         }
         if (key == "ng_initial_size") {
@@ -482,13 +501,28 @@ SolveResult Model::solve(const SolverOptions& options) {
     dssr_options.dssr_iterations = std::max<int32_t>(1, dssr_options.dssr_iterations);
     dssr_options.max_labels_per_node = std::max<int32_t>(1, dssr_options.max_labels_per_node);
     heuristic_node_interval = std::max<int64_t>(1, heuristic_node_interval);
+    deterministic = (parallel_mode != "opportunistic");
+    deterministic_work_units = std::max<int64_t>(0, deterministic_work_units);
+    heuristic_deterministic_restarts =
+        std::max<int32_t>(1, heuristic_deterministic_restarts);
     max_concurrent_solves = std::max<int32_t>(0, max_concurrent_solves);
     hyper_sb_iter_limit = std::max<int32_t>(1, hyper_sb_iter_limit);
     hyper_sb_min_reliable = std::max<int32_t>(1, hyper_sb_min_reliable);
     hyper_sb_max_candidates = std::max<int32_t>(1, hyper_sb_max_candidates);
     hyper_sb_max_depth = std::max<int32_t>(0, hyper_sb_max_depth);
+    dssr_background_max_epochs = std::max<int32_t>(0, dssr_background_max_epochs);
+    dssr_background_auto_min_epochs =
+        std::max<int32_t>(1, dssr_background_auto_min_epochs);
+    dssr_background_auto_no_progress_limit =
+        std::max<int32_t>(1, dssr_background_auto_no_progress_limit);
+    if (deterministic && !dssr_background_updates_explicit) {
+        dssr_background_updates = false;
+    }
 
-    SolveConcurrencyGuard solve_guard(max_concurrent_solves);
+    auto non_highs_work_budget =
+        std::make_shared<WorkUnitBudget>(deterministic_work_units);
+
+    model_detail::SolveConcurrencyGuard solve_guard(max_concurrent_solves);
 
     // When cutoff is provided, set HiGHS objective_bound for node pruning.
     // This sets the initial upper_limit in the MIP solver, enabling pruning
@@ -558,7 +592,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             if (!disable_heuristics) {
                 tg.run([&] {
                     warm_start = heuristic::build_initial_solution(
-                        problem_, num_restarts, budget_ms);
+                        problem_, num_restarts, budget_ms, non_highs_work_budget);
                 });
             }
             tg.wait();
@@ -596,7 +630,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             if (!disable_heuristics) {
                 tg.run([&] {
                     warm_start = heuristic::build_initial_solution(
-                        problem_, num_restarts, budget_ms);
+                        problem_, num_restarts, budget_ms, non_highs_work_budget);
                 });
             }
             tg.wait();
@@ -632,6 +666,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_edge_elimination_nodes(edge_elimination_nodes);
     bridge.set_heuristic_node_interval(heuristic_node_interval);
     bridge.set_heuristic_async_injection(heuristic_async_injection);
+    bridge.set_heuristic_deterministic_mode(deterministic);
+    bridge.set_heuristic_deterministic_restarts(heuristic_deterministic_restarts);
+    bridge.set_work_unit_budget(non_highs_work_budget);
     if (max_cuts_sec >= 0) bridge.set_separator_max_cuts("SEC", max_cuts_sec);
     if (max_cuts_rci >= 0) bridge.set_separator_max_cuts("RCI", max_cuts_rci);
     if (max_cuts_multistar >= 0) bridge.set_separator_max_cuts("Multistar", max_cuts_multistar);
@@ -663,6 +700,108 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_shared_bounds_store(shared_bounds);
     bridge.set_async_upper_bound(async_upper_bound);
     bridge.set_async_incumbent_store(async_incumbent_store);
+
+    const int32_t async_start_ng =
+        std::max(ng_size_used + 1, dssr_options.initial_ng_size + 1);
+    int32_t async_end_ng = dssr_options.max_ng_size;
+    if (dssr_background_max_epochs > 0) {
+        const int64_t capped_end =
+            static_cast<int64_t>(async_start_ng) +
+            static_cast<int64_t>(dssr_background_max_epochs) - 1;
+        async_end_ng = std::min<int32_t>(
+            async_end_ng,
+            static_cast<int32_t>(
+                std::min<int64_t>(capped_end, std::numeric_limits<int32_t>::max())));
+    }
+    const bool dssr_background_updates_enabled =
+        dssr_background_updates &&
+        !all_pairs_propagation &&
+        async_end_ng >= async_start_ng;
+    const bool deterministic_async_strict =
+        dssr_background_updates_enabled && deterministic;
+    const bool dssr_auto_policy =
+        dssr_background_updates_enabled && dssr_background_policy == "auto";
+    auto dssr_epoch_queue = deterministic_async_strict
+        ? std::make_shared<model_detail::DssrEpochQueue>(async_start_ng)
+        : std::shared_ptr<model_detail::DssrEpochQueue>{};
+    auto dssr_checkpoint_clock = std::make_shared<model_detail::DeterministicCheckpointClock>();
+    auto dssr_commit_mutex = std::make_shared<std::mutex>();
+    auto dssr_request_mutex = std::make_shared<std::mutex>();
+    auto dssr_request_cv = std::make_shared<std::condition_variable>();
+    auto dssr_requested_epochs = std::make_shared<int32_t>(0);
+    std::atomic<int64_t> dssr_epochs_enqueued{0};
+    int64_t dssr_epochs_committed = 0;
+    uint64_t dssr_commit_signature = kDssrSigOffset;
+
+    auto commit_dssr_epoch = [&](model_detail::DssrEpochUpdate update) {
+        bool bounds_changed =
+            shared_bounds->publish_tightening(update.fwd, update.bwd, update.ng_size);
+        bool ub_changed = false;
+        bool incumbent_changed = false;
+
+        if (update.elementary_path_found) {
+            double prev = async_upper_bound->load(std::memory_order_relaxed);
+            while (update.elementary_path_cost + 1e-9 < prev) {
+                if (async_upper_bound->compare_exchange_weak(
+                        prev, update.elementary_path_cost,
+                        std::memory_order_relaxed,
+                        std::memory_order_relaxed)) {
+                    ub_changed = true;
+                    break;
+                }
+            }
+            if (!update.elementary_path.empty()) {
+                auto start = build_ng_path_start(problem_, update.elementary_path);
+                if (!start.col_values.empty()) {
+                    incumbent_changed = async_incumbent_store->publish_if_better(
+                        std::move(start.col_values), start.objective);
+                }
+            }
+        }
+
+        dssr_epochs_committed++;
+        dssr_commit_signature = dssr_sig_mix(
+            dssr_commit_signature, static_cast<uint64_t>(update.epoch));
+        dssr_commit_signature = dssr_sig_mix(
+            dssr_commit_signature, static_cast<uint64_t>(update.ng_size));
+        dssr_commit_signature = dssr_sig_mix(
+            dssr_commit_signature, static_cast<uint64_t>(bounds_changed ? 1 : 0));
+        dssr_commit_signature = dssr_sig_mix(
+            dssr_commit_signature, static_cast<uint64_t>(ub_changed ? 1 : 0));
+        dssr_commit_signature = dssr_sig_mix(
+            dssr_commit_signature, static_cast<uint64_t>(incumbent_changed ? 1 : 0));
+        dssr_commit_signature = dssr_sig_mix(
+            dssr_commit_signature, dssr_sig_quantize(update.elementary_path_cost));
+    };
+
+    if (deterministic_async_strict && dssr_epoch_queue) {
+        bridge.set_deterministic_checkpoint_hook(
+            [dssr_epoch_queue, dssr_checkpoint_clock, dssr_commit_mutex,
+             dssr_request_mutex, dssr_request_cv, dssr_requested_epochs,
+             &commit_dssr_epoch, deterministic_async_strict]() {
+                {
+                    std::lock_guard<std::mutex> req_lock(*dssr_request_mutex);
+                    (*dssr_requested_epochs)++;
+                }
+                dssr_request_cv->notify_one();
+                std::lock_guard<std::mutex> lock(*dssr_commit_mutex);
+                dssr_checkpoint_clock->checkpoint();
+                if (deterministic_async_strict) {
+                    dssr_epoch_queue->commit_next_blocking(
+                        [&commit_dssr_epoch](model_detail::DssrEpochUpdate update) {
+                            commit_dssr_epoch(std::move(update));
+                        });
+                } else {
+                    dssr_epoch_queue->commit_ready(
+                        [&commit_dssr_epoch](model_detail::DssrEpochUpdate update) {
+                            commit_dssr_epoch(std::move(update));
+                        });
+                }
+            });
+    } else if (dssr_auto_policy) {
+        bridge.set_deterministic_checkpoint_hook(
+            [dssr_checkpoint_clock]() { dssr_checkpoint_clock->checkpoint(); });
+    }
 
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
     if (all_pairs_propagation) {
@@ -885,47 +1024,150 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     std::atomic<bool> stop_async_dssr{false};
     std::thread async_dssr_worker;
-    if (dssr_async &&
-        !all_pairs_propagation &&
-        dssr_options.max_ng_size > ng_size_used) {
+    if (dssr_background_updates_enabled) {
         async_dssr_worker = std::thread([&]() {
-            const int32_t start_ng = std::max(ng_size_used + 1, dssr_options.initial_ng_size + 1);
-            int32_t updates = 0;
-            for (int32_t ng_size = start_ng;
-                 ng_size <= dssr_options.max_ng_size &&
-                 !stop_async_dssr.load(std::memory_order_relaxed);
+            auto auto_snapshot = shared_bounds->snapshot();
+            std::vector<double> auto_best_fwd = auto_snapshot.fwd;
+            std::vector<double> auto_best_bwd = auto_snapshot.bwd;
+            double auto_best_ub = async_upper_bound->load(std::memory_order_relaxed);
+            model_detail::DssrAutoStopTracker auto_stop_tracker(
+                dssr_background_auto_min_epochs,
+                dssr_background_auto_no_progress_limit);
+            auto mark_bounds_tightening = [&](std::vector<double>& current,
+                                              const std::vector<double>& next) {
+                if (current.size() != next.size()) return false;
+                bool changed = false;
+                for (size_t i = 0; i < current.size(); ++i) {
+                    const double cur = current[i];
+                    const double nxt = next[i];
+                    if (!std::isfinite(nxt)) continue;
+                    if (!std::isfinite(cur) || nxt > cur + 1e-12) {
+                        current[i] = nxt;
+                        changed = true;
+                    }
+                }
+                return changed;
+            };
+            int32_t produced_epochs = 0;
+            for (int32_t ng_size = async_start_ng;
+                 ng_size <= async_end_ng;
                  ++ng_size) {
+                if (deterministic_async_strict) {
+                    std::unique_lock<std::mutex> req_lock(*dssr_request_mutex);
+                    dssr_request_cv->wait(req_lock, [&]() {
+                        return stop_async_dssr.load(std::memory_order_relaxed) ||
+                               produced_epochs < *dssr_requested_epochs;
+                    });
+                    if (stop_async_dssr.load(std::memory_order_relaxed)) {
+                        break;
+                    }
+                }
+                if (!deterministic_async_strict &&
+                    stop_async_dssr.load(std::memory_order_relaxed)) {
+                    break;
+                }
+                if (non_highs_work_budget &&
+                    !non_highs_work_budget->try_consume(1)) {
+                    break;
+                }
                 auto stage_opts = dssr_options;
                 stage_opts.initial_ng_size = ng_size;
                 stage_opts.max_ng_size = ng_size;
                 stage_opts.dssr_iterations = std::max<int32_t>(1, dssr_options.dssr_iterations / 2);
                 auto bounds = preprocess::ng::compute_bounds(problem_, source, target, stage_opts);
-                bool changed = shared_bounds->publish_tightening(bounds.fwd, bounds.bwd, bounds.ng_size);
-                if (changed) updates++;
-                if (bounds.elementary_path_found) {
-                    double prev = async_upper_bound->load(std::memory_order_relaxed);
-                    while (bounds.elementary_path_cost + 1e-9 < prev &&
-                           !async_upper_bound->compare_exchange_weak(
-                               prev, bounds.elementary_path_cost, std::memory_order_relaxed)) {
+                model_detail::DssrEpochUpdate update;
+                update.epoch = ng_size;
+                update.ng_size = bounds.ng_size;
+                update.fwd = std::move(bounds.fwd);
+                update.bwd = std::move(bounds.bwd);
+                update.elementary_path_found = bounds.elementary_path_found;
+                update.elementary_path_cost = bounds.elementary_path_cost;
+                update.elementary_path = std::move(bounds.elementary_path);
+                bool bounds_tightened_for_auto = false;
+                bool ub_tightened_for_auto = false;
+                if (dssr_auto_policy) {
+                    bounds_tightened_for_auto |=
+                        mark_bounds_tightening(auto_best_fwd, update.fwd);
+                    bounds_tightened_for_auto |=
+                        mark_bounds_tightening(auto_best_bwd, update.bwd);
+                    if (update.elementary_path_found &&
+                        update.elementary_path_cost + 1e-9 < auto_best_ub) {
+                        auto_best_ub = update.elementary_path_cost;
+                        ub_tightened_for_auto = true;
                     }
-                    if (!bounds.elementary_path.empty()) {
-                        auto start = build_ng_path_start(problem_, bounds.elementary_path);
-                        if (!start.col_values.empty()) {
-                            async_incumbent_store->publish_if_better(
-                                std::move(start.col_values), start.objective);
+                }
+                bool stage_improved = false;
+                if (deterministic_async_strict) {
+                    dssr_epoch_queue->enqueue(std::move(update));
+                    dssr_epochs_enqueued.fetch_add(1, std::memory_order_relaxed);
+                    if (dssr_auto_policy) {
+                        stage_improved =
+                            bounds_tightened_for_auto || ub_tightened_for_auto;
+                    }
+                } else {
+                    bool bounds_changed =
+                        shared_bounds->publish_tightening(update.fwd, update.bwd, update.ng_size);
+                    bool ub_changed = false;
+                    bool incumbent_changed = false;
+                    if (update.elementary_path_found) {
+                        double prev = async_upper_bound->load(std::memory_order_relaxed);
+                        while (update.elementary_path_cost + 1e-9 < prev) {
+                            if (async_upper_bound->compare_exchange_weak(
+                                    prev, update.elementary_path_cost,
+                                    std::memory_order_relaxed,
+                                    std::memory_order_relaxed)) {
+                                ub_changed = true;
+                                break;
+                            }
                         }
+                        if (!update.elementary_path.empty()) {
+                            auto start = build_ng_path_start(problem_, update.elementary_path);
+                            if (!start.col_values.empty()) {
+                                incumbent_changed = async_incumbent_store->publish_if_better(
+                                    std::move(start.col_values), start.objective);
+                            }
+                        }
+                    }
+                    if (dssr_auto_policy) {
+                        stage_improved = bounds_tightened_for_auto ||
+                                         ub_changed || incumbent_changed;
+                    } else {
+                        stage_improved = bounds_changed || ub_changed || incumbent_changed;
+                    }
+                }
+
+                produced_epochs++;
+                if (dssr_auto_policy) {
+                    const bool checkpoint_active =
+                        dssr_checkpoint_clock->value() > 0;
+                    if (auto_stop_tracker.observe_stage(
+                            stage_improved, checkpoint_active, produced_epochs)) {
+                        break;
                     }
                 }
             }
-            (void)updates;
+            if (deterministic_async_strict) {
+                dssr_epoch_queue->mark_producer_done();
+            }
         });
     }
 
     highs.run();
 
     stop_async_dssr.store(true, std::memory_order_relaxed);
+    if (deterministic_async_strict) {
+        dssr_request_cv->notify_all();
+    }
     if (async_dssr_worker.joinable()) {
         async_dssr_worker.join();
+    }
+    if (deterministic_async_strict && dssr_epoch_queue) {
+        std::lock_guard<std::mutex> lock(*dssr_commit_mutex);
+        dssr_checkpoint_clock->checkpoint();
+        dssr_epoch_queue->commit_all_ordered(
+            [&commit_dssr_epoch](model_detail::DssrEpochUpdate update) {
+                commit_dssr_epoch(std::move(update));
+            });
     }
 
     // Clear static callbacks/state to avoid leaking between solves
@@ -933,6 +1175,22 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     auto result = bridge.extract_result();
     result.time_seconds = timer.elapsed_seconds();
+    result.dssr_epochs_enqueued =
+        dssr_epochs_enqueued.load(std::memory_order_relaxed);
+    result.dssr_epochs_committed = dssr_epochs_committed;
+    result.dssr_checkpoint_count = dssr_checkpoint_clock->value();
+    result.dssr_commit_signature =
+        (dssr_epochs_committed > 0) ? dssr_commit_signature : 0;
+    if (non_highs_work_budget && non_highs_work_budget->used() > 0) {
+        if (non_highs_work_budget->capped()) {
+            logger_.log("Non-HiGHS work units used: {}/{}",
+                        non_highs_work_budget->used(),
+                        non_highs_work_budget->limit());
+        } else {
+            logger_.log("Non-HiGHS work units used: {} (uncapped)",
+                        non_highs_work_budget->used());
+        }
+    }
 
     return result;
 }

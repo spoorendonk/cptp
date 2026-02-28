@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <mutex>
 #include <numeric>
 #include <random>
@@ -16,6 +17,7 @@
 #include <tbb/task_group.h>
 
 #include "core/problem.h"
+#include "util/work_unit_budget.h"
 
 namespace rcspp::heuristic {
 
@@ -460,9 +462,9 @@ inline ReducedGraph reduce_neighborhood(const Problem& prob,
 /// Returns solution vector + objective value.
 inline HeuristicResult build_initial_solution(const Problem& prob,
                                               int num_restarts = 50,
-                                              double time_budget_ms = 0.0) {
+                                              double time_budget_ms = 0.0,
+                                              const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr) {
     const int32_t n = prob.num_nodes();
-    const int32_t m = prob.num_edges();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
     const double Q = prob.capacity();
@@ -522,6 +524,7 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
         auto worker = [&]() {
             std::mt19937 rng(std::random_device{}());
             while (std::chrono::steady_clock::now() < deadline) {
+                if (work_budget && !work_budget->try_consume(1)) break;
                 int r = next_restart.fetch_add(1, std::memory_order_relaxed);
                 std::vector<int32_t> order;
                 if (r < static_cast<int>(fixed_orders.size())) {
@@ -561,7 +564,15 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
             fixed_orders.push_back(std::move(order));
         }
 
-        const int total_restarts = static_cast<int>(fixed_orders.size());
+        int total_restarts = static_cast<int>(fixed_orders.size());
+        if (work_budget) {
+            total_restarts = static_cast<int>(
+                std::min<int64_t>(total_restarts,
+                    work_budget->reserve_up_to(total_restarts)));
+        }
+        if (total_restarts <= 0) {
+            return {{}, std::numeric_limits<double>::max()};
+        }
 
         struct RestartResult {
             std::vector<int32_t> tour;
@@ -591,8 +602,9 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
 /// Compatibility wrapper: build_warm_start delegates to build_initial_solution.
 inline HeuristicResult build_warm_start(const Problem& prob,
                                         int num_restarts = 50,
-                                        double time_budget_ms = 0.0) {
-    return build_initial_solution(prob, num_restarts, time_budget_ms);
+                                        double time_budget_ms = 0.0,
+                                        const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr) {
+    return build_initial_solution(prob, num_restarts, time_budget_ms, work_budget);
 }
 
 /// LP-guided primal heuristic: builds reduced graphs from LP relaxation
@@ -605,15 +617,15 @@ inline HeuristicResult lp_guided_heuristic(
     std::span<const double> y_lp,
     std::span<const double> incumbent,
     double time_budget_ms = 20.0,
-    int strategy = 0) {
+    int strategy = 0,
+    int max_restarts = 0,
+    uint32_t restart_seed = 0,
+    const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr) {
 
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
     const double Q = prob.capacity();
-
-    auto deadline = std::chrono::steady_clock::now()
-                  + std::chrono::microseconds(static_cast<int64_t>(time_budget_ms * 1000));
 
     // Build reduced graphs for selected strategies
     std::vector<ReducedGraph> graphs;
@@ -656,61 +668,117 @@ inline HeuristicResult lp_guided_heuristic(
         return order;
     };
 
-    // Shared best solution
-    std::mutex best_mtx;
-    std::vector<int32_t> best_tour;
-    double best_obj = std::numeric_limits<double>::max();
-    std::atomic<int> next_restart{0};
+    if (max_restarts > 0) {
+        // Deterministic mode: fixed restarts with deterministic seeds.
+        int total_restarts = max_restarts;
+        if (work_budget) {
+            total_restarts = static_cast<int>(
+                std::min<int64_t>(total_restarts,
+                    work_budget->reserve_up_to(total_restarts)));
+        }
+        if (total_restarts <= 0) {
+            return {{}, std::numeric_limits<double>::max()};
+        }
 
-    auto worker = [&]() {
-        std::mt19937 rng(std::random_device{}());
+        struct RestartResult {
+            std::vector<int32_t> tour;
+            double obj = std::numeric_limits<double>::max();
+        };
+        std::vector<RestartResult> results(static_cast<size_t>(total_restarts));
 
-        while (std::chrono::steady_clock::now() < deadline) {
-            int r = next_restart.fetch_add(1, std::memory_order_relaxed);
-            int strat = r % num_strategies;
-
+        tbb::parallel_for(0, total_restarts, [&](int r) {
+            const int strat = r % num_strategies;
             const auto& customers = strategy_customers[strat];
             const auto& ea = strategies[strat]->edge_active;
 
             std::vector<int32_t> order;
             if (r < num_strategies) {
-                // First round per strategy: LP-weighted ordering
                 order = make_lp_order(customers);
             } else {
-                // Subsequent rounds: random shuffle
                 order = customers;
+                std::mt19937 rng(restart_seed + static_cast<uint32_t>(r));
                 std::shuffle(order.begin(), order.end(), rng);
             }
 
             auto [tour, obj] = detail::single_restart(prob, customers, order, ea);
+            results[static_cast<size_t>(r)] = {std::move(tour), obj};
+        });
 
-            if (obj < best_obj) {
-                std::lock_guard lock(best_mtx);
-                if (obj < best_obj) {
-                    best_obj = obj;
-                    best_tour = std::move(tour);
-                }
+        double best_obj = std::numeric_limits<double>::max();
+        std::vector<int32_t> best_tour;
+        for (int r = 0; r < total_restarts; ++r) {
+            const auto& rr = results[static_cast<size_t>(r)];
+            if (rr.obj < best_obj) {
+                best_obj = rr.obj;
+                best_tour = rr.tour;
             }
         }
-    };
+        if (best_tour.empty()) {
+            return {{}, std::numeric_limits<double>::max()};
+        }
+        auto sol = detail::tour_to_solution(prob, best_tour);
+        return {std::move(sol), best_obj};
+    } else {
+        // Opportunistic mode: time-based workers, non-deterministic seeds.
+        auto deadline = std::chrono::steady_clock::now()
+                      + std::chrono::microseconds(static_cast<int64_t>(time_budget_ms * 1000));
 
-    // Launch parallel workers
-    unsigned hw = std::thread::hardware_concurrency();
-    unsigned num_workers = std::max(1u, hw);
+        std::mutex best_mtx;
+        std::vector<int32_t> best_tour;
+        double best_obj = std::numeric_limits<double>::max();
+        std::atomic<int> next_restart{0};
 
-    {
-        tbb::task_group tg;
-        for (unsigned i = 0; i < num_workers; ++i)
-            tg.run(worker);
-        tg.wait();
+        auto worker = [&]() {
+            std::mt19937 rng(std::random_device{}());
+
+            while (std::chrono::steady_clock::now() < deadline) {
+                if (work_budget && !work_budget->try_consume(1)) break;
+                int r = next_restart.fetch_add(1, std::memory_order_relaxed);
+                int strat = r % num_strategies;
+
+                const auto& customers = strategy_customers[strat];
+                const auto& ea = strategies[strat]->edge_active;
+
+                std::vector<int32_t> order;
+                if (r < num_strategies) {
+                    // First round per strategy: LP-weighted ordering
+                    order = make_lp_order(customers);
+                } else {
+                    // Subsequent rounds: random shuffle
+                    order = customers;
+                    std::shuffle(order.begin(), order.end(), rng);
+                }
+
+                auto [tour, obj] = detail::single_restart(prob, customers, order, ea);
+
+                if (obj < best_obj) {
+                    std::lock_guard lock(best_mtx);
+                    if (obj < best_obj) {
+                        best_obj = obj;
+                        best_tour = std::move(tour);
+                    }
+                }
+            }
+        };
+
+        // Launch parallel workers
+        unsigned hw = std::thread::hardware_concurrency();
+        unsigned num_workers = std::max(1u, hw);
+
+        {
+            tbb::task_group tg;
+            for (unsigned i = 0; i < num_workers; ++i)
+                tg.run(worker);
+            tg.wait();
+        }
+
+        if (best_tour.empty()) {
+            return {{}, std::numeric_limits<double>::max()};
+        }
+
+        auto sol = detail::tour_to_solution(prob, best_tour);
+        return {std::move(sol), best_obj};
     }
-
-    if (best_tour.empty()) {
-        return {{}, std::numeric_limits<double>::max()};
-    }
-
-    auto sol = detail::tour_to_solution(prob, best_tour);
-    return {std::move(sol), best_obj};
 }
 
 }  // namespace rcspp::heuristic
