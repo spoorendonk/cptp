@@ -132,6 +132,7 @@ class HiGHSBridge {
     void set_heuristic_deterministic_restarts(int32_t restarts) {
         heuristic_deterministic_restarts_ = restarts;
     }
+    void set_fixed_y(std::vector<int8_t> fixed_y) { fixed_y_ = std::move(fixed_y); }
     void set_work_unit_budget(std::shared_ptr<WorkUnitBudget> budget) {
         work_unit_budget_ = std::move(budget);
     }
@@ -164,6 +165,7 @@ class HiGHSBridge {
     std::vector<double> fwd_bounds_;   // f[v]: forward bounds (source → v)
     std::vector<double> bwd_bounds_;   // b[v]: backward bounds (v → target)
     double correction_ = 0.0;         // profit(source) if tour, 0 if path
+    std::vector<int8_t> fixed_y_;      // optional fixed y-vars: -1 unset, 0/1 fixed
 
     // All-pairs labeling bounds for stronger Trigger B propagation
     std::vector<double> all_pairs_;    // flat n×n: d(s,v) = all_pairs_[s*n+v]

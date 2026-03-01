@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cmath>
 #include <condition_variable>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -164,6 +165,103 @@ std::vector<ParamipChunkPlan> build_paramip_chunk_plan(
     return chunks;
 }
 
+std::string encode_paramip_fixings(std::span<const ParamipFixing> fixings) {
+    std::ostringstream ss;
+    for (size_t i = 0; i < fixings.size(); ++i) {
+        if (i > 0) ss << ",";
+        ss << fixings[i].node << ":" << (fixings[i].value ? 1 : 0);
+    }
+    return ss.str();
+}
+
+std::vector<int8_t> parse_paramip_fixings(const std::string& spec,
+                                          int32_t num_nodes,
+                                          int32_t source,
+                                          int32_t target,
+                                          Logger& logger) {
+    std::vector<int8_t> fixed_y(static_cast<size_t>(num_nodes), static_cast<int8_t>(-1));
+    if (spec.empty()) return fixed_y;
+    std::stringstream ss(spec);
+    std::string token;
+    while (std::getline(ss, token, ',')) {
+        if (token.empty()) continue;
+        const auto pos = token.find(':');
+        if (pos == std::string::npos) {
+            logger.log("Warning: invalid paramip_fixings token '{}', expected node:value", token);
+            continue;
+        }
+        const std::string node_str = token.substr(0, pos);
+        const std::string value_str = token.substr(pos + 1);
+        int node = -1;
+        int value = -1;
+        try {
+            node = std::stoi(node_str);
+            value = std::stoi(value_str);
+        } catch (...) {
+            logger.log("Warning: invalid paramip_fixings token '{}', expected integers", token);
+            continue;
+        }
+        if (node < 0 || node >= num_nodes || (value != 0 && value != 1)) {
+            logger.log("Warning: invalid paramip_fixings token '{}', out of range", token);
+            continue;
+        }
+        if (node == source || node == target) {
+            if (value == 0) {
+                logger.log("Warning: ignoring paramip_fixings on terminal node {}:{}", node, value);
+                continue;
+            }
+            fixed_y[static_cast<size_t>(node)] = 1;
+            continue;
+        }
+        fixed_y[static_cast<size_t>(node)] = static_cast<int8_t>(value);
+    }
+    return fixed_y;
+}
+
+SolverOptions make_paramip_subsolve_options(const SolverOptions& base_options,
+                                            std::string fixings_spec,
+                                            double cutoff,
+                                            double remaining_time_limit_sec,
+                                            bool force_quiet) {
+    SolverOptions out;
+    out.reserve(base_options.size() + 8);
+    for (const auto& [k, v] : base_options) {
+        if (k == "paramip_mode" || k == "paramip_chunks" || k == "paramip_workers" ||
+            k == "paramip_fixings" || k == "cutoff" || k == "threads" ||
+            k == "time_limit" ||
+            k == "max_concurrent_solves" || k == "branch_hyper") {
+            continue;
+        }
+        if (force_quiet && k == "output_flag") continue;
+        out.push_back({k, v});
+    }
+    out.push_back({"paramip_mode", "off"});
+    out.push_back({"paramip_fixings", std::move(fixings_spec)});
+    out.push_back({"threads", "1"});
+    out.push_back({"max_concurrent_solves", "0"});
+    out.push_back({"branch_hyper", "off"});
+    if (force_quiet) {
+        out.push_back({"output_flag", "false"});
+    }
+    if (std::isfinite(cutoff)) {
+        out.push_back({"cutoff", std::to_string(cutoff)});
+    }
+    if (std::isfinite(remaining_time_limit_sec)) {
+        out.push_back({"time_limit", std::to_string(std::max(0.001, remaining_time_limit_sec))});
+    }
+    return out;
+}
+
+void aggregate_separator_stats(std::map<std::string, SeparatorStats>& dst,
+                               const std::map<std::string, SeparatorStats>& src) {
+    for (const auto& [name, s] : src) {
+        auto& d = dst[name];
+        d.cuts_added += s.cuts_added;
+        d.rounds_called += s.rounds_called;
+        d.time_seconds += s.time_seconds;
+    }
+}
+
 }  // namespace
 
 Model::Model() = default;
@@ -275,6 +373,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::string paramip_mode = "off";
     int32_t paramip_chunks = 0;
     int32_t paramip_workers = 0;
+    std::string paramip_fixings_spec;
     int32_t max_concurrent_solves = 0;
     bool enable_sec = true;
     bool enable_rci = true;
@@ -395,6 +494,10 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "paramip_workers") {
             paramip_workers = std::stoi(value);
+            continue;
+        }
+        if (key == "paramip_fixings") {
+            paramip_fixings_spec = value;
             continue;
         }
         if (key == "parallel_mode") {
@@ -681,6 +784,202 @@ SolveResult Model::solve(const SolverOptions& options) {
         dssr_background_updates = false;
     }
 
+    const int32_t source = problem_.source();
+    const int32_t target = problem_.target();
+    const int32_t n = problem_.num_nodes();
+
+    auto fixed_y = parse_paramip_fixings(
+        paramip_fixings_spec, n, source, target, logger_);
+
+    std::vector<ParamipChunkPlan> chunk_plan;
+    if (paramip_mode != "off") {
+        const int32_t requested_chunks = std::max<int32_t>(2, paramip_chunks);
+        const int32_t depth = ceil_log2_chunks(requested_chunks);
+        auto split_nodes = choose_paramip_split_nodes(problem_, depth);
+        chunk_plan = build_paramip_chunk_plan(split_nodes);
+        const int32_t workers = (paramip_workers > 0)
+            ? paramip_workers
+            : std::max<int32_t>(1, static_cast<int32_t>(std::thread::hardware_concurrency()));
+        logger_.log("ParaMIP plan: mode={}, requested_chunks={}, depth={}, chunks={}, workers={}",
+                    paramip_mode, requested_chunks, depth,
+                    static_cast<int32_t>(chunk_plan.size()), workers);
+        if (static_cast<int32_t>(split_nodes.size()) < depth) {
+            logger_.log("ParaMIP plan: limited split nodes ({}/{}) due to instance size",
+                        static_cast<int32_t>(split_nodes.size()), depth);
+        }
+        if (workflow_dump && !chunk_plan.empty()) {
+            const int32_t dump_limit = std::min<int32_t>(
+                8, static_cast<int32_t>(chunk_plan.size()));
+            for (int32_t i = 0; i < dump_limit; ++i) {
+                const auto& chunk = chunk_plan[static_cast<size_t>(i)];
+                std::ostringstream ss;
+                ss << "  chunk#" << chunk.id << ": ";
+                for (size_t k = 0; k < chunk.fixings.size(); ++k) {
+                    if (k > 0) ss << ", ";
+                    ss << "y[" << chunk.fixings[k].node << "]="
+                       << (chunk.fixings[k].value ? 1 : 0);
+                }
+                logger_.log("{}", ss.str());
+            }
+        }
+    }
+
+    if (paramip_mode == "static_root" && !chunk_plan.empty()) {
+        Timer paramip_timer;
+        std::vector<SolveResult> chunk_results(chunk_plan.size());
+        std::atomic<double> global_ub{cutoff};
+        double global_time_limit_sec = std::numeric_limits<double>::infinity();
+        for (const auto& [k, v] : options) {
+            if (k != "time_limit") continue;
+            try {
+                global_time_limit_sec = std::stod(v);
+            } catch (...) {
+                global_time_limit_sec = std::numeric_limits<double>::infinity();
+            }
+            break;
+        }
+
+        auto run_chunk = [&](int32_t idx) {
+            const auto& chunk = chunk_plan[static_cast<size_t>(idx)];
+            const double local_cutoff = global_ub.load(std::memory_order_relaxed);
+            double remaining_time_sec = std::numeric_limits<double>::infinity();
+            if (std::isfinite(global_time_limit_sec)) {
+                remaining_time_sec = global_time_limit_sec - paramip_timer.elapsed_seconds();
+                if (remaining_time_sec <= 1e-6) {
+                    SolveResult timeout;
+                    timeout.status = SolveResult::Status::TimeLimit;
+                    timeout.objective = 0.0;
+                    timeout.bound = 0.0;
+                    timeout.gap = 1.0;
+                    timeout.time_seconds = 0.0;
+                    chunk_results[static_cast<size_t>(idx)] = timeout;
+                    return;
+                }
+            }
+            auto sub_opts = make_paramip_subsolve_options(
+                options, encode_paramip_fixings(chunk.fixings), local_cutoff,
+                remaining_time_sec, !output_flag);
+            Model sub_model;
+            sub_model.set_problem(problem_);
+            auto r = sub_model.solve(sub_opts);
+            chunk_results[static_cast<size_t>(idx)] = r;
+            if (r.has_solution() && std::isfinite(r.objective)) {
+                double prev = global_ub.load(std::memory_order_relaxed);
+                while (r.objective + 1e-9 < prev) {
+                    if (global_ub.compare_exchange_weak(
+                            prev, r.objective,
+                            std::memory_order_relaxed, std::memory_order_relaxed)) {
+                        break;
+                    }
+                }
+            }
+        };
+
+        if (deterministic) {
+            for (int32_t i = 0; i < static_cast<int32_t>(chunk_plan.size()); ++i) {
+                run_chunk(i);
+            }
+        } else {
+            const int32_t workers = std::min<int32_t>(
+                std::max<int32_t>(1, (paramip_workers > 0)
+                    ? paramip_workers
+                    : static_cast<int32_t>(std::thread::hardware_concurrency())),
+                static_cast<int32_t>(chunk_plan.size()));
+            std::atomic<int32_t> next{0};
+            std::vector<std::thread> pool;
+            pool.reserve(static_cast<size_t>(workers));
+            for (int32_t w = 0; w < workers; ++w) {
+                pool.emplace_back([&] {
+                    for (;;) {
+                        const int32_t idx = next.fetch_add(1, std::memory_order_relaxed);
+                        if (idx >= static_cast<int32_t>(chunk_plan.size())) break;
+                        run_chunk(idx);
+                    }
+                });
+            }
+            for (auto& t : pool) t.join();
+        }
+
+        SolveResult out;
+        out.status = SolveResult::Status::Error;
+        out.objective = std::numeric_limits<double>::infinity();
+        out.bound = std::numeric_limits<double>::infinity();
+        out.gap = 1.0;
+        out.time_seconds = paramip_timer.elapsed_seconds();
+
+        bool any_error = false;
+        bool any_timelimit = false;
+        bool any_solution = false;
+        bool all_infeasible = true;
+        bool all_opt_or_infeasible = true;
+
+        for (const auto& r : chunk_results) {
+            out.nodes += r.nodes;
+            out.total_cuts += r.total_cuts;
+            out.separation_rounds += r.separation_rounds;
+            out.dssr_epochs_enqueued += r.dssr_epochs_enqueued;
+            out.dssr_epochs_committed += r.dssr_epochs_committed;
+            out.dssr_checkpoint_count += r.dssr_checkpoint_count;
+            out.dssr_commit_signature ^= r.dssr_commit_signature;
+            aggregate_separator_stats(out.separator_stats, r.separator_stats);
+
+            any_error = any_error || (r.status == SolveResult::Status::Error);
+            any_timelimit = any_timelimit || (r.status == SolveResult::Status::TimeLimit);
+            all_infeasible = all_infeasible && (r.status == SolveResult::Status::Infeasible);
+            all_opt_or_infeasible = all_opt_or_infeasible &&
+                (r.status == SolveResult::Status::Optimal ||
+                 r.status == SolveResult::Status::Infeasible);
+            if (std::isfinite(r.bound)) {
+                out.bound = std::min(out.bound, r.bound);
+            }
+            if (r.has_solution() && std::isfinite(r.objective)) {
+                any_solution = true;
+                if (!std::isfinite(out.objective) || r.objective < out.objective - 1e-9) {
+                    out.objective = r.objective;
+                    out.tour = r.tour;
+                    out.tour_arcs = r.tour_arcs;
+                }
+            }
+        }
+
+        if (any_solution) {
+            if (!std::isfinite(out.bound)) out.bound = out.objective;
+            if (std::abs(out.objective) > 1e-9) {
+                out.gap = std::max(0.0, (out.objective - out.bound) / std::abs(out.objective));
+            } else {
+                out.gap = (out.bound <= out.objective + 1e-9) ? 0.0 : 1.0;
+            }
+            if (all_opt_or_infeasible) out.status = SolveResult::Status::Optimal;
+            else if (any_timelimit) out.status = SolveResult::Status::TimeLimit;
+            else out.status = SolveResult::Status::Feasible;
+        } else if (all_infeasible) {
+            out.status = SolveResult::Status::Infeasible;
+            out.objective = 0.0;
+            if (!std::isfinite(out.bound)) out.bound = 0.0;
+            out.gap = 0.0;
+        } else if (any_timelimit) {
+            out.status = SolveResult::Status::TimeLimit;
+            out.objective = 0.0;
+            if (!std::isfinite(out.bound)) out.bound = 0.0;
+            out.gap = 1.0;
+        } else if (any_error) {
+            out.status = SolveResult::Status::Error;
+            out.objective = 0.0;
+            if (!std::isfinite(out.bound)) out.bound = 0.0;
+            out.gap = 1.0;
+        } else {
+            out.status = SolveResult::Status::Feasible;
+        }
+
+        logger_.log("ParaMIP static_root done: chunks={}, status={}, obj={}, bound={}, time={}s",
+                    static_cast<int32_t>(chunk_plan.size()),
+                    static_cast<int>(out.status),
+                    out.objective,
+                    out.bound,
+                    out.time_seconds);
+        return out;
+    }
+
     auto non_highs_work_budget =
         std::make_shared<WorkUnitBudget>(deterministic_work_units);
 
@@ -712,48 +1011,10 @@ SolveResult Model::solve(const SolverOptions& options) {
     // Staged preprocessing:
     // Stage 1: parallel source/target 2-cycle bounds + fast warm-start
     // Stage 2: adaptive second warm-start + optional all-pairs + deeper s-t ng/DSSR
-    const int32_t source = problem_.source();
-    const int32_t target = problem_.target();
     // correction = profit(source) when s == t (tour: depot profit double-subtracted)
     double correction = problem_.is_tour() ? problem_.profit(source) : 0.0;
 
-    const int32_t n = problem_.num_nodes();
     const int32_t m = problem_.num_edges();
-
-    if (paramip_mode != "off") {
-        const int32_t requested_chunks = std::max<int32_t>(2, paramip_chunks);
-        const int32_t depth = ceil_log2_chunks(requested_chunks);
-        auto split_nodes = choose_paramip_split_nodes(problem_, depth);
-        auto chunk_plan = build_paramip_chunk_plan(split_nodes);
-        const int32_t workers = (paramip_workers > 0)
-            ? paramip_workers
-            : std::max<int32_t>(1, static_cast<int32_t>(std::thread::hardware_concurrency()));
-        logger_.log("ParaMIP plan: mode={}, requested_chunks={}, depth={}, chunks={}, workers={}",
-                    paramip_mode, requested_chunks, depth,
-                    static_cast<int32_t>(chunk_plan.size()), workers);
-        if (static_cast<int32_t>(split_nodes.size()) < depth) {
-            logger_.log("ParaMIP plan: limited split nodes ({}/{}) due to instance size",
-                        static_cast<int32_t>(split_nodes.size()), depth);
-        }
-        if (workflow_dump && !chunk_plan.empty()) {
-            const int32_t dump_limit = std::min<int32_t>(
-                8, static_cast<int32_t>(chunk_plan.size()));
-            for (int32_t i = 0; i < dump_limit; ++i) {
-                const auto& chunk = chunk_plan[static_cast<size_t>(i)];
-                std::ostringstream ss;
-                ss << "  chunk#" << chunk.id << ": ";
-                for (size_t k = 0; k < chunk.fixings.size(); ++k) {
-                    if (k > 0) ss << ", ";
-                    ss << "y[" << chunk.fixings[k].node << "]="
-                       << (chunk.fixings[k].value ? 1 : 0);
-                }
-                logger_.log("{}", ss.str());
-            }
-        }
-        if (paramip_mode == "static_root") {
-            logger_.log("ParaMIP static_root: execution path is not enabled yet; running single-solve baseline");
-        }
-    }
 
     std::vector<double> fwd_bounds, bwd_bounds;
     std::vector<double> all_pairs;
@@ -994,6 +1255,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_heuristic_async_injection(heuristic_async_injection);
     bridge.set_heuristic_deterministic_mode(deterministic);
     bridge.set_heuristic_deterministic_restarts(heuristic_deterministic_restarts);
+    bridge.set_fixed_y(fixed_y);
     bridge.set_work_unit_budget(non_highs_work_budget);
     if (max_cuts_sec >= 0) bridge.set_separator_max_cuts("SEC", max_cuts_sec);
     if (max_cuts_rci >= 0) bridge.set_separator_max_cuts("RCI", max_cuts_rci);
@@ -1052,7 +1314,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         } else {
             logger_.log("  async_dssr_updates disabled for this run");
         }
-        logger_.log("  paramip-style worker DAG: planned next (not active in this branch)");
+        logger_.log("  paramip-style worker DAG: enabled via paramip_mode=static_root");
     }
     const bool deterministic_async_strict =
         dssr_background_updates_enabled && deterministic;

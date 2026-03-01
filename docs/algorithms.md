@@ -162,7 +162,9 @@ the single-instance exact solve behavior.
 
 Current implementation status:
 - `paramip_mode=plan`: builds and logs deterministic root chunk plans.
-- `paramip_mode=static_root`: logs chunk plan and currently falls back to single-solve baseline.
+- `paramip_mode=static_root`: executes static root chunk solves and aggregates results.
+- `parallel_mode=deterministic`: executes chunk solves in fixed chunk order.
+- `parallel_mode=opportunistic`: executes chunk solves with a worker pool (`paramip_workers`).
 
 ## Cut Separation
 

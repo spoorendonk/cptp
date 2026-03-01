@@ -87,6 +87,22 @@ void HiGHSBridge::build_formulation() {
         }
     }
 
+    // Optional fixed-y assignments (used by ParaMIP root partitioning).
+    if (!fixed_y_.empty() && fixed_y_.size() == static_cast<size_t>(n)) {
+        for (int32_t i = 0; i < n; ++i) {
+            if (i == prob_.source() || i == prob_.target()) continue;
+            const int8_t fix = fixed_y_[static_cast<size_t>(i)];
+            if (fix == 0) {
+                col_upper[m + i] = 0.0;
+                for (auto e : graph.incident_edges(i)) {
+                    col_upper[e] = 0.0;
+                }
+            } else if (fix == 1) {
+                col_lower[m + i] = 1.0;
+            }
+        }
+    }
+
     // Edge elimination: capacity-aware labeling bounds (possibly async-updated).
     std::vector<double> elim_fwd = fwd_bounds_;
     std::vector<double> elim_bwd = bwd_bounds_;

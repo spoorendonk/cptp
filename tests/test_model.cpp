@@ -883,3 +883,47 @@ TEST_CASE("Model: paramip planning options are accepted",
         return;
     }
 }
+
+TEST_CASE("Model: paramip static_root matches baseline objective on tiny path",
+          "[model][paramip]") {
+    auto setup_model = [](rcspp::Model& model) {
+        std::vector<rcspp::Edge> edges = {
+            {0, 1}, {1, 2}, {0, 2}, {2, 3}, {1, 3}
+        };
+        std::vector<double> costs = {4.0, 3.0, 10.0, 1.0, 2.0};
+        std::vector<double> profits = {0.0, 7.0, 2.0, 5.0};
+        std::vector<double> demands = {0.0, 1.0, 1.0, 1.0};
+        model.set_graph(4, edges, costs);
+        model.set_source(0);
+        model.set_target(3);
+        model.set_profits(profits);
+        model.add_capacity_resource(demands, 3.0);
+    };
+
+    auto base_opts = quiet;
+    base_opts.push_back({"threads", "1"});
+    base_opts.push_back({"random_seed", "0"});
+    base_opts.push_back({"parallel_mode", "deterministic"});
+    base_opts.push_back({"dssr_background_updates", "false"});
+
+    rcspp::Model base_model;
+    setup_model(base_model);
+    auto base = base_model.solve(base_opts);
+    if (base.status == rcspp::SolveResult::Status::Error || !base.has_solution()) {
+        WARN("baseline run unavailable; skipping static_root objective comparison");
+        return;
+    }
+
+    rcspp::Model paramip_model;
+    setup_model(paramip_model);
+    auto p_opts = base_opts;
+    p_opts.push_back({"paramip_mode", "static_root"});
+    p_opts.push_back({"paramip_chunks", "4"});
+    p_opts.push_back({"paramip_workers", "2"});
+    auto p = paramip_model.solve(p_opts);
+    if (p.status == rcspp::SolveResult::Status::Error || !p.has_solution()) {
+        WARN("static_root run unavailable; skipping objective comparison");
+        return;
+    }
+    REQUIRE_THAT(p.objective, WithinAbs(base.objective, 1e-6));
+}

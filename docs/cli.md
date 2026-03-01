@@ -108,7 +108,9 @@ Related existing knobs in the same area:
 
 Note:
 - Edge elimination requires a finite incumbent upper bound plus labeling bounds; if no UB is available yet, elimination is skipped.
-- `paramip_mode=static_root` currently emits the chunk plan and falls back to single-solve baseline execution.
+- `paramip_mode=static_root` executes chunked root partition solves (threads=1 per chunk).
+- In `parallel_mode=deterministic`, static-root chunks run in fixed order.
+- In `parallel_mode=opportunistic`, static-root chunks run with a worker pool (`paramip_workers`).
 
 ## 4) Reduced-cost fixing
 

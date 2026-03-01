@@ -49,6 +49,7 @@ static void print_usage(const char* prog) {
               << "  --paramip_mode <mode>  ParaMIP direction mode: off | plan | static_root\n"
               << "  --paramip_chunks N  Requested static root partition chunks (power-of-two rounded)\n"
               << "  --paramip_workers N  Target worker count for ParaMIP plan/execution\n"
+              << "  --paramip_fixings spec  Internal fixed-y assignments: node:value,node:value\n"
               << "  --branch_hyper_sb_max_depth/iter_limit/min_reliable/max_candidates <int>\n"
               << "                         Hyperplane strong-branching tuning\n"
               << "\nAll other options are forwarded to HiGHS. Common ones:\n"
