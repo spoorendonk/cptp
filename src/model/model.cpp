@@ -311,6 +311,7 @@ SolverOptions make_paramip_subsolve_options(const SolverOptions& base_options,
             k == "_internal_prepared_ctx_id" ||
             k == "_internal_root_capture_id" ||
             k == "_internal_root_warmstart_id" ||
+            k == "_internal_interrupt_flag_id" ||
             k == "_internal_disable_async_dssr" ||
             (k == "random_seed" && random_seed.has_value()) ||
             (k == "mip_max_nodes" && mip_max_nodes.has_value())) {
@@ -408,6 +409,11 @@ std::unordered_map<int64_t, std::shared_ptr<const RootLpSnapshot>>
     g_root_warmstarts;
 std::atomic<int64_t> g_next_root_warmstart_id{1};
 
+std::mutex g_interrupt_flag_mutex;
+std::unordered_map<int64_t, std::shared_ptr<std::atomic<bool>>>
+    g_interrupt_flags;
+std::atomic<int64_t> g_next_interrupt_flag_id{1};
+
 int64_t register_prepared_context(std::shared_ptr<const PreparedSolveContext> ctx) {
     const int64_t id = g_next_prepared_context_id.fetch_add(1, std::memory_order_relaxed);
     std::lock_guard<std::mutex> lock(g_prepared_context_mutex);
@@ -471,6 +477,28 @@ void unregister_root_warmstart(int64_t id) {
     if (id <= 0) return;
     std::lock_guard<std::mutex> lock(g_root_warmstart_mutex);
     g_root_warmstarts.erase(id);
+}
+
+int64_t register_interrupt_flag(std::shared_ptr<std::atomic<bool>> flag) {
+    const int64_t id =
+        g_next_interrupt_flag_id.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(g_interrupt_flag_mutex);
+    g_interrupt_flags[id] = std::move(flag);
+    return id;
+}
+
+std::shared_ptr<std::atomic<bool>> find_interrupt_flag(int64_t id) {
+    if (id <= 0) return {};
+    std::lock_guard<std::mutex> lock(g_interrupt_flag_mutex);
+    auto it = g_interrupt_flags.find(id);
+    if (it == g_interrupt_flags.end()) return {};
+    return it->second;
+}
+
+void unregister_interrupt_flag(int64_t id) {
+    if (id <= 0) return;
+    std::lock_guard<std::mutex> lock(g_interrupt_flag_mutex);
+    g_interrupt_flags.erase(id);
 }
 
 }  // namespace
@@ -591,6 +619,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     int64_t internal_prepared_ctx_id = 0;
     int64_t internal_root_capture_id = 0;
     int64_t internal_root_warmstart_id = 0;
+    int64_t internal_interrupt_flag_id = 0;
     bool internal_disable_async_dssr = false;
     int32_t max_concurrent_solves = 0;
     bool enable_sec = true;
@@ -760,6 +789,14 @@ SolveResult Model::solve(const SolverOptions& options) {
                 internal_root_warmstart_id = std::stoll(value);
             } catch (...) {
                 internal_root_warmstart_id = 0;
+            }
+            continue;
+        }
+        if (key == "_internal_interrupt_flag_id") {
+            try {
+                internal_interrupt_flag_id = std::stoll(value);
+            } catch (...) {
+                internal_interrupt_flag_id = 0;
             }
             continue;
         }
@@ -1068,6 +1105,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     auto root_capture_store = find_root_capture_store(internal_root_capture_id);
     auto root_warmstart = find_root_warmstart(internal_root_warmstart_id);
+    auto interrupt_flag = find_interrupt_flag(internal_interrupt_flag_id);
     if (internal_root_capture_id > 0 && !root_capture_store) {
         logger_.log(
             "Warning: internal root capture store {} not found; root LP capture disabled",
@@ -1077,6 +1115,11 @@ SolveResult Model::solve(const SolverOptions& options) {
         logger_.log(
             "Warning: internal root warmstart {} not found; using heuristic warm-start only",
             internal_root_warmstart_id);
+    }
+    if (internal_interrupt_flag_id > 0 && !interrupt_flag) {
+        logger_.log(
+            "Warning: internal interrupt flag {} not found; interrupt callback disabled",
+            internal_interrupt_flag_id);
     }
 
     int32_t base_random_seed = 0;
@@ -1483,8 +1526,26 @@ SolveResult Model::solve(const SolverOptions& options) {
                         ? std::max(0.05, std::min(5.0, 0.25 * stage0_remaining))
                         : std::numeric_limits<double>::infinity();
                 const std::string root_fixings = encode_paramip_fixings(fixed_y);
+                const bool first_finish_mode =
+                    (!deterministic && root_pick_policy == "first");
+                auto probe_interrupt_flag = std::make_shared<std::atomic<bool>>(false);
+                int64_t probe_interrupt_flag_id = 0;
+                struct ProbeInterruptGuard {
+                    int64_t id = 0;
+                    ~ProbeInterruptGuard() { unregister_interrupt_flag(id); }
+                } probe_interrupt_guard{};
+                if (first_finish_mode) {
+                    probe_interrupt_flag_id =
+                        register_interrupt_flag(probe_interrupt_flag);
+                    probe_interrupt_guard.id = probe_interrupt_flag_id;
+                }
                 std::atomic<int32_t> completion_counter{0};
+                std::atomic<int32_t> first_valid_probe{-1};
                 auto run_probe = [&](int32_t idx) {
+                    if (first_finish_mode &&
+                        first_valid_probe.load(std::memory_order_relaxed) >= 0) {
+                        return;
+                    }
                     auto& probe = probes[static_cast<size_t>(idx)];
                     auto capture_store = std::make_shared<RootLpCaptureStore>();
                     const int64_t capture_id =
@@ -1497,24 +1558,58 @@ SolveResult Model::solve(const SolverOptions& options) {
                         options, root_fixings, global_ub.load(std::memory_order_relaxed),
                         stage0_probe_limit, true,
                         probe.seed, 1);
+                    sub_opts.push_back({"disable_heuristics", "true"});
+                    sub_opts.push_back({"heuristic_callback", "false"});
+                    sub_opts.push_back({"heuristic_async_injection", "false"});
                     sub_opts.push_back({"_internal_skip_preproc", "true"});
                     sub_opts.push_back({"_internal_prepared_ctx_id",
                                         std::to_string(prepared_ctx_id)});
                     sub_opts.push_back({"_internal_root_capture_id",
                                         std::to_string(capture_id)});
+                    if (probe_interrupt_flag_id > 0) {
+                        sub_opts.push_back({"_internal_interrupt_flag_id",
+                                            std::to_string(probe_interrupt_flag_id)});
+                    }
                     sub_opts.push_back({"_internal_disable_async_dssr", "true"});
                     Model sub_model;
                     sub_model.set_problem(problem_);
                     probe.result = sub_model.solve(sub_opts);
+                    if (probe.result.has_solution() &&
+                        std::isfinite(probe.result.objective)) {
+                        double prev = global_ub.load(std::memory_order_relaxed);
+                        while (probe.result.objective + 1e-9 < prev) {
+                            if (global_ub.compare_exchange_weak(
+                                    prev, probe.result.objective,
+                                    std::memory_order_relaxed,
+                                    std::memory_order_relaxed)) {
+                                break;
+                            }
+                        }
+                    }
                     probe.root_lp = capture_store->get_snapshot();
                     probe.completion_rank = completion_counter.fetch_add(
                         1, std::memory_order_relaxed);
+
+                    if (first_finish_mode &&
+                        probe.result.status != SolveResult::Status::Error &&
+                        std::isfinite(probe.result.bound)) {
+                        int32_t expected = -1;
+                        if (first_valid_probe.compare_exchange_strong(
+                                expected, idx, std::memory_order_relaxed)) {
+                            probe_interrupt_flag->store(
+                                true, std::memory_order_relaxed);
+                        }
+                    }
                 };
 
                 const int32_t workers = std::min<int32_t>(
                     paramip_worker_target, root_probe_count);
                 if (workers <= 1) {
                     for (int32_t i = 0; i < root_probe_count; ++i) {
+                        if (first_finish_mode &&
+                            first_valid_probe.load(std::memory_order_relaxed) >= 0) {
+                            break;
+                        }
                         run_probe(i);
                     }
                 } else {
@@ -1524,6 +1619,10 @@ SolveResult Model::solve(const SolverOptions& options) {
                     for (int32_t w = 0; w < workers; ++w) {
                         pool.emplace_back([&] {
                             for (;;) {
+                                if (first_finish_mode &&
+                                    first_valid_probe.load(std::memory_order_relaxed) >= 0) {
+                                    break;
+                                }
                                 const int32_t idx =
                                     next.fetch_add(1, std::memory_order_relaxed);
                                 if (idx >= root_probe_count) break;
@@ -1551,14 +1650,17 @@ SolveResult Model::solve(const SolverOptions& options) {
 
                 int32_t chosen = -1;
                 if (root_pick_policy == "first") {
-                    for (int32_t i = 0; i < root_probe_count; ++i) {
-                        const auto& p = probes[static_cast<size_t>(i)];
-                        if (p.result.status == SolveResult::Status::Error) continue;
-                        if (!has_finite_bound(p)) continue;
-                        if (chosen < 0 ||
-                            p.completion_rank <
-                                probes[static_cast<size_t>(chosen)].completion_rank) {
-                            chosen = i;
+                    chosen = first_valid_probe.load(std::memory_order_relaxed);
+                    if (chosen < 0) {
+                        for (int32_t i = 0; i < root_probe_count; ++i) {
+                            const auto& p = probes[static_cast<size_t>(i)];
+                            if (p.result.status == SolveResult::Status::Error) continue;
+                            if (!has_finite_bound(p)) continue;
+                            if (chosen < 0 ||
+                                p.completion_rank <
+                                    probes[static_cast<size_t>(chosen)].completion_rank) {
+                                chosen = i;
+                            }
                         }
                     }
                     if (chosen < 0) {
@@ -1592,8 +1694,8 @@ SolveResult Model::solve(const SolverOptions& options) {
                             chosen = i;
                             continue;
                         }
-                        if (p_has_bound && b_has_bound &&
-                            std::abs(p.result.bound - best.result.bound) <= 1e-9) {
+                            if (p_has_bound && b_has_bound &&
+                                std::abs(p.result.bound - best.result.bound) <= 1e-9) {
                             const bool p_has_sol = has_incumbent(p);
                             const bool b_has_sol = has_incumbent(best);
                             if (p_has_sol && !b_has_sol) {
@@ -1602,6 +1704,16 @@ SolveResult Model::solve(const SolverOptions& options) {
                             }
                             if (p_has_sol && b_has_sol &&
                                 p.result.objective < best.result.objective - 1e-9) {
+                                chosen = i;
+                                continue;
+                            }
+                            const int64_t p_it = p.result.simplex_iterations;
+                            const int64_t b_it = best.result.simplex_iterations;
+                            if (p_it >= 0 && b_it >= 0 && p_it < b_it) {
+                                chosen = i;
+                                continue;
+                            }
+                            if (p_it == b_it && p.probe_idx < best.probe_idx) {
                                 chosen = i;
                                 continue;
                             }
@@ -1632,10 +1744,11 @@ SolveResult Model::solve(const SolverOptions& options) {
                         }
                     }
                     logger_.log(
-                        "ParaMIP stage0: probes={}, policy={}, chosen_probe={}, seed={}, bound={}, obj={}, status={}, root_lp={}",
+                        "ParaMIP stage0: probes={}, policy={}, chosen_probe={}, seed={}, bound={}, obj={}, status={}, simplex_it={}, root_lp={}",
                         root_probe_count, root_pick_policy, chosen, selected_root_seed,
                         picked.result.bound, picked.result.objective,
                         static_cast<int>(picked.result.status),
+                        picked.result.simplex_iterations,
                         selected_root_snapshot.has_value() ? "captured" : "missing");
                 } else {
                     logger_.log(
@@ -1704,9 +1817,11 @@ SolveResult Model::solve(const SolverOptions& options) {
             return encode_paramip_fixings(merged);
         };
 
-        auto run_chunk = [&](int32_t idx) {
+        auto run_chunk = [&](int32_t idx, double fixed_cutoff, bool dynamic_cutoff) {
             const auto& chunk = chunk_plan[static_cast<size_t>(idx)];
-            const double local_cutoff = global_ub.load(std::memory_order_relaxed);
+            const double local_cutoff = dynamic_cutoff
+                ? global_ub.load(std::memory_order_relaxed)
+                : fixed_cutoff;
             double remaining_time_sec = std::numeric_limits<double>::infinity();
             if (std::isfinite(global_time_limit_sec)) {
                 remaining_time_sec = global_time_limit_sec - paramip_timer.elapsed_seconds();
@@ -1737,7 +1852,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             sub_model.set_problem(problem_);
             auto r = sub_model.solve(sub_opts);
             chunk_results[static_cast<size_t>(idx)] = r;
-            if (r.has_solution() && std::isfinite(r.objective)) {
+            if (dynamic_cutoff && r.has_solution() && std::isfinite(r.objective)) {
                 double prev = global_ub.load(std::memory_order_relaxed);
                 while (r.objective + 1e-9 < prev) {
                     if (global_ub.compare_exchange_weak(
@@ -1750,8 +1865,27 @@ SolveResult Model::solve(const SolverOptions& options) {
         };
 
         if (deterministic) {
-            for (int32_t i = 0; i < static_cast<int32_t>(chunk_plan.size()); ++i) {
-                run_chunk(i);
+            const double fixed_cutoff = global_ub.load(std::memory_order_relaxed);
+            const int32_t workers = std::min<int32_t>(
+                std::max<int32_t>(1, paramip_worker_target),
+                static_cast<int32_t>(chunk_plan.size()));
+            if (workers <= 1) {
+                for (int32_t i = 0; i < static_cast<int32_t>(chunk_plan.size()); ++i) {
+                    run_chunk(i, fixed_cutoff, false);
+                }
+            } else {
+                std::vector<std::thread> pool;
+                pool.reserve(static_cast<size_t>(workers));
+                for (int32_t w = 0; w < workers; ++w) {
+                    pool.emplace_back([&, w] {
+                        for (int32_t idx = w;
+                             idx < static_cast<int32_t>(chunk_plan.size());
+                             idx += workers) {
+                            run_chunk(idx, fixed_cutoff, false);
+                        }
+                    });
+                }
+                for (auto& t : pool) t.join();
             }
         } else {
             const int32_t workers = std::min<int32_t>(
@@ -1765,7 +1899,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                     for (;;) {
                         const int32_t idx = next.fetch_add(1, std::memory_order_relaxed);
                         if (idx >= static_cast<int32_t>(chunk_plan.size())) break;
-                        run_chunk(idx);
+                        run_chunk(idx, std::numeric_limits<double>::infinity(), true);
                     }
                 });
             }
@@ -1915,6 +2049,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_shared_bounds_store(shared_bounds);
     bridge.set_async_upper_bound(async_upper_bound);
     bridge.set_async_incumbent_store(async_incumbent_store);
+    bridge.set_interrupt_flag(interrupt_flag);
 
     const int32_t async_start_ng =
         std::max(ng_size_used + 1, dssr_options.initial_ng_size + 1);

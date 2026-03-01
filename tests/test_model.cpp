@@ -886,6 +886,32 @@ TEST_CASE("Model: paramip planning options are accepted",
     }
 }
 
+TEST_CASE("Model: mip_max_nodes limit is surfaced as non-error status",
+          "[model][paramip][limits]") {
+    rcspp::Model model;
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {1, 2}, {0, 2}, {2, 3}, {1, 3}
+    };
+    std::vector<double> costs = {4.0, 3.0, 10.0, 1.0, 2.0};
+    std::vector<double> profits = {0.0, 7.0, 2.0, 5.0};
+    std::vector<double> demands = {0.0, 1.0, 1.0, 1.0};
+    model.set_graph(4, edges, costs);
+    model.set_source(0);
+    model.set_target(3);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 3.0);
+
+    auto opts = quiet;
+    opts.push_back({"threads", "1"});
+    opts.push_back({"random_seed", "0"});
+    opts.push_back({"parallel_mode", "deterministic"});
+    opts.push_back({"dssr_background_updates", "false"});
+    opts.push_back({"mip_max_nodes", "1"});
+
+    auto r = model.solve(opts);
+    REQUIRE(r.status != rcspp::SolveResult::Status::Error);
+}
+
 TEST_CASE("Model: paramip static_root matches baseline objective on tiny path",
           "[model][paramip]") {
     auto setup_model = [](rcspp::Model& model) {

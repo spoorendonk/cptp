@@ -950,7 +950,9 @@ void HiGHSBridge::install_propagator() {
 }
 
 void HiGHSBridge::install_heuristic_callback() {
-    if (!heuristic_callback_) return;
+    const bool heuristic_enabled = heuristic_callback_;
+    const bool interrupt_enabled = static_cast<bool>(interrupt_flag_);
+    if (!heuristic_enabled && !interrupt_enabled) return;
 
     auto calls = heuristic_calls_;
     auto solutions = heuristic_solutions_;
@@ -971,7 +973,7 @@ void HiGHSBridge::install_heuristic_callback() {
     auto async_store = async_incumbent_store_;
     auto last_async_version = std::make_shared<uint64_t>(0);
     highs_.setCallback(
-        [this, cached_x, cached_y, cache_mtx, calls, solutions, budget_ms,
+        [this, heuristic_enabled, cached_x, cached_y, cache_mtx, calls, solutions, budget_ms,
          last_node_count, strategy, async_store, last_async_version,
          node_interval, async_injection, deterministic_mode,
          deterministic_restarts, work_budget](
@@ -980,6 +982,13 @@ void HiGHSBridge::install_heuristic_callback() {
             HighsCallbackInput* data_in,
             void* /*user_data*/) {
             if (callback_type == static_cast<int>(HighsCallbackType::kCallbackMipInterrupt)) {
+                if (interrupt_flag_ &&
+                    interrupt_flag_->load(std::memory_order_relaxed)) {
+                    data_in->user_interrupt = true;
+                    return;
+                }
+                if (!heuristic_enabled) return;
+
                 // Only stop when HiGHS has already accepted an incumbent.
                 // Otherwise we may terminate before an async candidate is injected.
                 if (std::isfinite(data_out->mip_primal_bound) &&
@@ -989,6 +998,8 @@ void HiGHSBridge::install_heuristic_callback() {
                 }
                 return;
             }
+
+            if (!heuristic_enabled) return;
 
             // Only handle kCallbackMipUserSolution below.
             if (callback_type != static_cast<int>(HighsCallbackType::kCallbackMipUserSolution)) {
@@ -1065,9 +1076,15 @@ void HiGHSBridge::install_heuristic_callback() {
         },
         nullptr);
 
-    highs_.startCallback(HighsCallbackType::kCallbackMipUserSolution);
+    if (heuristic_enabled) {
+        highs_.startCallback(HighsCallbackType::kCallbackMipUserSolution);
+    }
     highs_.startCallback(HighsCallbackType::kCallbackMipInterrupt);
-    logger_.log("Installed LP-guided heuristic callback (budget={}ms)", budget_ms);
+    if (heuristic_enabled) {
+        logger_.log("Installed LP-guided heuristic callback (budget={}ms)", budget_ms);
+    } else {
+        logger_.log("Installed MIP interrupt callback");
+    }
 }
 
 std::vector<int32_t> HiGHSBridge::order_path(
@@ -1146,6 +1163,7 @@ SolveResult HiGHSBridge::extract_result() const {
             break;
         case HighsModelStatus::kTimeLimit:
         case HighsModelStatus::kIterationLimit:
+        case HighsModelStatus::kSolutionLimit:
             result.status = SolveResult::Status::TimeLimit;
             break;
         default:
@@ -1156,6 +1174,7 @@ SolveResult HiGHSBridge::extract_result() const {
     highs_.getInfoValue("objective_function_value", result.objective);
 
     highs_.getInfoValue("mip_node_count", result.nodes);
+    highs_.getInfoValue("simplex_iteration_count", result.simplex_iterations);
     highs_.getInfoValue("mip_dual_bound", result.bound);
     double mip_gap = 0.0;
     highs_.getInfoValue("mip_gap", mip_gap);

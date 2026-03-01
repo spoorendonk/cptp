@@ -110,6 +110,9 @@ class HiGHSBridge {
     void set_async_incumbent_store(std::shared_ptr<model::AsyncIncumbentStore> store) {
         async_incumbent_store_ = std::move(store);
     }
+    void set_interrupt_flag(std::shared_ptr<std::atomic<bool>> flag) {
+        interrupt_flag_ = std::move(flag);
+    }
 
     /// Optional deterministic checkpoint hook called at propagator callbacks.
     void set_deterministic_checkpoint_hook(std::function<void()> hook) {
@@ -180,6 +183,7 @@ class HiGHSBridge {
     std::shared_ptr<preprocess::SharedBoundsStore> shared_bounds_;
     std::shared_ptr<std::atomic<double>> async_upper_bound_;
     std::shared_ptr<model::AsyncIncumbentStore> async_incumbent_store_;
+    std::shared_ptr<std::atomic<bool>> interrupt_flag_;
     std::function<void()> deterministic_checkpoint_hook_;
     RootLpCaptureCallback root_lp_capture_callback_;
     std::atomic<bool> root_lp_captured_{false};
