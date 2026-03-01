@@ -89,7 +89,8 @@ HiGHS MIP solve
 Extract result (tour/path, objective, bound, gap)
 ```
 
-Orchestrated by `Model::solve()` in `src/model/model.cpp`.
+Orchestrated by `Model::solve()` in `src/model/model.cpp`. Set
+`workflow_dump=true` to print startup/solve DAG wiring in logs.
 
 ## High-Level Pseudocode
 
@@ -98,9 +99,14 @@ function solve(problem, options):
     configure_highs(options)
 
     # Stage 1: bounds + fast UB in parallel
+    stage1_mode = choose(preproc_stage1_bounds in {two_cycle, ng1, auto})
     parallel:
-        fwd = forward_labeling(problem, source)
-        bwd = backward_labeling(problem, target)  # bwd=fwd in tour mode
+        if stage1_mode == two_cycle:
+            fwd = labeling_from(problem, source)
+            bwd = labeling_from(problem, target)  # bwd=fwd in tour mode
+        else:
+            fwd, bwd, ng_path = ng_compute_bounds(problem, source, target,
+                                                  ng_size=1, dssr_iters=1)
         ws_fast = build_initial_solution(problem, fast_budget)
 
     if source == target:
@@ -137,6 +143,22 @@ function solve(problem, options):
     stop_async_ng_worker()
     return extract_result()
 ```
+
+## Planned ParaMIP Worker DAG (Design, Not Yet Active)
+
+Current code runs one HiGHS MIP instance per `Model::solve` call (plus async DSSR
+updates). The next step is root-partitioned ParaMIP-style execution:
+
+```text
+root_lp -> create_branch_chunks(B)
+        -> worker_1 solve chunk_1 (threads=1)
+        -> worker_2 solve chunk_2 (threads=1)
+        -> ...
+        -> worker_B solve chunk_B (threads=1)
+```
+
+For now, this branch only exposes DAG visibility (`workflow_dump=true`) and keeps
+the single-instance exact solve behavior.
 
 ## Cut Separation
 

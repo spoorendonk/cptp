@@ -44,6 +44,8 @@ static void print_usage(const char* prog) {
               << "  --min_violation_<family> X  Per-family min violation filter\n"
               << "  --edge_elimination true/false  Enable preprocessing edge elimination (default true)\n"
               << "  --edge_elimination_nodes true/false  Also fix nodes if all incident edges are eliminated\n"
+              << "  --preproc_stage1_bounds <mode>  Stage-1 bounds backend: two_cycle | ng1 | auto\n"
+              << "  --workflow_dump true/false  Print startup/solve DAG wiring (default false)\n"
               << "  --branch_hyper_sb_max_depth/iter_limit/min_reliable/max_candidates <int>\n"
               << "                         Hyperplane strong-branching tuning\n"
               << "\nAll other options are forwarded to HiGHS. Common ones:\n"

@@ -203,6 +203,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t heuristic_deterministic_restarts = 32;
     int64_t heuristic_node_interval = 200;
     bool heuristic_async_injection = true;
+    bool workflow_dump = false;
     int32_t max_concurrent_solves = 0;
     bool enable_sec = true;
     bool enable_rci = true;
@@ -220,6 +221,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t dssr_background_auto_min_epochs = 4;
     int32_t dssr_background_auto_no_progress_limit = 6;
     bool preproc_adaptive = true;
+    std::string preproc_stage1_bounds = "auto";
     int32_t preproc_fast_restarts = 12;
     double preproc_fast_budget_ms = 30.0;
     int32_t preproc_second_ws_large_n = 60;
@@ -297,6 +299,10 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "heuristic_async_injection") {
             heuristic_async_injection = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "workflow_dump") {
+            workflow_dump = (value == "true" || value == "1");
             continue;
         }
         if (key == "parallel_mode") {
@@ -398,6 +404,19 @@ SolveResult Model::solve(const SolverOptions& options) {
             preproc_adaptive = (value == "true" || value == "1");
             continue;
         }
+        if (key == "preproc_stage1_bounds") {
+            std::string mode = value;
+            std::transform(mode.begin(), mode.end(), mode.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (mode == "two_cycle" || mode == "ng1" || mode == "auto") {
+                preproc_stage1_bounds = mode;
+            } else {
+                logger_.log("Warning: unknown preproc_stage1_bounds='{}' (expected two_cycle|ng1|auto), using auto",
+                            value);
+                preproc_stage1_bounds = "auto";
+            }
+            continue;
+        }
         if (key == "preproc_fast_restarts") {
             preproc_fast_restarts = std::stoi(value);
             continue;
@@ -442,10 +461,6 @@ SolveResult Model::solve(const SolverOptions& options) {
             dssr_options.dssr_iterations = std::stoi(value);
             continue;
         }
-        if (key == "ng_label_budget") {
-            logger_.log("Warning: ng_label_budget is deprecated and ignored (exact bounds do not cap labels)");
-            continue;
-        }
         if (key == "ng_simd") {
             dssr_options.enable_simd = (value == "true" || value == "1");
             continue;
@@ -454,7 +469,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             if (value == "root_only") rc_settings.strategy = RCFixingStrategy::root_only;
             else if (value == "on_ub_improvement") rc_settings.strategy = RCFixingStrategy::on_ub_improvement;
             else if (value == "periodic") rc_settings.strategy = RCFixingStrategy::periodic;
-            else if (value == "adaptive" || value == "auto") rc_settings.strategy = RCFixingStrategy::adaptive;
+            else if (value == "adaptive") rc_settings.strategy = RCFixingStrategy::adaptive;
             else rc_settings.strategy = RCFixingStrategy::off;
             continue;
         }
@@ -630,22 +645,55 @@ SolveResult Model::solve(const SolverOptions& options) {
 
         // Stage 1: fast startup bounds + first incumbent
         heuristic::HeuristicResult fast_start{{}, std::numeric_limits<double>::infinity()};
-        auto fast_stage_opts = dssr_options;
-        fast_stage_opts.initial_ng_size = 1;
-        fast_stage_opts.max_ng_size = 1;
-        fast_stage_opts.dssr_iterations = 1;
+        enum class Stage1BoundsBackend {
+            two_cycle,
+            ng1,
+        };
+        Stage1BoundsBackend stage1_backend = Stage1BoundsBackend::two_cycle;
+        if (preproc_stage1_bounds == "ng1") {
+            stage1_backend = Stage1BoundsBackend::ng1;
+        } else if (preproc_stage1_bounds == "auto") {
+            // Favor the lightweight 2-cycle kernel on medium/large instances.
+            stage1_backend = (n <= 40) ? Stage1BoundsBackend::ng1
+                                       : Stage1BoundsBackend::two_cycle;
+        }
+        const char* stage1_backend_name =
+            (stage1_backend == Stage1BoundsBackend::ng1) ? "ng1" : "two_cycle";
+        if (workflow_dump) {
+            logger_.log("Workflow DAG (startup):");
+            logger_.log("  stage1_bounds({}) + fast_warm_start -> ub0", stage1_backend_name);
+            logger_.log("  ub0 + stage1_bounds -> stage1_edge_elim_ratio -> second_warm_start(adaptive)");
+            logger_.log("  stage2 parallel: second_warm_start | ng_refinement | all_pairs(optional)");
+        }
+
         tbb::task_group stage1_tg;
-        stage1_tg.run([&] {
-            auto fast_bounds = preprocess::ng::compute_bounds(
-                problem_, source, target, fast_stage_opts);
-            fwd_bounds = std::move(fast_bounds.fwd);
-            bwd_bounds = std::move(fast_bounds.bwd);
-            ng_size_used = fast_bounds.ng_size;
-            if (fast_bounds.elementary_path_found) {
-                ng_path_ub = fast_bounds.elementary_path_cost;
-                ng_path_nodes = std::move(fast_bounds.elementary_path);
+        if (stage1_backend == Stage1BoundsBackend::two_cycle) {
+            stage1_tg.run([&] {
+                fwd_bounds = preprocess::labeling_from(problem_, source);
+            });
+            if (source != target) {
+                stage1_tg.run([&] {
+                    bwd_bounds = preprocess::labeling_from(problem_, target);
+                });
             }
-        });
+            ng_size_used = 1;
+        } else {
+            auto fast_stage_opts = dssr_options;
+            fast_stage_opts.initial_ng_size = 1;
+            fast_stage_opts.max_ng_size = 1;
+            fast_stage_opts.dssr_iterations = 1;
+            stage1_tg.run([&] {
+                auto fast_bounds = preprocess::ng::compute_bounds(
+                    problem_, source, target, fast_stage_opts);
+                fwd_bounds = std::move(fast_bounds.fwd);
+                bwd_bounds = std::move(fast_bounds.bwd);
+                ng_size_used = fast_bounds.ng_size;
+                if (fast_bounds.elementary_path_found) {
+                    ng_path_ub = fast_bounds.elementary_path_cost;
+                    ng_path_nodes = std::move(fast_bounds.elementary_path);
+                }
+            });
+        }
         if (!disable_heuristics) {
             const int fast_restarts = std::max<int32_t>(3, preproc_fast_restarts);
             const double fast_budget_ms = deterministic ? 0.0 : preproc_fast_budget_ms;
@@ -655,6 +703,9 @@ SolveResult Model::solve(const SolverOptions& options) {
             });
         }
         stage1_tg.wait();
+        if (stage1_backend == Stage1BoundsBackend::two_cycle && source == target) {
+            bwd_bounds = fwd_bounds;
+        }
         if (!disable_heuristics) {
             warm_start = std::move(fast_start);
         }
@@ -793,10 +844,11 @@ SolveResult Model::solve(const SolverOptions& options) {
                 warm_start_ub = std::min(warm_start_ub, warm_start.objective);
             }
         }
-        logger_.log("Preprocessing: {}s, UB={}{} [stage1 edge-elim estimate: {}/{} ({:.1f}%)]",
+        logger_.log("Preprocessing: {}s, UB={}{} [stage1={}, edge-elim estimate: {}/{} ({:.1f}%)]",
                     preproc_timer.elapsed_seconds(),
                     warm_start_ub,
                     (cutoff < std::numeric_limits<double>::infinity() ? " (cutoff)" : ""),
+                    stage1_backend_name,
                     stage1_elim_edges, m, 100.0 * stage1_elim_ratio);
     }
 
@@ -861,6 +913,17 @@ SolveResult Model::solve(const SolverOptions& options) {
         dssr_background_updates &&
         !all_pairs_propagation &&
         async_end_ng >= async_start_ng;
+    if (workflow_dump) {
+        logger_.log("Workflow DAG (solve):");
+        logger_.log("  build_formulation -> highs.run() with callbacks");
+        if (dssr_background_updates_enabled) {
+            logger_.log("  highs.run() || async_dssr_updates (ng_size {}..{})",
+                        async_start_ng, async_end_ng);
+        } else {
+            logger_.log("  async_dssr_updates disabled for this run");
+        }
+        logger_.log("  paramip-style worker DAG: planned next (not active in this branch)");
+    }
     const bool deterministic_async_strict =
         dssr_background_updates_enabled && deterministic;
     const bool dssr_auto_policy =
@@ -1146,6 +1209,10 @@ SolveResult Model::solve(const SolverOptions& options) {
                 }
                 return result;
             });
+    } else {
+        // Ensure no stale global hyperplane callback leaks from prior solves.
+        HighsUserSeparator::setBranchingCallback({});
+        HighsUserSeparator::clearStack();
     }
 
     bridge.install_separators();

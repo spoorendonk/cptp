@@ -92,6 +92,7 @@ Related existing knobs in the same area:
 - `ng_dssr_iters` (default `6`)
 - `ng_simd` (default `true`)
 - `preproc_adaptive` (default `true`)
+- `preproc_stage1_bounds` (default `auto`): `two_cycle/ng1/auto`
 - `preproc_fast_restarts` (default `12`)
 - `preproc_fast_budget_ms` (default `30`)
 - `preproc_second_ws_large_n` (default `60`)
@@ -100,6 +101,7 @@ Related existing knobs in the same area:
 - `preproc_second_ws_budget_ms_min` (default `20`)
 - `preproc_second_ws_budget_ms_max` (default `400`)
 - `preproc_second_ws_budget_scale` (default `8`)
+- `workflow_dump` (default `false`): logs startup/solve task DAG (including current async DSSR wiring)
 
 Note:
 - Edge elimination requires a finite incumbent upper bound plus labeling bounds; if no UB is available yet, elimination is skipped.
