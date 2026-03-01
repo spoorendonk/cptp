@@ -105,10 +105,14 @@ Related existing knobs in the same area:
 - `paramip_mode` (default `off`): `off/plan/static_root`
 - `paramip_chunks` (default `0`): requested root partition chunks for ParaMIP planning
 - `paramip_workers` (default `0`): target worker count (`0` = hardware-concurrency default)
+- `paramip_root_probes` (default `0`): Stage-0 root-only probe solves with different seeds (`0` = auto)
+- `paramip_root_pick` (default `auto`): root candidate selection policy `auto/best/first`
 
 Note:
 - Edge elimination requires a finite incumbent upper bound plus labeling bounds; if no UB is available yet, elimination is skipped.
 - `paramip_mode=static_root` executes chunked root partition solves (threads=1 per chunk).
+- `static_root` includes Stage-0 root probing (`mip_max_nodes=1`) across different seeds, then
+  reuses the selected seed/cutoff for chunk solves.
 - In `parallel_mode=deterministic`, static-root chunks run in fixed order.
 - In `parallel_mode=opportunistic`, static-root chunks run with a worker pool (`paramip_workers`).
 

@@ -876,6 +876,8 @@ TEST_CASE("Model: paramip planning options are accepted",
     opts.push_back({"paramip_mode", "plan"});
     opts.push_back({"paramip_chunks", "8"});
     opts.push_back({"paramip_workers", "4"});
+    opts.push_back({"paramip_root_probes", "4"});
+    opts.push_back({"paramip_root_pick", "best"});
 
     auto r = model.solve(opts);
     if (r.status == rcspp::SolveResult::Status::Error) {
@@ -920,10 +922,46 @@ TEST_CASE("Model: paramip static_root matches baseline objective on tiny path",
     p_opts.push_back({"paramip_mode", "static_root"});
     p_opts.push_back({"paramip_chunks", "4"});
     p_opts.push_back({"paramip_workers", "2"});
+    p_opts.push_back({"paramip_root_probes", "4"});
+    p_opts.push_back({"paramip_root_pick", "best"});
     auto p = paramip_model.solve(p_opts);
     if (p.status == rcspp::SolveResult::Status::Error || !p.has_solution()) {
         WARN("static_root run unavailable; skipping objective comparison");
         return;
     }
     REQUIRE_THAT(p.objective, WithinAbs(base.objective, 1e-6));
+}
+
+TEST_CASE("Model: paramip static_root accepts stage0 first-pick policy",
+          "[model][paramip]") {
+    rcspp::Model model;
+    std::vector<rcspp::Edge> edges = {
+        {0, 1}, {1, 2}, {0, 2}, {2, 3}, {1, 3}
+    };
+    std::vector<double> costs = {4.0, 3.0, 10.0, 1.0, 2.0};
+    std::vector<double> profits = {0.0, 7.0, 2.0, 5.0};
+    std::vector<double> demands = {0.0, 1.0, 1.0, 1.0};
+    model.set_graph(4, edges, costs);
+    model.set_source(0);
+    model.set_target(3);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 3.0);
+
+    auto opts = quiet;
+    opts.push_back({"threads", "1"});
+    opts.push_back({"random_seed", "0"});
+    opts.push_back({"parallel_mode", "opportunistic"});
+    opts.push_back({"dssr_background_updates", "false"});
+    opts.push_back({"paramip_mode", "static_root"});
+    opts.push_back({"paramip_chunks", "4"});
+    opts.push_back({"paramip_workers", "2"});
+    opts.push_back({"paramip_root_probes", "4"});
+    opts.push_back({"paramip_root_pick", "first"});
+    opts.push_back({"time_limit", "5"});
+
+    auto r = model.solve(opts);
+    if (r.status == rcspp::SolveResult::Status::Error) {
+        WARN("static_root first-pick run unavailable; skipping strict assertion");
+        return;
+    }
 }

@@ -12,8 +12,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <thread>
+#include <unordered_map>
 
 #include <tbb/task_group.h>
 #include <tbb/parallel_for.h>
@@ -119,7 +121,8 @@ int32_t ceil_log2_chunks(int32_t chunks) {
 }
 
 std::vector<int32_t> choose_paramip_split_nodes(const Problem& problem,
-                                                int32_t depth) {
+                                                int32_t depth,
+                                                std::span<const int8_t> fixed_y = {}) {
     std::vector<int32_t> candidates;
     const int32_t n = problem.num_nodes();
     const int32_t source = problem.source();
@@ -127,6 +130,11 @@ std::vector<int32_t> choose_paramip_split_nodes(const Problem& problem,
     candidates.reserve(static_cast<size_t>(n));
     for (int32_t i = 0; i < n; ++i) {
         if (i == source || i == target) continue;
+        if (!fixed_y.empty() &&
+            i < static_cast<int32_t>(fixed_y.size()) &&
+            fixed_y[static_cast<size_t>(i)] != static_cast<int8_t>(-1)) {
+            continue;
+        }
         candidates.push_back(i);
     }
     std::stable_sort(candidates.begin(), candidates.end(),
@@ -165,11 +173,15 @@ std::vector<ParamipChunkPlan> build_paramip_chunk_plan(
     return chunks;
 }
 
-std::string encode_paramip_fixings(std::span<const ParamipFixing> fixings) {
+std::string encode_paramip_fixings(std::span<const int8_t> fixed_y) {
     std::ostringstream ss;
-    for (size_t i = 0; i < fixings.size(); ++i) {
-        if (i > 0) ss << ",";
-        ss << fixings[i].node << ":" << (fixings[i].value ? 1 : 0);
+    bool first = true;
+    for (size_t i = 0; i < fixed_y.size(); ++i) {
+        const int8_t v = fixed_y[i];
+        if (v != static_cast<int8_t>(0) && v != static_cast<int8_t>(1)) continue;
+        if (!first) ss << ",";
+        first = false;
+        ss << static_cast<int32_t>(i) << ":" << static_cast<int32_t>(v);
     }
     return ss.str();
 }
@@ -222,14 +234,22 @@ SolverOptions make_paramip_subsolve_options(const SolverOptions& base_options,
                                             std::string fixings_spec,
                                             double cutoff,
                                             double remaining_time_limit_sec,
-                                            bool force_quiet) {
+                                            bool force_quiet,
+                                            std::optional<int32_t> random_seed = std::nullopt,
+                                            std::optional<int32_t> mip_max_nodes = std::nullopt) {
     SolverOptions out;
-    out.reserve(base_options.size() + 8);
+    out.reserve(base_options.size() + 12);
     for (const auto& [k, v] : base_options) {
         if (k == "paramip_mode" || k == "paramip_chunks" || k == "paramip_workers" ||
             k == "paramip_fixings" || k == "cutoff" || k == "threads" ||
             k == "time_limit" ||
-            k == "max_concurrent_solves" || k == "branch_hyper") {
+            k == "max_concurrent_solves" || k == "branch_hyper" ||
+            k == "paramip_root_probes" || k == "paramip_root_pick" ||
+            k == "_internal_skip_preproc" ||
+            k == "_internal_prepared_ctx_id" ||
+            k == "_internal_disable_async_dssr" ||
+            (k == "random_seed" && random_seed.has_value()) ||
+            (k == "mip_max_nodes" && mip_max_nodes.has_value())) {
             continue;
         }
         if (force_quiet && k == "output_flag") continue;
@@ -249,6 +269,12 @@ SolverOptions make_paramip_subsolve_options(const SolverOptions& base_options,
     if (std::isfinite(remaining_time_limit_sec)) {
         out.push_back({"time_limit", std::to_string(std::max(0.001, remaining_time_limit_sec))});
     }
+    if (random_seed.has_value()) {
+        out.push_back({"random_seed", std::to_string(*random_seed)});
+    }
+    if (mip_max_nodes.has_value()) {
+        out.push_back({"mip_max_nodes", std::to_string(*mip_max_nodes)});
+    }
     return out;
 }
 
@@ -260,6 +286,45 @@ void aggregate_separator_stats(std::map<std::string, SeparatorStats>& dst,
         d.rounds_called += s.rounds_called;
         d.time_seconds += s.time_seconds;
     }
+}
+
+struct PreparedSolveContext {
+    std::vector<double> fwd_bounds;
+    std::vector<double> bwd_bounds;
+    std::vector<double> all_pairs;
+    heuristic::HeuristicResult warm_start;
+    double warm_start_ub = std::numeric_limits<double>::infinity();
+    int32_t ng_size_used = 1;
+    double correction = 0.0;
+    int32_t stage1_elim_edges = 0;
+    double stage1_elim_ratio = 0.0;
+    std::string stage1_backend_name = "reused";
+};
+
+std::mutex g_prepared_context_mutex;
+std::unordered_map<int64_t, std::shared_ptr<const PreparedSolveContext>>
+    g_prepared_contexts;
+std::atomic<int64_t> g_next_prepared_context_id{1};
+
+int64_t register_prepared_context(std::shared_ptr<const PreparedSolveContext> ctx) {
+    const int64_t id = g_next_prepared_context_id.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(g_prepared_context_mutex);
+    g_prepared_contexts[id] = std::move(ctx);
+    return id;
+}
+
+std::shared_ptr<const PreparedSolveContext> find_prepared_context(int64_t id) {
+    if (id <= 0) return {};
+    std::lock_guard<std::mutex> lock(g_prepared_context_mutex);
+    auto it = g_prepared_contexts.find(id);
+    if (it == g_prepared_contexts.end()) return {};
+    return it->second;
+}
+
+void unregister_prepared_context(int64_t id) {
+    if (id <= 0) return;
+    std::lock_guard<std::mutex> lock(g_prepared_context_mutex);
+    g_prepared_contexts.erase(id);
 }
 
 }  // namespace
@@ -373,7 +438,12 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::string paramip_mode = "off";
     int32_t paramip_chunks = 0;
     int32_t paramip_workers = 0;
+    int32_t paramip_root_probes = 0;
+    std::string paramip_root_pick = "auto";
     std::string paramip_fixings_spec;
+    bool internal_skip_preproc = false;
+    int64_t internal_prepared_ctx_id = 0;
+    bool internal_disable_async_dssr = false;
     int32_t max_concurrent_solves = 0;
     bool enable_sec = true;
     bool enable_rci = true;
@@ -496,8 +566,41 @@ SolveResult Model::solve(const SolverOptions& options) {
             paramip_workers = std::stoi(value);
             continue;
         }
+        if (key == "paramip_root_probes") {
+            paramip_root_probes = std::stoi(value);
+            continue;
+        }
+        if (key == "paramip_root_pick") {
+            std::string pick = value;
+            std::transform(pick.begin(), pick.end(), pick.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (pick == "auto" || pick == "best" || pick == "first") {
+                paramip_root_pick = pick;
+            } else {
+                logger_.log("Warning: unknown paramip_root_pick='{}' (expected auto|best|first), using auto",
+                            value);
+                paramip_root_pick = "auto";
+            }
+            continue;
+        }
         if (key == "paramip_fixings") {
             paramip_fixings_spec = value;
+            continue;
+        }
+        if (key == "_internal_skip_preproc") {
+            internal_skip_preproc = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "_internal_prepared_ctx_id") {
+            try {
+                internal_prepared_ctx_id = std::stoll(value);
+            } catch (...) {
+                internal_prepared_ctx_id = 0;
+            }
+            continue;
+        }
+        if (key == "_internal_disable_async_dssr") {
+            internal_disable_async_dssr = (value == "true" || value == "1");
             continue;
         }
         if (key == "parallel_mode") {
@@ -771,6 +874,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     max_concurrent_solves = std::max<int32_t>(0, max_concurrent_solves);
     paramip_chunks = std::max<int32_t>(0, paramip_chunks);
     paramip_workers = std::max<int32_t>(0, paramip_workers);
+    paramip_root_probes = std::max<int32_t>(0, paramip_root_probes);
     hyper_sb_iter_limit = std::max<int32_t>(1, hyper_sb_iter_limit);
     hyper_sb_min_reliable = std::max<int32_t>(1, hyper_sb_min_reliable);
     hyper_sb_max_candidates = std::max<int32_t>(1, hyper_sb_max_candidates);
@@ -790,19 +894,46 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     auto fixed_y = parse_paramip_fixings(
         paramip_fixings_spec, n, source, target, logger_);
+    std::shared_ptr<const PreparedSolveContext> prepared_context;
+    if (internal_skip_preproc) {
+        prepared_context = find_prepared_context(internal_prepared_ctx_id);
+        if (!prepared_context) {
+            logger_.log(
+                "Warning: internal prepared context {} not found; running normal preprocessing",
+                internal_prepared_ctx_id);
+            internal_skip_preproc = false;
+        }
+    }
+
+    int32_t base_random_seed = 0;
+    for (const auto& [k, v] : options) {
+        if (k != "random_seed") continue;
+        try {
+            base_random_seed = std::stoi(v);
+        } catch (...) {
+            base_random_seed = 0;
+        }
+        break;
+    }
+
+    const int32_t paramip_worker_target =
+        (paramip_workers > 0)
+            ? paramip_workers
+            : std::max<int32_t>(1, static_cast<int32_t>(std::thread::hardware_concurrency()));
 
     std::vector<ParamipChunkPlan> chunk_plan;
     if (paramip_mode != "off") {
         const int32_t requested_chunks = std::max<int32_t>(2, paramip_chunks);
         const int32_t depth = ceil_log2_chunks(requested_chunks);
-        auto split_nodes = choose_paramip_split_nodes(problem_, depth);
+        auto split_nodes = choose_paramip_split_nodes(problem_, depth, fixed_y);
         chunk_plan = build_paramip_chunk_plan(split_nodes);
-        const int32_t workers = (paramip_workers > 0)
-            ? paramip_workers
-            : std::max<int32_t>(1, static_cast<int32_t>(std::thread::hardware_concurrency()));
         logger_.log("ParaMIP plan: mode={}, requested_chunks={}, depth={}, chunks={}, workers={}",
                     paramip_mode, requested_chunks, depth,
-                    static_cast<int32_t>(chunk_plan.size()), workers);
+                    static_cast<int32_t>(chunk_plan.size()), paramip_worker_target);
+        if (paramip_mode == "static_root") {
+            logger_.log("ParaMIP stage0 config: root_probes={}, pick={}",
+                        paramip_root_probes, paramip_root_pick);
+        }
         if (static_cast<int32_t>(split_nodes.size()) < depth) {
             logger_.log("ParaMIP plan: limited split nodes ({}/{}) due to instance size",
                         static_cast<int32_t>(split_nodes.size()), depth);
@@ -824,7 +955,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
-    if (paramip_mode == "static_root" && !chunk_plan.empty()) {
+    if (paramip_mode == "static_root" && !chunk_plan.empty() && internal_skip_preproc) {
         Timer paramip_timer;
         std::vector<SolveResult> chunk_results(chunk_plan.size());
         std::atomic<double> global_ub{cutoff};
@@ -838,6 +969,198 @@ SolveResult Model::solve(const SolverOptions& options) {
             }
             break;
         }
+
+        int32_t selected_root_seed = base_random_seed;
+        const std::string root_pick_policy =
+            (paramip_root_pick == "auto")
+                ? (deterministic ? "best" : "first")
+                : paramip_root_pick;
+        const int32_t root_probe_count =
+            (paramip_root_probes > 0)
+                ? paramip_root_probes
+                : std::min<int32_t>(std::max<int32_t>(2, paramip_worker_target), 8);
+
+        if (root_probe_count > 1) {
+            struct RootProbeResult {
+                int32_t probe_idx = -1;
+                int32_t seed = 0;
+                int32_t completion_rank = std::numeric_limits<int32_t>::max();
+                SolveResult result;
+            };
+
+            std::vector<RootProbeResult> probes(static_cast<size_t>(root_probe_count));
+            for (int32_t i = 0; i < root_probe_count; ++i) {
+                probes[static_cast<size_t>(i)].probe_idx = i;
+                probes[static_cast<size_t>(i)].seed = base_random_seed + i;
+            }
+
+            double stage0_remaining = std::numeric_limits<double>::infinity();
+            if (std::isfinite(global_time_limit_sec)) {
+                stage0_remaining = global_time_limit_sec - paramip_timer.elapsed_seconds();
+            }
+            if (stage0_remaining > 1e-6 || !std::isfinite(stage0_remaining)) {
+                const double stage0_probe_limit =
+                    std::isfinite(stage0_remaining)
+                        ? std::max(0.05, std::min(5.0, 0.25 * stage0_remaining))
+                        : std::numeric_limits<double>::infinity();
+                const std::string root_fixings = encode_paramip_fixings(fixed_y);
+                std::atomic<int32_t> completion_counter{0};
+                auto run_probe = [&](int32_t idx) {
+                    auto& probe = probes[static_cast<size_t>(idx)];
+                    auto sub_opts = make_paramip_subsolve_options(
+                        options, root_fixings, global_ub.load(std::memory_order_relaxed),
+                        stage0_probe_limit, true,
+                        probe.seed, 1);
+                    Model sub_model;
+                    sub_model.set_problem(problem_);
+                    probe.result = sub_model.solve(sub_opts);
+                    probe.completion_rank = completion_counter.fetch_add(
+                        1, std::memory_order_relaxed);
+                };
+
+                const int32_t workers = std::min<int32_t>(
+                    paramip_worker_target, root_probe_count);
+                if (workers <= 1) {
+                    for (int32_t i = 0; i < root_probe_count; ++i) {
+                        run_probe(i);
+                    }
+                } else {
+                    std::atomic<int32_t> next{0};
+                    std::vector<std::thread> pool;
+                    pool.reserve(static_cast<size_t>(workers));
+                    for (int32_t w = 0; w < workers; ++w) {
+                        pool.emplace_back([&] {
+                            for (;;) {
+                                const int32_t idx =
+                                    next.fetch_add(1, std::memory_order_relaxed);
+                                if (idx >= root_probe_count) break;
+                                run_probe(idx);
+                            }
+                        });
+                    }
+                    for (auto& t : pool) t.join();
+                }
+
+                auto has_finite_bound = [](const RootProbeResult& p) {
+                    return std::isfinite(p.result.bound);
+                };
+                auto has_incumbent = [](const RootProbeResult& p) {
+                    if (!std::isfinite(p.result.objective)) return false;
+                    if (p.result.status == SolveResult::Status::Optimal ||
+                        p.result.status == SolveResult::Status::Feasible) {
+                        return true;
+                    }
+                    if (p.result.status == SolveResult::Status::TimeLimit) {
+                        return !p.result.tour.empty() || !p.result.tour_arcs.empty();
+                    }
+                    return false;
+                };
+
+                int32_t chosen = -1;
+                if (root_pick_policy == "first") {
+                    for (int32_t i = 0; i < root_probe_count; ++i) {
+                        const auto& p = probes[static_cast<size_t>(i)];
+                        if (p.result.status == SolveResult::Status::Error) continue;
+                        if (!has_finite_bound(p)) continue;
+                        if (chosen < 0 ||
+                            p.completion_rank <
+                                probes[static_cast<size_t>(chosen)].completion_rank) {
+                            chosen = i;
+                        }
+                    }
+                    if (chosen < 0) {
+                        for (int32_t i = 0; i < root_probe_count; ++i) {
+                            const auto& p = probes[static_cast<size_t>(i)];
+                            if (p.result.status == SolveResult::Status::Error) continue;
+                            if (chosen < 0 ||
+                                p.completion_rank <
+                                    probes[static_cast<size_t>(chosen)].completion_rank) {
+                                chosen = i;
+                            }
+                        }
+                    }
+                } else {
+                    // "best": pick strongest root LP bound (max bound in minimization),
+                    // tie-breaking by incumbent objective then probe index.
+                    for (int32_t i = 0; i < root_probe_count; ++i) {
+                        const auto& p = probes[static_cast<size_t>(i)];
+                        if (p.result.status == SolveResult::Status::Error) continue;
+                        if (chosen < 0) {
+                            chosen = i;
+                            continue;
+                        }
+                        const auto& best = probes[static_cast<size_t>(chosen)];
+                        const bool p_has_bound = has_finite_bound(p);
+                        const bool b_has_bound = has_finite_bound(best);
+                        if (p_has_bound && !b_has_bound) {
+                            chosen = i;
+                            continue;
+                        }
+                        if (p_has_bound && b_has_bound &&
+                            p.result.bound > best.result.bound + 1e-9) {
+                            chosen = i;
+                            continue;
+                        }
+                        if (p_has_bound && b_has_bound &&
+                            std::abs(p.result.bound - best.result.bound) <= 1e-9) {
+                            const bool p_has_sol = has_incumbent(p);
+                            const bool b_has_sol = has_incumbent(best);
+                            if (p_has_sol && !b_has_sol) {
+                                chosen = i;
+                                continue;
+                            }
+                            if (p_has_sol && b_has_sol &&
+                                p.result.objective < best.result.objective - 1e-9) {
+                                chosen = i;
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                if (chosen >= 0) {
+                    const auto& picked = probes[static_cast<size_t>(chosen)];
+                    selected_root_seed = picked.seed;
+                    double best_probe_obj = std::numeric_limits<double>::infinity();
+                    for (const auto& p : probes) {
+                        if (!has_incumbent(p)) continue;
+                        best_probe_obj = std::min(best_probe_obj, p.result.objective);
+                    }
+                    if (std::isfinite(best_probe_obj)) {
+                        double prev = global_ub.load(std::memory_order_relaxed);
+                        while (best_probe_obj + 1e-9 < prev) {
+                            if (global_ub.compare_exchange_weak(
+                                    prev, best_probe_obj,
+                                    std::memory_order_relaxed,
+                                    std::memory_order_relaxed)) {
+                                break;
+                            }
+                        }
+                    }
+                    logger_.log(
+                        "ParaMIP stage0: probes={}, policy={}, chosen_probe={}, seed={}, bound={}, obj={}, status={}",
+                        root_probe_count, root_pick_policy, chosen, selected_root_seed,
+                        picked.result.bound, picked.result.objective,
+                        static_cast<int>(picked.result.status));
+                } else {
+                    logger_.log(
+                        "ParaMIP stage0: probes={}, policy={}, no valid root candidate (keeping seed={})",
+                        root_probe_count, root_pick_policy, selected_root_seed);
+                }
+            }
+        }
+
+        auto encode_chunk_fixings = [&](const ParamipChunkPlan& chunk) {
+            std::vector<int8_t> merged = fixed_y;
+            if (merged.empty()) {
+                merged.assign(static_cast<size_t>(n), static_cast<int8_t>(-1));
+            }
+            for (const auto& f : chunk.fixings) {
+                if (f.node < 0 || f.node >= n) continue;
+                merged[static_cast<size_t>(f.node)] = static_cast<int8_t>(f.value ? 1 : 0);
+            }
+            return encode_paramip_fixings(merged);
+        };
 
         auto run_chunk = [&](int32_t idx) {
             const auto& chunk = chunk_plan[static_cast<size_t>(idx)];
@@ -856,9 +1179,11 @@ SolveResult Model::solve(const SolverOptions& options) {
                     return;
                 }
             }
+            const int32_t chunk_seed = selected_root_seed + 104729 * (chunk.id + 1);
             auto sub_opts = make_paramip_subsolve_options(
-                options, encode_paramip_fixings(chunk.fixings), local_cutoff,
-                remaining_time_sec, !output_flag);
+                options, encode_chunk_fixings(chunk), local_cutoff,
+                remaining_time_sec, !output_flag,
+                chunk_seed, std::nullopt);
             Model sub_model;
             sub_model.set_problem(problem_);
             auto r = sub_model.solve(sub_opts);
@@ -881,9 +1206,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             }
         } else {
             const int32_t workers = std::min<int32_t>(
-                std::max<int32_t>(1, (paramip_workers > 0)
-                    ? paramip_workers
-                    : static_cast<int32_t>(std::thread::hardware_concurrency())),
+                std::max<int32_t>(1, paramip_worker_target),
                 static_cast<int32_t>(chunk_plan.size()));
             std::atomic<int32_t> next{0};
             std::vector<std::thread> pool;
@@ -1031,7 +1354,28 @@ SolveResult Model::solve(const SolverOptions& options) {
         warm_start_ub = cutoff;
     }
 
-    {
+    if (internal_skip_preproc && prepared_context) {
+        fwd_bounds = prepared_context->fwd_bounds;
+        bwd_bounds = prepared_context->bwd_bounds;
+        if (all_pairs_propagation) {
+            all_pairs = prepared_context->all_pairs;
+        }
+        warm_start = prepared_context->warm_start;
+        warm_start_ub = prepared_context->warm_start_ub;
+        if (cutoff < std::numeric_limits<double>::infinity()) {
+            warm_start_ub = std::min(warm_start_ub, cutoff);
+        }
+        ng_size_used = prepared_context->ng_size_used;
+        correction = prepared_context->correction;
+        stage1_elim_edges = prepared_context->stage1_elim_edges;
+        stage1_elim_ratio = prepared_context->stage1_elim_ratio;
+        logger_.log(
+            "Preprocessing: 0s, UB={}{} [stage1={}, edge-elim estimate: {}/{} ({:.1f}%), reused]",
+            warm_start_ub,
+            (cutoff < std::numeric_limits<double>::infinity() ? " (cutoff)" : ""),
+            prepared_context->stage1_backend_name,
+            stage1_elim_edges, m, 100.0 * stage1_elim_ratio);
+    } else {
         Timer preproc_timer;
 
         // Stage 1: fast startup bounds + first incumbent
@@ -1243,6 +1587,376 @@ SolveResult Model::solve(const SolverOptions& options) {
                     stage1_elim_edges, m, 100.0 * stage1_elim_ratio);
     }
 
+    if (paramip_mode == "static_root" && !chunk_plan.empty() && !internal_skip_preproc) {
+        auto prepared_ctx = std::make_shared<PreparedSolveContext>();
+        prepared_ctx->fwd_bounds = fwd_bounds;
+        prepared_ctx->bwd_bounds = bwd_bounds;
+        prepared_ctx->all_pairs = all_pairs;
+        prepared_ctx->warm_start = warm_start;
+        prepared_ctx->warm_start_ub = warm_start_ub;
+        prepared_ctx->ng_size_used = ng_size_used;
+        prepared_ctx->correction = correction;
+        prepared_ctx->stage1_elim_edges = stage1_elim_edges;
+        prepared_ctx->stage1_elim_ratio = stage1_elim_ratio;
+        prepared_ctx->stage1_backend_name = "prepared";
+        const int64_t prepared_ctx_id = register_prepared_context(prepared_ctx);
+        struct PreparedCtxGuard {
+            int64_t id = 0;
+            ~PreparedCtxGuard() { unregister_prepared_context(id); }
+        } prepared_ctx_guard{prepared_ctx_id};
+
+        Timer paramip_timer;
+        std::vector<SolveResult> chunk_results(chunk_plan.size());
+        std::atomic<double> global_ub{warm_start_ub};
+        double global_time_limit_sec = std::numeric_limits<double>::infinity();
+        for (const auto& [k, v] : options) {
+            if (k != "time_limit") continue;
+            try {
+                global_time_limit_sec = std::stod(v);
+            } catch (...) {
+                global_time_limit_sec = std::numeric_limits<double>::infinity();
+            }
+            break;
+        }
+
+        int32_t selected_root_seed = base_random_seed;
+        const std::string root_pick_policy =
+            (paramip_root_pick == "auto")
+                ? (deterministic ? "best" : "first")
+                : paramip_root_pick;
+        const int32_t root_probe_count =
+            (paramip_root_probes > 0)
+                ? paramip_root_probes
+                : std::min<int32_t>(std::max<int32_t>(2, paramip_worker_target), 8);
+
+        if (root_probe_count > 1) {
+            struct RootProbeResult {
+                int32_t probe_idx = -1;
+                int32_t seed = 0;
+                int32_t completion_rank = std::numeric_limits<int32_t>::max();
+                SolveResult result;
+            };
+
+            std::vector<RootProbeResult> probes(static_cast<size_t>(root_probe_count));
+            for (int32_t i = 0; i < root_probe_count; ++i) {
+                probes[static_cast<size_t>(i)].probe_idx = i;
+                probes[static_cast<size_t>(i)].seed = base_random_seed + i;
+            }
+
+            double stage0_remaining = std::numeric_limits<double>::infinity();
+            if (std::isfinite(global_time_limit_sec)) {
+                stage0_remaining = global_time_limit_sec - paramip_timer.elapsed_seconds();
+            }
+            if (stage0_remaining > 1e-6 || !std::isfinite(stage0_remaining)) {
+                const double stage0_probe_limit =
+                    std::isfinite(stage0_remaining)
+                        ? std::max(0.05, std::min(5.0, 0.25 * stage0_remaining))
+                        : std::numeric_limits<double>::infinity();
+                const std::string root_fixings = encode_paramip_fixings(fixed_y);
+                std::atomic<int32_t> completion_counter{0};
+                auto run_probe = [&](int32_t idx) {
+                    auto& probe = probes[static_cast<size_t>(idx)];
+                    auto sub_opts = make_paramip_subsolve_options(
+                        options, root_fixings, global_ub.load(std::memory_order_relaxed),
+                        stage0_probe_limit, true,
+                        probe.seed, 1);
+                    sub_opts.push_back({"_internal_skip_preproc", "true"});
+                    sub_opts.push_back({"_internal_prepared_ctx_id",
+                                        std::to_string(prepared_ctx_id)});
+                    sub_opts.push_back({"_internal_disable_async_dssr", "true"});
+                    Model sub_model;
+                    sub_model.set_problem(problem_);
+                    probe.result = sub_model.solve(sub_opts);
+                    probe.completion_rank = completion_counter.fetch_add(
+                        1, std::memory_order_relaxed);
+                };
+
+                const int32_t workers = std::min<int32_t>(
+                    paramip_worker_target, root_probe_count);
+                if (workers <= 1) {
+                    for (int32_t i = 0; i < root_probe_count; ++i) {
+                        run_probe(i);
+                    }
+                } else {
+                    std::atomic<int32_t> next{0};
+                    std::vector<std::thread> pool;
+                    pool.reserve(static_cast<size_t>(workers));
+                    for (int32_t w = 0; w < workers; ++w) {
+                        pool.emplace_back([&] {
+                            for (;;) {
+                                const int32_t idx =
+                                    next.fetch_add(1, std::memory_order_relaxed);
+                                if (idx >= root_probe_count) break;
+                                run_probe(idx);
+                            }
+                        });
+                    }
+                    for (auto& t : pool) t.join();
+                }
+
+                auto has_finite_bound = [](const RootProbeResult& p) {
+                    return std::isfinite(p.result.bound);
+                };
+                auto has_incumbent = [](const RootProbeResult& p) {
+                    if (!std::isfinite(p.result.objective)) return false;
+                    if (p.result.status == SolveResult::Status::Optimal ||
+                        p.result.status == SolveResult::Status::Feasible) {
+                        return true;
+                    }
+                    if (p.result.status == SolveResult::Status::TimeLimit) {
+                        return !p.result.tour.empty() || !p.result.tour_arcs.empty();
+                    }
+                    return false;
+                };
+
+                int32_t chosen = -1;
+                if (root_pick_policy == "first") {
+                    for (int32_t i = 0; i < root_probe_count; ++i) {
+                        const auto& p = probes[static_cast<size_t>(i)];
+                        if (p.result.status == SolveResult::Status::Error) continue;
+                        if (!has_finite_bound(p)) continue;
+                        if (chosen < 0 ||
+                            p.completion_rank <
+                                probes[static_cast<size_t>(chosen)].completion_rank) {
+                            chosen = i;
+                        }
+                    }
+                    if (chosen < 0) {
+                        for (int32_t i = 0; i < root_probe_count; ++i) {
+                            const auto& p = probes[static_cast<size_t>(i)];
+                            if (p.result.status == SolveResult::Status::Error) continue;
+                            if (chosen < 0 ||
+                                p.completion_rank <
+                                    probes[static_cast<size_t>(chosen)].completion_rank) {
+                                chosen = i;
+                            }
+                        }
+                    }
+                } else {
+                    for (int32_t i = 0; i < root_probe_count; ++i) {
+                        const auto& p = probes[static_cast<size_t>(i)];
+                        if (p.result.status == SolveResult::Status::Error) continue;
+                        if (chosen < 0) {
+                            chosen = i;
+                            continue;
+                        }
+                        const auto& best = probes[static_cast<size_t>(chosen)];
+                        const bool p_has_bound = has_finite_bound(p);
+                        const bool b_has_bound = has_finite_bound(best);
+                        if (p_has_bound && !b_has_bound) {
+                            chosen = i;
+                            continue;
+                        }
+                        if (p_has_bound && b_has_bound &&
+                            p.result.bound > best.result.bound + 1e-9) {
+                            chosen = i;
+                            continue;
+                        }
+                        if (p_has_bound && b_has_bound &&
+                            std::abs(p.result.bound - best.result.bound) <= 1e-9) {
+                            const bool p_has_sol = has_incumbent(p);
+                            const bool b_has_sol = has_incumbent(best);
+                            if (p_has_sol && !b_has_sol) {
+                                chosen = i;
+                                continue;
+                            }
+                            if (p_has_sol && b_has_sol &&
+                                p.result.objective < best.result.objective - 1e-9) {
+                                chosen = i;
+                                continue;
+                            }
+                        }
+                    }
+                }
+
+                if (chosen >= 0) {
+                    const auto& picked = probes[static_cast<size_t>(chosen)];
+                    selected_root_seed = picked.seed;
+                    double best_probe_obj = std::numeric_limits<double>::infinity();
+                    for (const auto& p : probes) {
+                        if (!has_incumbent(p)) continue;
+                        best_probe_obj = std::min(best_probe_obj, p.result.objective);
+                    }
+                    if (std::isfinite(best_probe_obj)) {
+                        double prev = global_ub.load(std::memory_order_relaxed);
+                        while (best_probe_obj + 1e-9 < prev) {
+                            if (global_ub.compare_exchange_weak(
+                                    prev, best_probe_obj,
+                                    std::memory_order_relaxed,
+                                    std::memory_order_relaxed)) {
+                                break;
+                            }
+                        }
+                    }
+                    logger_.log(
+                        "ParaMIP stage0: probes={}, policy={}, chosen_probe={}, seed={}, bound={}, obj={}, status={}",
+                        root_probe_count, root_pick_policy, chosen, selected_root_seed,
+                        picked.result.bound, picked.result.objective,
+                        static_cast<int>(picked.result.status));
+                } else {
+                    logger_.log(
+                        "ParaMIP stage0: probes={}, policy={}, no valid root candidate (keeping seed={})",
+                        root_probe_count, root_pick_policy, selected_root_seed);
+                }
+            }
+        }
+
+        auto encode_chunk_fixings = [&](const ParamipChunkPlan& chunk) {
+            std::vector<int8_t> merged = fixed_y;
+            if (merged.empty()) {
+                merged.assign(static_cast<size_t>(n), static_cast<int8_t>(-1));
+            }
+            for (const auto& f : chunk.fixings) {
+                if (f.node < 0 || f.node >= n) continue;
+                merged[static_cast<size_t>(f.node)] = static_cast<int8_t>(f.value ? 1 : 0);
+            }
+            return encode_paramip_fixings(merged);
+        };
+
+        auto run_chunk = [&](int32_t idx) {
+            const auto& chunk = chunk_plan[static_cast<size_t>(idx)];
+            const double local_cutoff = global_ub.load(std::memory_order_relaxed);
+            double remaining_time_sec = std::numeric_limits<double>::infinity();
+            if (std::isfinite(global_time_limit_sec)) {
+                remaining_time_sec = global_time_limit_sec - paramip_timer.elapsed_seconds();
+                if (remaining_time_sec <= 1e-6) {
+                    SolveResult timeout;
+                    timeout.status = SolveResult::Status::TimeLimit;
+                    timeout.objective = 0.0;
+                    timeout.bound = 0.0;
+                    timeout.gap = 1.0;
+                    timeout.time_seconds = 0.0;
+                    chunk_results[static_cast<size_t>(idx)] = timeout;
+                    return;
+                }
+            }
+            const int32_t chunk_seed = selected_root_seed + 104729 * (chunk.id + 1);
+            auto sub_opts = make_paramip_subsolve_options(
+                options, encode_chunk_fixings(chunk), local_cutoff,
+                remaining_time_sec, !output_flag,
+                chunk_seed, std::nullopt);
+            sub_opts.push_back({"_internal_skip_preproc", "true"});
+            sub_opts.push_back({"_internal_prepared_ctx_id",
+                                std::to_string(prepared_ctx_id)});
+            Model sub_model;
+            sub_model.set_problem(problem_);
+            auto r = sub_model.solve(sub_opts);
+            chunk_results[static_cast<size_t>(idx)] = r;
+            if (r.has_solution() && std::isfinite(r.objective)) {
+                double prev = global_ub.load(std::memory_order_relaxed);
+                while (r.objective + 1e-9 < prev) {
+                    if (global_ub.compare_exchange_weak(
+                            prev, r.objective,
+                            std::memory_order_relaxed, std::memory_order_relaxed)) {
+                        break;
+                    }
+                }
+            }
+        };
+
+        if (deterministic) {
+            for (int32_t i = 0; i < static_cast<int32_t>(chunk_plan.size()); ++i) {
+                run_chunk(i);
+            }
+        } else {
+            const int32_t workers = std::min<int32_t>(
+                std::max<int32_t>(1, paramip_worker_target),
+                static_cast<int32_t>(chunk_plan.size()));
+            std::atomic<int32_t> next{0};
+            std::vector<std::thread> pool;
+            pool.reserve(static_cast<size_t>(workers));
+            for (int32_t w = 0; w < workers; ++w) {
+                pool.emplace_back([&] {
+                    for (;;) {
+                        const int32_t idx = next.fetch_add(1, std::memory_order_relaxed);
+                        if (idx >= static_cast<int32_t>(chunk_plan.size())) break;
+                        run_chunk(idx);
+                    }
+                });
+            }
+            for (auto& t : pool) t.join();
+        }
+
+        SolveResult out;
+        out.status = SolveResult::Status::Error;
+        out.objective = std::numeric_limits<double>::infinity();
+        out.bound = std::numeric_limits<double>::infinity();
+        out.gap = 1.0;
+        out.time_seconds = paramip_timer.elapsed_seconds();
+
+        bool any_error = false;
+        bool any_timelimit = false;
+        bool any_solution = false;
+        bool all_infeasible = true;
+        bool all_opt_or_infeasible = true;
+
+        for (const auto& r : chunk_results) {
+            out.nodes += r.nodes;
+            out.total_cuts += r.total_cuts;
+            out.separation_rounds += r.separation_rounds;
+            out.dssr_epochs_enqueued += r.dssr_epochs_enqueued;
+            out.dssr_epochs_committed += r.dssr_epochs_committed;
+            out.dssr_checkpoint_count += r.dssr_checkpoint_count;
+            out.dssr_commit_signature ^= r.dssr_commit_signature;
+            aggregate_separator_stats(out.separator_stats, r.separator_stats);
+
+            any_error = any_error || (r.status == SolveResult::Status::Error);
+            any_timelimit = any_timelimit || (r.status == SolveResult::Status::TimeLimit);
+            all_infeasible = all_infeasible && (r.status == SolveResult::Status::Infeasible);
+            all_opt_or_infeasible = all_opt_or_infeasible &&
+                (r.status == SolveResult::Status::Optimal ||
+                 r.status == SolveResult::Status::Infeasible);
+            if (std::isfinite(r.bound)) {
+                out.bound = std::min(out.bound, r.bound);
+            }
+            if (r.has_solution() && std::isfinite(r.objective)) {
+                any_solution = true;
+                if (!std::isfinite(out.objective) || r.objective < out.objective - 1e-9) {
+                    out.objective = r.objective;
+                    out.tour = r.tour;
+                    out.tour_arcs = r.tour_arcs;
+                }
+            }
+        }
+
+        if (any_solution) {
+            if (!std::isfinite(out.bound)) out.bound = out.objective;
+            if (std::abs(out.objective) > 1e-9) {
+                out.gap = std::max(0.0, (out.objective - out.bound) / std::abs(out.objective));
+            } else {
+                out.gap = (out.bound <= out.objective + 1e-9) ? 0.0 : 1.0;
+            }
+            if (all_opt_or_infeasible) out.status = SolveResult::Status::Optimal;
+            else if (any_timelimit) out.status = SolveResult::Status::TimeLimit;
+            else out.status = SolveResult::Status::Feasible;
+        } else if (all_infeasible) {
+            out.status = SolveResult::Status::Infeasible;
+            out.objective = 0.0;
+            if (!std::isfinite(out.bound)) out.bound = 0.0;
+            out.gap = 0.0;
+        } else if (any_timelimit) {
+            out.status = SolveResult::Status::TimeLimit;
+            out.objective = 0.0;
+            if (!std::isfinite(out.bound)) out.bound = 0.0;
+            out.gap = 1.0;
+        } else if (any_error) {
+            out.status = SolveResult::Status::Error;
+            out.objective = 0.0;
+            if (!std::isfinite(out.bound)) out.bound = 0.0;
+            out.gap = 1.0;
+        } else {
+            out.status = SolveResult::Status::Feasible;
+        }
+
+        logger_.log("ParaMIP static_root done: chunks={}, status={}, obj={}, bound={}, time={}s",
+                    static_cast<int32_t>(chunk_plan.size()),
+                    static_cast<int>(out.status),
+                    out.objective,
+                    out.bound,
+                    out.time_seconds);
+        return out;
+    }
+
     HiGHSBridge bridge(problem_, highs, logger_, separation_tol);
     bridge.set_separation_interval(separation_interval);
     bridge.set_max_cuts_per_separator(max_cuts_per_sep);
@@ -1303,6 +2017,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     const bool dssr_background_updates_enabled =
         dssr_background_updates &&
+        !internal_disable_async_dssr &&
         !all_pairs_propagation &&
         async_end_ng >= async_start_ng;
     if (workflow_dump) {

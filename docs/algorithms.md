@@ -144,25 +144,27 @@ function solve(problem, options):
     return extract_result()
 ```
 
-## Planned ParaMIP Worker DAG (Design, Not Yet Active)
+## ParaMIP Worker DAG (Current `static_root` Direction)
 
-Current code runs one HiGHS MIP instance per `Model::solve` call (plus async DSSR
-updates). The next step is root-partitioned ParaMIP-style execution:
+`paramip_mode=static_root` executes a root-partitioned ParaMIP-style solve in-process.
+The current flow is:
 
 ```text
-root_lp -> create_branch_chunks(B)
+stage0_root_probes(seed_0..seed_k, mip_max_nodes=1)
+      -> pick_root_candidate(best|first)
+      -> create_branch_chunks(B)
         -> worker_1 solve chunk_1 (threads=1)
         -> worker_2 solve chunk_2 (threads=1)
         -> ...
         -> worker_B solve chunk_B (threads=1)
+      -> aggregate(best incumbent + global bound/stats)
 ```
-
-For now, this branch only exposes DAG visibility (`workflow_dump=true`) and keeps
-the single-instance exact solve behavior.
 
 Current implementation status:
 - `paramip_mode=plan`: builds and logs deterministic root chunk plans.
 - `paramip_mode=static_root`: executes static root chunk solves and aggregates results.
+- Stage-0 root probe races run with different random seeds and `mip_max_nodes=1`.
+- Root probe winner policy: `paramip_root_pick=auto|best|first` (`auto` = best in deterministic, first in opportunistic).
 - `parallel_mode=deterministic`: executes chunk solves in fixed chunk order.
 - `parallel_mode=opportunistic`: executes chunk solves with a worker pool (`paramip_workers`).
 
