@@ -150,13 +150,16 @@ function solve(problem, options):
 The current flow is:
 
 ```text
-stage0_root_probes(seed_0..seed_k, mip_max_nodes=1)
+stage1+stage2 preprocessing (once in parent)
+      -> stage0_root_probes(seed_0..seed_k, mip_max_nodes=1, threads=1)
       -> pick_root_candidate(best|first)
-      -> create_branch_chunks(B)
+      -> extract selected root LP (y-fractionality + basis + solution)
+      -> create_branch_chunks(B) from most-fractional root y-vars
         -> worker_1 solve chunk_1 (threads=1)
         -> worker_2 solve chunk_2 (threads=1)
         -> ...
         -> worker_B solve chunk_B (threads=1)
+          (each chunk reuses parent preprocessing and gets root basis/solution warm-start)
       -> aggregate(best incumbent + global bound/stats)
 ```
 
@@ -165,6 +168,7 @@ Current implementation status:
 - `paramip_mode=static_root`: executes static root chunk solves and aggregates results.
 - Stage-0 root probe races run with different random seeds and `mip_max_nodes=1`.
 - Root probe winner policy: `paramip_root_pick=auto|best|first` (`auto` = best in deterministic, first in opportunistic).
+- Chunk split variables are selected after Stage-0 from the selected root LP (`y` most-fractional first, fallback heuristic if needed).
 - `parallel_mode=deterministic`: executes chunk solves in fixed chunk order.
 - `parallel_mode=opportunistic`: executes chunk solves with a worker pool (`paramip_workers`).
 

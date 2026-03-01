@@ -150,6 +150,68 @@ std::vector<int32_t> choose_paramip_split_nodes(const Problem& problem,
     return candidates;
 }
 
+std::vector<int32_t> choose_paramip_split_nodes_from_root_lp(
+    const Problem& problem,
+    int32_t depth,
+    std::span<const int8_t> fixed_y,
+    std::span<const double> y_lp,
+    double integral_tol = 1e-6) {
+    if (depth <= 0) return {};
+
+    struct ScoredNode {
+        int32_t node = -1;
+        double score = std::numeric_limits<double>::infinity();
+    };
+
+    const int32_t n = problem.num_nodes();
+    const int32_t source = problem.source();
+    const int32_t target = problem.target();
+    std::vector<ScoredNode> scored;
+    scored.reserve(static_cast<size_t>(n));
+    for (int32_t i = 0; i < n; ++i) {
+        if (i == source || i == target) continue;
+        if (!fixed_y.empty() &&
+            i < static_cast<int32_t>(fixed_y.size()) &&
+            fixed_y[static_cast<size_t>(i)] != static_cast<int8_t>(-1)) {
+            continue;
+        }
+        if (i >= static_cast<int32_t>(y_lp.size())) continue;
+        const double yi = y_lp[static_cast<size_t>(i)];
+        if (!std::isfinite(yi)) continue;
+        if (yi <= integral_tol || yi >= 1.0 - integral_tol) continue;
+        scored.push_back({i, std::abs(yi - 0.5)});
+    }
+    std::stable_sort(scored.begin(), scored.end(),
+                     [&](const ScoredNode& a, const ScoredNode& b) {
+                         if (a.score != b.score) return a.score < b.score;
+                         const double pa = problem.profit(a.node);
+                         const double pb = problem.profit(b.node);
+                         if (pa != pb) return pa > pb;
+                         return a.node < b.node;
+                     });
+
+    std::vector<int32_t> split_nodes;
+    split_nodes.reserve(static_cast<size_t>(depth));
+    for (const auto& s : scored) {
+        split_nodes.push_back(s.node);
+        if (static_cast<int32_t>(split_nodes.size()) >= depth) break;
+    }
+
+    if (static_cast<int32_t>(split_nodes.size()) < depth) {
+        auto fallback = choose_paramip_split_nodes(problem, depth, fixed_y);
+        for (int32_t node : fallback) {
+            if (std::find(split_nodes.begin(), split_nodes.end(), node) !=
+                split_nodes.end()) {
+                continue;
+            }
+            split_nodes.push_back(node);
+            if (static_cast<int32_t>(split_nodes.size()) >= depth) break;
+        }
+    }
+
+    return split_nodes;
+}
+
 std::vector<ParamipChunkPlan> build_paramip_chunk_plan(
     std::span<const int32_t> split_nodes) {
     const int32_t depth = static_cast<int32_t>(split_nodes.size());
@@ -247,6 +309,8 @@ SolverOptions make_paramip_subsolve_options(const SolverOptions& base_options,
             k == "paramip_root_probes" || k == "paramip_root_pick" ||
             k == "_internal_skip_preproc" ||
             k == "_internal_prepared_ctx_id" ||
+            k == "_internal_root_capture_id" ||
+            k == "_internal_root_warmstart_id" ||
             k == "_internal_disable_async_dssr" ||
             (k == "random_seed" && random_seed.has_value()) ||
             (k == "mip_max_nodes" && mip_max_nodes.has_value())) {
@@ -301,10 +365,48 @@ struct PreparedSolveContext {
     std::string stage1_backend_name = "reused";
 };
 
+struct RootLpSnapshot {
+    std::vector<double> x_lp;
+    std::vector<double> y_lp;
+    HighsBasis basis;
+    HighsSolution solution;
+    double bound = std::numeric_limits<double>::infinity();
+    bool valid = false;
+};
+
+struct RootLpCaptureStore {
+    mutable std::mutex mutex;
+    bool captured = false;
+    RootLpSnapshot snapshot;
+
+    void publish(RootLpSnapshot new_snapshot) {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (captured) return;
+        snapshot = std::move(new_snapshot);
+        captured = snapshot.valid;
+    }
+
+    std::optional<RootLpSnapshot> get_snapshot() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!captured) return std::nullopt;
+        return snapshot;
+    }
+};
+
 std::mutex g_prepared_context_mutex;
 std::unordered_map<int64_t, std::shared_ptr<const PreparedSolveContext>>
     g_prepared_contexts;
 std::atomic<int64_t> g_next_prepared_context_id{1};
+
+std::mutex g_root_capture_store_mutex;
+std::unordered_map<int64_t, std::shared_ptr<RootLpCaptureStore>>
+    g_root_capture_stores;
+std::atomic<int64_t> g_next_root_capture_store_id{1};
+
+std::mutex g_root_warmstart_mutex;
+std::unordered_map<int64_t, std::shared_ptr<const RootLpSnapshot>>
+    g_root_warmstarts;
+std::atomic<int64_t> g_next_root_warmstart_id{1};
 
 int64_t register_prepared_context(std::shared_ptr<const PreparedSolveContext> ctx) {
     const int64_t id = g_next_prepared_context_id.fetch_add(1, std::memory_order_relaxed);
@@ -325,6 +427,50 @@ void unregister_prepared_context(int64_t id) {
     if (id <= 0) return;
     std::lock_guard<std::mutex> lock(g_prepared_context_mutex);
     g_prepared_contexts.erase(id);
+}
+
+int64_t register_root_capture_store(std::shared_ptr<RootLpCaptureStore> store) {
+    const int64_t id =
+        g_next_root_capture_store_id.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(g_root_capture_store_mutex);
+    g_root_capture_stores[id] = std::move(store);
+    return id;
+}
+
+std::shared_ptr<RootLpCaptureStore> find_root_capture_store(int64_t id) {
+    if (id <= 0) return {};
+    std::lock_guard<std::mutex> lock(g_root_capture_store_mutex);
+    auto it = g_root_capture_stores.find(id);
+    if (it == g_root_capture_stores.end()) return {};
+    return it->second;
+}
+
+void unregister_root_capture_store(int64_t id) {
+    if (id <= 0) return;
+    std::lock_guard<std::mutex> lock(g_root_capture_store_mutex);
+    g_root_capture_stores.erase(id);
+}
+
+int64_t register_root_warmstart(std::shared_ptr<const RootLpSnapshot> warmstart) {
+    const int64_t id =
+        g_next_root_warmstart_id.fetch_add(1, std::memory_order_relaxed);
+    std::lock_guard<std::mutex> lock(g_root_warmstart_mutex);
+    g_root_warmstarts[id] = std::move(warmstart);
+    return id;
+}
+
+std::shared_ptr<const RootLpSnapshot> find_root_warmstart(int64_t id) {
+    if (id <= 0) return {};
+    std::lock_guard<std::mutex> lock(g_root_warmstart_mutex);
+    auto it = g_root_warmstarts.find(id);
+    if (it == g_root_warmstarts.end()) return {};
+    return it->second;
+}
+
+void unregister_root_warmstart(int64_t id) {
+    if (id <= 0) return;
+    std::lock_guard<std::mutex> lock(g_root_warmstart_mutex);
+    g_root_warmstarts.erase(id);
 }
 
 }  // namespace
@@ -443,6 +589,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::string paramip_fixings_spec;
     bool internal_skip_preproc = false;
     int64_t internal_prepared_ctx_id = 0;
+    int64_t internal_root_capture_id = 0;
+    int64_t internal_root_warmstart_id = 0;
     bool internal_disable_async_dssr = false;
     int32_t max_concurrent_solves = 0;
     bool enable_sec = true;
@@ -596,6 +744,22 @@ SolveResult Model::solve(const SolverOptions& options) {
                 internal_prepared_ctx_id = std::stoll(value);
             } catch (...) {
                 internal_prepared_ctx_id = 0;
+            }
+            continue;
+        }
+        if (key == "_internal_root_capture_id") {
+            try {
+                internal_root_capture_id = std::stoll(value);
+            } catch (...) {
+                internal_root_capture_id = 0;
+            }
+            continue;
+        }
+        if (key == "_internal_root_warmstart_id") {
+            try {
+                internal_root_warmstart_id = std::stoll(value);
+            } catch (...) {
+                internal_root_warmstart_id = 0;
             }
             continue;
         }
@@ -892,8 +1056,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     const int32_t target = problem_.target();
     const int32_t n = problem_.num_nodes();
 
-    auto fixed_y = parse_paramip_fixings(
-        paramip_fixings_spec, n, source, target, logger_);
     std::shared_ptr<const PreparedSolveContext> prepared_context;
     if (internal_skip_preproc) {
         prepared_context = find_prepared_context(internal_prepared_ctx_id);
@@ -903,6 +1065,18 @@ SolveResult Model::solve(const SolverOptions& options) {
                 internal_prepared_ctx_id);
             internal_skip_preproc = false;
         }
+    }
+    auto root_capture_store = find_root_capture_store(internal_root_capture_id);
+    auto root_warmstart = find_root_warmstart(internal_root_warmstart_id);
+    if (internal_root_capture_id > 0 && !root_capture_store) {
+        logger_.log(
+            "Warning: internal root capture store {} not found; root LP capture disabled",
+            internal_root_capture_id);
+    }
+    if (internal_root_warmstart_id > 0 && !root_warmstart) {
+        logger_.log(
+            "Warning: internal root warmstart {} not found; using heuristic warm-start only",
+            internal_root_warmstart_id);
     }
 
     int32_t base_random_seed = 0;
@@ -920,388 +1094,6 @@ SolveResult Model::solve(const SolverOptions& options) {
         (paramip_workers > 0)
             ? paramip_workers
             : std::max<int32_t>(1, static_cast<int32_t>(std::thread::hardware_concurrency()));
-
-    std::vector<ParamipChunkPlan> chunk_plan;
-    if (paramip_mode != "off") {
-        const int32_t requested_chunks = std::max<int32_t>(2, paramip_chunks);
-        const int32_t depth = ceil_log2_chunks(requested_chunks);
-        auto split_nodes = choose_paramip_split_nodes(problem_, depth, fixed_y);
-        chunk_plan = build_paramip_chunk_plan(split_nodes);
-        logger_.log("ParaMIP plan: mode={}, requested_chunks={}, depth={}, chunks={}, workers={}",
-                    paramip_mode, requested_chunks, depth,
-                    static_cast<int32_t>(chunk_plan.size()), paramip_worker_target);
-        if (paramip_mode == "static_root") {
-            logger_.log("ParaMIP stage0 config: root_probes={}, pick={}",
-                        paramip_root_probes, paramip_root_pick);
-        }
-        if (static_cast<int32_t>(split_nodes.size()) < depth) {
-            logger_.log("ParaMIP plan: limited split nodes ({}/{}) due to instance size",
-                        static_cast<int32_t>(split_nodes.size()), depth);
-        }
-        if (workflow_dump && !chunk_plan.empty()) {
-            const int32_t dump_limit = std::min<int32_t>(
-                8, static_cast<int32_t>(chunk_plan.size()));
-            for (int32_t i = 0; i < dump_limit; ++i) {
-                const auto& chunk = chunk_plan[static_cast<size_t>(i)];
-                std::ostringstream ss;
-                ss << "  chunk#" << chunk.id << ": ";
-                for (size_t k = 0; k < chunk.fixings.size(); ++k) {
-                    if (k > 0) ss << ", ";
-                    ss << "y[" << chunk.fixings[k].node << "]="
-                       << (chunk.fixings[k].value ? 1 : 0);
-                }
-                logger_.log("{}", ss.str());
-            }
-        }
-    }
-
-    if (paramip_mode == "static_root" && !chunk_plan.empty() && internal_skip_preproc) {
-        Timer paramip_timer;
-        std::vector<SolveResult> chunk_results(chunk_plan.size());
-        std::atomic<double> global_ub{cutoff};
-        double global_time_limit_sec = std::numeric_limits<double>::infinity();
-        for (const auto& [k, v] : options) {
-            if (k != "time_limit") continue;
-            try {
-                global_time_limit_sec = std::stod(v);
-            } catch (...) {
-                global_time_limit_sec = std::numeric_limits<double>::infinity();
-            }
-            break;
-        }
-
-        int32_t selected_root_seed = base_random_seed;
-        const std::string root_pick_policy =
-            (paramip_root_pick == "auto")
-                ? (deterministic ? "best" : "first")
-                : paramip_root_pick;
-        const int32_t root_probe_count =
-            (paramip_root_probes > 0)
-                ? paramip_root_probes
-                : std::min<int32_t>(std::max<int32_t>(2, paramip_worker_target), 8);
-
-        if (root_probe_count > 1) {
-            struct RootProbeResult {
-                int32_t probe_idx = -1;
-                int32_t seed = 0;
-                int32_t completion_rank = std::numeric_limits<int32_t>::max();
-                SolveResult result;
-            };
-
-            std::vector<RootProbeResult> probes(static_cast<size_t>(root_probe_count));
-            for (int32_t i = 0; i < root_probe_count; ++i) {
-                probes[static_cast<size_t>(i)].probe_idx = i;
-                probes[static_cast<size_t>(i)].seed = base_random_seed + i;
-            }
-
-            double stage0_remaining = std::numeric_limits<double>::infinity();
-            if (std::isfinite(global_time_limit_sec)) {
-                stage0_remaining = global_time_limit_sec - paramip_timer.elapsed_seconds();
-            }
-            if (stage0_remaining > 1e-6 || !std::isfinite(stage0_remaining)) {
-                const double stage0_probe_limit =
-                    std::isfinite(stage0_remaining)
-                        ? std::max(0.05, std::min(5.0, 0.25 * stage0_remaining))
-                        : std::numeric_limits<double>::infinity();
-                const std::string root_fixings = encode_paramip_fixings(fixed_y);
-                std::atomic<int32_t> completion_counter{0};
-                auto run_probe = [&](int32_t idx) {
-                    auto& probe = probes[static_cast<size_t>(idx)];
-                    auto sub_opts = make_paramip_subsolve_options(
-                        options, root_fixings, global_ub.load(std::memory_order_relaxed),
-                        stage0_probe_limit, true,
-                        probe.seed, 1);
-                    Model sub_model;
-                    sub_model.set_problem(problem_);
-                    probe.result = sub_model.solve(sub_opts);
-                    probe.completion_rank = completion_counter.fetch_add(
-                        1, std::memory_order_relaxed);
-                };
-
-                const int32_t workers = std::min<int32_t>(
-                    paramip_worker_target, root_probe_count);
-                if (workers <= 1) {
-                    for (int32_t i = 0; i < root_probe_count; ++i) {
-                        run_probe(i);
-                    }
-                } else {
-                    std::atomic<int32_t> next{0};
-                    std::vector<std::thread> pool;
-                    pool.reserve(static_cast<size_t>(workers));
-                    for (int32_t w = 0; w < workers; ++w) {
-                        pool.emplace_back([&] {
-                            for (;;) {
-                                const int32_t idx =
-                                    next.fetch_add(1, std::memory_order_relaxed);
-                                if (idx >= root_probe_count) break;
-                                run_probe(idx);
-                            }
-                        });
-                    }
-                    for (auto& t : pool) t.join();
-                }
-
-                auto has_finite_bound = [](const RootProbeResult& p) {
-                    return std::isfinite(p.result.bound);
-                };
-                auto has_incumbent = [](const RootProbeResult& p) {
-                    if (!std::isfinite(p.result.objective)) return false;
-                    if (p.result.status == SolveResult::Status::Optimal ||
-                        p.result.status == SolveResult::Status::Feasible) {
-                        return true;
-                    }
-                    if (p.result.status == SolveResult::Status::TimeLimit) {
-                        return !p.result.tour.empty() || !p.result.tour_arcs.empty();
-                    }
-                    return false;
-                };
-
-                int32_t chosen = -1;
-                if (root_pick_policy == "first") {
-                    for (int32_t i = 0; i < root_probe_count; ++i) {
-                        const auto& p = probes[static_cast<size_t>(i)];
-                        if (p.result.status == SolveResult::Status::Error) continue;
-                        if (!has_finite_bound(p)) continue;
-                        if (chosen < 0 ||
-                            p.completion_rank <
-                                probes[static_cast<size_t>(chosen)].completion_rank) {
-                            chosen = i;
-                        }
-                    }
-                    if (chosen < 0) {
-                        for (int32_t i = 0; i < root_probe_count; ++i) {
-                            const auto& p = probes[static_cast<size_t>(i)];
-                            if (p.result.status == SolveResult::Status::Error) continue;
-                            if (chosen < 0 ||
-                                p.completion_rank <
-                                    probes[static_cast<size_t>(chosen)].completion_rank) {
-                                chosen = i;
-                            }
-                        }
-                    }
-                } else {
-                    // "best": pick strongest root LP bound (max bound in minimization),
-                    // tie-breaking by incumbent objective then probe index.
-                    for (int32_t i = 0; i < root_probe_count; ++i) {
-                        const auto& p = probes[static_cast<size_t>(i)];
-                        if (p.result.status == SolveResult::Status::Error) continue;
-                        if (chosen < 0) {
-                            chosen = i;
-                            continue;
-                        }
-                        const auto& best = probes[static_cast<size_t>(chosen)];
-                        const bool p_has_bound = has_finite_bound(p);
-                        const bool b_has_bound = has_finite_bound(best);
-                        if (p_has_bound && !b_has_bound) {
-                            chosen = i;
-                            continue;
-                        }
-                        if (p_has_bound && b_has_bound &&
-                            p.result.bound > best.result.bound + 1e-9) {
-                            chosen = i;
-                            continue;
-                        }
-                        if (p_has_bound && b_has_bound &&
-                            std::abs(p.result.bound - best.result.bound) <= 1e-9) {
-                            const bool p_has_sol = has_incumbent(p);
-                            const bool b_has_sol = has_incumbent(best);
-                            if (p_has_sol && !b_has_sol) {
-                                chosen = i;
-                                continue;
-                            }
-                            if (p_has_sol && b_has_sol &&
-                                p.result.objective < best.result.objective - 1e-9) {
-                                chosen = i;
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                if (chosen >= 0) {
-                    const auto& picked = probes[static_cast<size_t>(chosen)];
-                    selected_root_seed = picked.seed;
-                    double best_probe_obj = std::numeric_limits<double>::infinity();
-                    for (const auto& p : probes) {
-                        if (!has_incumbent(p)) continue;
-                        best_probe_obj = std::min(best_probe_obj, p.result.objective);
-                    }
-                    if (std::isfinite(best_probe_obj)) {
-                        double prev = global_ub.load(std::memory_order_relaxed);
-                        while (best_probe_obj + 1e-9 < prev) {
-                            if (global_ub.compare_exchange_weak(
-                                    prev, best_probe_obj,
-                                    std::memory_order_relaxed,
-                                    std::memory_order_relaxed)) {
-                                break;
-                            }
-                        }
-                    }
-                    logger_.log(
-                        "ParaMIP stage0: probes={}, policy={}, chosen_probe={}, seed={}, bound={}, obj={}, status={}",
-                        root_probe_count, root_pick_policy, chosen, selected_root_seed,
-                        picked.result.bound, picked.result.objective,
-                        static_cast<int>(picked.result.status));
-                } else {
-                    logger_.log(
-                        "ParaMIP stage0: probes={}, policy={}, no valid root candidate (keeping seed={})",
-                        root_probe_count, root_pick_policy, selected_root_seed);
-                }
-            }
-        }
-
-        auto encode_chunk_fixings = [&](const ParamipChunkPlan& chunk) {
-            std::vector<int8_t> merged = fixed_y;
-            if (merged.empty()) {
-                merged.assign(static_cast<size_t>(n), static_cast<int8_t>(-1));
-            }
-            for (const auto& f : chunk.fixings) {
-                if (f.node < 0 || f.node >= n) continue;
-                merged[static_cast<size_t>(f.node)] = static_cast<int8_t>(f.value ? 1 : 0);
-            }
-            return encode_paramip_fixings(merged);
-        };
-
-        auto run_chunk = [&](int32_t idx) {
-            const auto& chunk = chunk_plan[static_cast<size_t>(idx)];
-            const double local_cutoff = global_ub.load(std::memory_order_relaxed);
-            double remaining_time_sec = std::numeric_limits<double>::infinity();
-            if (std::isfinite(global_time_limit_sec)) {
-                remaining_time_sec = global_time_limit_sec - paramip_timer.elapsed_seconds();
-                if (remaining_time_sec <= 1e-6) {
-                    SolveResult timeout;
-                    timeout.status = SolveResult::Status::TimeLimit;
-                    timeout.objective = 0.0;
-                    timeout.bound = 0.0;
-                    timeout.gap = 1.0;
-                    timeout.time_seconds = 0.0;
-                    chunk_results[static_cast<size_t>(idx)] = timeout;
-                    return;
-                }
-            }
-            const int32_t chunk_seed = selected_root_seed + 104729 * (chunk.id + 1);
-            auto sub_opts = make_paramip_subsolve_options(
-                options, encode_chunk_fixings(chunk), local_cutoff,
-                remaining_time_sec, !output_flag,
-                chunk_seed, std::nullopt);
-            Model sub_model;
-            sub_model.set_problem(problem_);
-            auto r = sub_model.solve(sub_opts);
-            chunk_results[static_cast<size_t>(idx)] = r;
-            if (r.has_solution() && std::isfinite(r.objective)) {
-                double prev = global_ub.load(std::memory_order_relaxed);
-                while (r.objective + 1e-9 < prev) {
-                    if (global_ub.compare_exchange_weak(
-                            prev, r.objective,
-                            std::memory_order_relaxed, std::memory_order_relaxed)) {
-                        break;
-                    }
-                }
-            }
-        };
-
-        if (deterministic) {
-            for (int32_t i = 0; i < static_cast<int32_t>(chunk_plan.size()); ++i) {
-                run_chunk(i);
-            }
-        } else {
-            const int32_t workers = std::min<int32_t>(
-                std::max<int32_t>(1, paramip_worker_target),
-                static_cast<int32_t>(chunk_plan.size()));
-            std::atomic<int32_t> next{0};
-            std::vector<std::thread> pool;
-            pool.reserve(static_cast<size_t>(workers));
-            for (int32_t w = 0; w < workers; ++w) {
-                pool.emplace_back([&] {
-                    for (;;) {
-                        const int32_t idx = next.fetch_add(1, std::memory_order_relaxed);
-                        if (idx >= static_cast<int32_t>(chunk_plan.size())) break;
-                        run_chunk(idx);
-                    }
-                });
-            }
-            for (auto& t : pool) t.join();
-        }
-
-        SolveResult out;
-        out.status = SolveResult::Status::Error;
-        out.objective = std::numeric_limits<double>::infinity();
-        out.bound = std::numeric_limits<double>::infinity();
-        out.gap = 1.0;
-        out.time_seconds = paramip_timer.elapsed_seconds();
-
-        bool any_error = false;
-        bool any_timelimit = false;
-        bool any_solution = false;
-        bool all_infeasible = true;
-        bool all_opt_or_infeasible = true;
-
-        for (const auto& r : chunk_results) {
-            out.nodes += r.nodes;
-            out.total_cuts += r.total_cuts;
-            out.separation_rounds += r.separation_rounds;
-            out.dssr_epochs_enqueued += r.dssr_epochs_enqueued;
-            out.dssr_epochs_committed += r.dssr_epochs_committed;
-            out.dssr_checkpoint_count += r.dssr_checkpoint_count;
-            out.dssr_commit_signature ^= r.dssr_commit_signature;
-            aggregate_separator_stats(out.separator_stats, r.separator_stats);
-
-            any_error = any_error || (r.status == SolveResult::Status::Error);
-            any_timelimit = any_timelimit || (r.status == SolveResult::Status::TimeLimit);
-            all_infeasible = all_infeasible && (r.status == SolveResult::Status::Infeasible);
-            all_opt_or_infeasible = all_opt_or_infeasible &&
-                (r.status == SolveResult::Status::Optimal ||
-                 r.status == SolveResult::Status::Infeasible);
-            if (std::isfinite(r.bound)) {
-                out.bound = std::min(out.bound, r.bound);
-            }
-            if (r.has_solution() && std::isfinite(r.objective)) {
-                any_solution = true;
-                if (!std::isfinite(out.objective) || r.objective < out.objective - 1e-9) {
-                    out.objective = r.objective;
-                    out.tour = r.tour;
-                    out.tour_arcs = r.tour_arcs;
-                }
-            }
-        }
-
-        if (any_solution) {
-            if (!std::isfinite(out.bound)) out.bound = out.objective;
-            if (std::abs(out.objective) > 1e-9) {
-                out.gap = std::max(0.0, (out.objective - out.bound) / std::abs(out.objective));
-            } else {
-                out.gap = (out.bound <= out.objective + 1e-9) ? 0.0 : 1.0;
-            }
-            if (all_opt_or_infeasible) out.status = SolveResult::Status::Optimal;
-            else if (any_timelimit) out.status = SolveResult::Status::TimeLimit;
-            else out.status = SolveResult::Status::Feasible;
-        } else if (all_infeasible) {
-            out.status = SolveResult::Status::Infeasible;
-            out.objective = 0.0;
-            if (!std::isfinite(out.bound)) out.bound = 0.0;
-            out.gap = 0.0;
-        } else if (any_timelimit) {
-            out.status = SolveResult::Status::TimeLimit;
-            out.objective = 0.0;
-            if (!std::isfinite(out.bound)) out.bound = 0.0;
-            out.gap = 1.0;
-        } else if (any_error) {
-            out.status = SolveResult::Status::Error;
-            out.objective = 0.0;
-            if (!std::isfinite(out.bound)) out.bound = 0.0;
-            out.gap = 1.0;
-        } else {
-            out.status = SolveResult::Status::Feasible;
-        }
-
-        logger_.log("ParaMIP static_root done: chunks={}, status={}, obj={}, bound={}, time={}s",
-                    static_cast<int32_t>(chunk_plan.size()),
-                    static_cast<int>(out.status),
-                    out.objective,
-                    out.bound,
-                    out.time_seconds);
-        return out;
-    }
 
     auto non_highs_work_budget =
         std::make_shared<WorkUnitBudget>(deterministic_work_units);
@@ -1587,7 +1379,39 @@ SolveResult Model::solve(const SolverOptions& options) {
                     stage1_elim_edges, m, 100.0 * stage1_elim_ratio);
     }
 
-    if (paramip_mode == "static_root" && !chunk_plan.empty() && !internal_skip_preproc) {
+    auto fixed_y = parse_paramip_fixings(
+        paramip_fixings_spec, n, source, target, logger_);
+    const int32_t requested_chunks = std::max<int32_t>(2, paramip_chunks);
+    const int32_t requested_depth = ceil_log2_chunks(requested_chunks);
+
+    if (paramip_mode == "plan") {
+        auto split_nodes = choose_paramip_split_nodes(problem_, requested_depth, fixed_y);
+        auto chunk_plan = build_paramip_chunk_plan(split_nodes);
+        logger_.log("ParaMIP plan: mode={}, requested_chunks={}, depth={}, chunks={}, workers={}",
+                    paramip_mode, requested_chunks, requested_depth,
+                    static_cast<int32_t>(chunk_plan.size()), paramip_worker_target);
+        if (static_cast<int32_t>(split_nodes.size()) < requested_depth) {
+            logger_.log("ParaMIP plan: limited split nodes ({}/{}) due to instance size",
+                        static_cast<int32_t>(split_nodes.size()), requested_depth);
+        }
+        if (workflow_dump && !chunk_plan.empty()) {
+            const int32_t dump_limit =
+                std::min<int32_t>(8, static_cast<int32_t>(chunk_plan.size()));
+            for (int32_t i = 0; i < dump_limit; ++i) {
+                const auto& chunk = chunk_plan[static_cast<size_t>(i)];
+                std::ostringstream ss;
+                ss << "  chunk#" << chunk.id << ": ";
+                for (size_t k = 0; k < chunk.fixings.size(); ++k) {
+                    if (k > 0) ss << ", ";
+                    ss << "y[" << chunk.fixings[k].node << "]="
+                       << (chunk.fixings[k].value ? 1 : 0);
+                }
+                logger_.log("{}", ss.str());
+            }
+        }
+    }
+
+    if (paramip_mode == "static_root" && !internal_skip_preproc) {
         auto prepared_ctx = std::make_shared<PreparedSolveContext>();
         prepared_ctx->fwd_bounds = fwd_bounds;
         prepared_ctx->bwd_bounds = bwd_bounds;
@@ -1606,7 +1430,6 @@ SolveResult Model::solve(const SolverOptions& options) {
         } prepared_ctx_guard{prepared_ctx_id};
 
         Timer paramip_timer;
-        std::vector<SolveResult> chunk_results(chunk_plan.size());
         std::atomic<double> global_ub{warm_start_ub};
         double global_time_limit_sec = std::numeric_limits<double>::infinity();
         for (const auto& [k, v] : options) {
@@ -1628,13 +1451,20 @@ SolveResult Model::solve(const SolverOptions& options) {
             (paramip_root_probes > 0)
                 ? paramip_root_probes
                 : std::min<int32_t>(std::max<int32_t>(2, paramip_worker_target), 8);
+        logger_.log("ParaMIP plan: mode={}, requested_chunks={}, depth<={}",
+                    paramip_mode, requested_chunks, requested_depth);
+        logger_.log("ParaMIP stage0 config: root_probes={}, pick={}",
+                    root_probe_count, root_pick_policy);
 
-        if (root_probe_count > 1) {
+        std::optional<RootLpSnapshot> selected_root_snapshot;
+
+        if (root_probe_count > 0) {
             struct RootProbeResult {
                 int32_t probe_idx = -1;
                 int32_t seed = 0;
                 int32_t completion_rank = std::numeric_limits<int32_t>::max();
                 SolveResult result;
+                std::optional<RootLpSnapshot> root_lp;
             };
 
             std::vector<RootProbeResult> probes(static_cast<size_t>(root_probe_count));
@@ -1656,6 +1486,13 @@ SolveResult Model::solve(const SolverOptions& options) {
                 std::atomic<int32_t> completion_counter{0};
                 auto run_probe = [&](int32_t idx) {
                     auto& probe = probes[static_cast<size_t>(idx)];
+                    auto capture_store = std::make_shared<RootLpCaptureStore>();
+                    const int64_t capture_id =
+                        register_root_capture_store(capture_store);
+                    struct CaptureGuard {
+                        int64_t id = 0;
+                        ~CaptureGuard() { unregister_root_capture_store(id); }
+                    } capture_guard{capture_id};
                     auto sub_opts = make_paramip_subsolve_options(
                         options, root_fixings, global_ub.load(std::memory_order_relaxed),
                         stage0_probe_limit, true,
@@ -1663,10 +1500,13 @@ SolveResult Model::solve(const SolverOptions& options) {
                     sub_opts.push_back({"_internal_skip_preproc", "true"});
                     sub_opts.push_back({"_internal_prepared_ctx_id",
                                         std::to_string(prepared_ctx_id)});
+                    sub_opts.push_back({"_internal_root_capture_id",
+                                        std::to_string(capture_id)});
                     sub_opts.push_back({"_internal_disable_async_dssr", "true"});
                     Model sub_model;
                     sub_model.set_problem(problem_);
                     probe.result = sub_model.solve(sub_opts);
+                    probe.root_lp = capture_store->get_snapshot();
                     probe.completion_rank = completion_counter.fetch_add(
                         1, std::memory_order_relaxed);
                 };
@@ -1772,6 +1612,9 @@ SolveResult Model::solve(const SolverOptions& options) {
                 if (chosen >= 0) {
                     const auto& picked = probes[static_cast<size_t>(chosen)];
                     selected_root_seed = picked.seed;
+                    if (picked.root_lp && picked.root_lp->valid) {
+                        selected_root_snapshot = picked.root_lp;
+                    }
                     double best_probe_obj = std::numeric_limits<double>::infinity();
                     for (const auto& p : probes) {
                         if (!has_incumbent(p)) continue;
@@ -1789,10 +1632,11 @@ SolveResult Model::solve(const SolverOptions& options) {
                         }
                     }
                     logger_.log(
-                        "ParaMIP stage0: probes={}, policy={}, chosen_probe={}, seed={}, bound={}, obj={}, status={}",
+                        "ParaMIP stage0: probes={}, policy={}, chosen_probe={}, seed={}, bound={}, obj={}, status={}, root_lp={}",
                         root_probe_count, root_pick_policy, chosen, selected_root_seed,
                         picked.result.bound, picked.result.objective,
-                        static_cast<int>(picked.result.status));
+                        static_cast<int>(picked.result.status),
+                        selected_root_snapshot.has_value() ? "captured" : "missing");
                 } else {
                     logger_.log(
                         "ParaMIP stage0: probes={}, policy={}, no valid root candidate (keeping seed={})",
@@ -1800,6 +1644,53 @@ SolveResult Model::solve(const SolverOptions& options) {
                 }
             }
         }
+
+        std::vector<int32_t> split_nodes;
+        if (selected_root_snapshot &&
+            selected_root_snapshot->valid &&
+            selected_root_snapshot->y_lp.size() == static_cast<size_t>(n)) {
+            split_nodes = choose_paramip_split_nodes_from_root_lp(
+                problem_, requested_depth, fixed_y, selected_root_snapshot->y_lp);
+            logger_.log("ParaMIP chunking: selected {} split vars from root LP (depth={})",
+                        static_cast<int32_t>(split_nodes.size()), requested_depth);
+        } else {
+            split_nodes = choose_paramip_split_nodes(problem_, requested_depth, fixed_y);
+            logger_.log("ParaMIP chunking: root LP unavailable; using fallback split heuristic (depth={})",
+                        requested_depth);
+        }
+        auto chunk_plan = build_paramip_chunk_plan(split_nodes);
+        if (chunk_plan.empty()) {
+            logger_.log("ParaMIP static_root: no chunk plan generated; falling back to single HiGHS solve");
+        }
+        if (workflow_dump && !chunk_plan.empty()) {
+            const int32_t dump_limit =
+                std::min<int32_t>(8, static_cast<int32_t>(chunk_plan.size()));
+            for (int32_t i = 0; i < dump_limit; ++i) {
+                const auto& chunk = chunk_plan[static_cast<size_t>(i)];
+                std::ostringstream ss;
+                ss << "  chunk#" << chunk.id << ": ";
+                for (size_t k = 0; k < chunk.fixings.size(); ++k) {
+                    if (k > 0) ss << ", ";
+                    ss << "y[" << chunk.fixings[k].node << "]="
+                       << (chunk.fixings[k].value ? 1 : 0);
+                }
+                logger_.log("{}", ss.str());
+            }
+        }
+        if (chunk_plan.empty()) {
+            // Continue to regular single-instance path.
+        } else {
+            std::vector<SolveResult> chunk_results(chunk_plan.size());
+            int64_t root_warmstart_id = 0;
+            struct RootWarmGuard {
+                int64_t id = 0;
+                ~RootWarmGuard() { unregister_root_warmstart(id); }
+            } root_warm_guard{};
+            if (selected_root_snapshot && selected_root_snapshot->valid) {
+                root_warmstart_id = register_root_warmstart(
+                    std::make_shared<RootLpSnapshot>(*selected_root_snapshot));
+                root_warm_guard.id = root_warmstart_id;
+            }
 
         auto encode_chunk_fixings = [&](const ParamipChunkPlan& chunk) {
             std::vector<int8_t> merged = fixed_y;
@@ -1838,6 +1729,10 @@ SolveResult Model::solve(const SolverOptions& options) {
             sub_opts.push_back({"_internal_skip_preproc", "true"});
             sub_opts.push_back({"_internal_prepared_ctx_id",
                                 std::to_string(prepared_ctx_id)});
+            if (root_warmstart_id > 0) {
+                sub_opts.push_back({"_internal_root_warmstart_id",
+                                    std::to_string(root_warmstart_id)});
+            }
             Model sub_model;
             sub_model.set_problem(problem_);
             auto r = sub_model.solve(sub_opts);
@@ -1955,6 +1850,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                     out.bound,
                     out.time_seconds);
         return out;
+        }
     }
 
     HiGHSBridge bridge(problem_, highs, logger_, separation_tol);
@@ -1971,6 +1867,23 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_heuristic_deterministic_restarts(heuristic_deterministic_restarts);
     bridge.set_fixed_y(fixed_y);
     bridge.set_work_unit_budget(non_highs_work_budget);
+    if (root_capture_store) {
+        bridge.set_root_lp_capture_callback(
+            [root_capture_store](const std::vector<double>& x_lp,
+                                 const std::vector<double>& y_lp,
+                                 const HighsBasis& basis,
+                                 const HighsSolution& solution,
+                                 double bound) {
+                RootLpSnapshot snapshot;
+                snapshot.x_lp = x_lp;
+                snapshot.y_lp = y_lp;
+                snapshot.basis = basis;
+                snapshot.solution = solution;
+                snapshot.bound = bound;
+                snapshot.valid = true;
+                root_capture_store->publish(std::move(snapshot));
+            });
+    }
     if (max_cuts_sec >= 0) bridge.set_separator_max_cuts("SEC", max_cuts_sec);
     if (max_cuts_rci >= 0) bridge.set_separator_max_cuts("RCI", max_cuts_rci);
     if (max_cuts_multistar >= 0) bridge.set_separator_max_cuts("Multistar", max_cuts_multistar);
@@ -2329,8 +2242,23 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_heuristic_strategy(heuristic_strategy);
     bridge.install_heuristic_callback();
 
-    // Pass initial solution to HiGHS (skip if heuristics disabled)
-    if (!disable_heuristics) {
+    // If available, warm-start LP from selected root probe snapshot.
+    if (root_warmstart && root_warmstart->valid) {
+        auto basis_status = highs.setBasis(root_warmstart->basis);
+        if (basis_status != HighsStatus::kOk) {
+            logger_.log("Warning: failed to set root LP basis warm-start");
+        }
+        auto root_start = root_warmstart->solution;
+        root_start.value_valid = true;
+        HighsInt num_cols = highs.getNumCol();
+        while (static_cast<HighsInt>(root_start.col_value.size()) < num_cols)
+            root_start.col_value.push_back(0.0);
+        auto sol_status = highs.setSolution(root_start);
+        if (sol_status != HighsStatus::kOk) {
+            logger_.log("Warning: failed to set root LP solution warm-start");
+        }
+    } else if (!disable_heuristics) {
+        // Pass heuristic solution to HiGHS (skip if heuristics disabled)
         HighsSolution start;
         start.value_valid = true;
         start.col_value = std::move(warm_start.col_values);
@@ -2471,6 +2399,20 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     highs.run();
+
+    if (root_capture_store && !root_capture_store->get_snapshot().has_value()) {
+        const auto& sol = highs.getSolution();
+        if (static_cast<int32_t>(sol.col_value.size()) >= m + n) {
+            RootLpSnapshot snapshot;
+            snapshot.x_lp.assign(sol.col_value.begin(), sol.col_value.begin() + m);
+            snapshot.y_lp.assign(sol.col_value.begin() + m, sol.col_value.begin() + m + n);
+            snapshot.basis = highs.getBasis();
+            snapshot.solution = sol;
+            snapshot.bound = highs.getObjectiveValue();
+            snapshot.valid = true;
+            root_capture_store->publish(std::move(snapshot));
+        }
+    }
 
     stop_async_dssr.store(true, std::memory_order_relaxed);
     if (deterministic_async_strict) {
