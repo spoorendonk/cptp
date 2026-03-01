@@ -160,6 +160,10 @@ root_lp -> create_branch_chunks(B)
 For now, this branch only exposes DAG visibility (`workflow_dump=true`) and keeps
 the single-instance exact solve behavior.
 
+Current implementation status:
+- `paramip_mode=plan`: builds and logs deterministic root chunk plans.
+- `paramip_mode=static_root`: logs chunk plan and currently falls back to single-solve baseline.
+
 ## Cut Separation
 
 Five families of cutting planes are separated dynamically: SEC, RCI, Multistar/GLM,

@@ -102,9 +102,13 @@ Related existing knobs in the same area:
 - `preproc_second_ws_budget_ms_max` (default `400`)
 - `preproc_second_ws_budget_scale` (default `8`)
 - `workflow_dump` (default `false`): logs startup/solve task DAG (including current async DSSR wiring)
+- `paramip_mode` (default `off`): `off/plan/static_root`
+- `paramip_chunks` (default `0`): requested root partition chunks for ParaMIP planning
+- `paramip_workers` (default `0`): target worker count (`0` = hardware-concurrency default)
 
 Note:
 - Edge elimination requires a finite incumbent upper bound plus labeling bounds; if no UB is available yet, elimination is skipped.
+- `paramip_mode=static_root` currently emits the chunk plan and falls back to single-solve baseline execution.
 
 ## 4) Reduced-cost fixing
 

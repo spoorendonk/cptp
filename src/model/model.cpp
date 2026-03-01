@@ -11,6 +11,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <thread>
 
 #include <tbb/task_group.h>
@@ -94,6 +95,73 @@ uint64_t dssr_sig_quantize(double value) {
         return std::numeric_limits<uint64_t>::max();
     }
     return std::bit_cast<uint64_t>(value);
+}
+
+struct ParamipFixing {
+    int32_t node = -1;
+    bool value = false;
+};
+
+struct ParamipChunkPlan {
+    int32_t id = 0;
+    std::vector<ParamipFixing> fixings;
+};
+
+int32_t ceil_log2_chunks(int32_t chunks) {
+    int32_t depth = 0;
+    int32_t cap = 1;
+    while (cap < chunks && depth < 30) {
+        cap <<= 1;
+        ++depth;
+    }
+    return depth;
+}
+
+std::vector<int32_t> choose_paramip_split_nodes(const Problem& problem,
+                                                int32_t depth) {
+    std::vector<int32_t> candidates;
+    const int32_t n = problem.num_nodes();
+    const int32_t source = problem.source();
+    const int32_t target = problem.target();
+    candidates.reserve(static_cast<size_t>(n));
+    for (int32_t i = 0; i < n; ++i) {
+        if (i == source || i == target) continue;
+        candidates.push_back(i);
+    }
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [&](int32_t a, int32_t b) {
+                         const double pa = problem.profit(a);
+                         const double pb = problem.profit(b);
+                         if (pa != pb) return pa > pb;
+                         return a < b;
+                     });
+    if (depth < static_cast<int32_t>(candidates.size())) {
+        candidates.resize(static_cast<size_t>(depth));
+    }
+    return candidates;
+}
+
+std::vector<ParamipChunkPlan> build_paramip_chunk_plan(
+    std::span<const int32_t> split_nodes) {
+    const int32_t depth = static_cast<int32_t>(split_nodes.size());
+    std::vector<ParamipChunkPlan> chunks;
+    if (depth <= 0) return chunks;
+    const int32_t total = 1 << depth;
+    chunks.reserve(static_cast<size_t>(total));
+    for (int32_t cid = 0; cid < total; ++cid) {
+        ParamipChunkPlan chunk;
+        chunk.id = cid;
+        chunk.fixings.reserve(static_cast<size_t>(depth));
+        for (int32_t level = 0; level < depth; ++level) {
+            const bool value = ((cid >> level) & 1) != 0;
+            chunk.fixings.push_back(ParamipFixing{
+                .node = split_nodes[static_cast<size_t>(level)],
+                .value = value,
+            });
+        }
+        chunks.push_back(std::move(chunk));
+    }
+    return chunks;
 }
 
 }  // namespace
@@ -204,6 +272,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     int64_t heuristic_node_interval = 200;
     bool heuristic_async_injection = true;
     bool workflow_dump = false;
+    std::string paramip_mode = "off";
+    int32_t paramip_chunks = 0;
+    int32_t paramip_workers = 0;
     int32_t max_concurrent_solves = 0;
     bool enable_sec = true;
     bool enable_rci = true;
@@ -303,6 +374,27 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "workflow_dump") {
             workflow_dump = (value == "true" || value == "1");
+            continue;
+        }
+        if (key == "paramip_mode") {
+            std::string mode = value;
+            std::transform(mode.begin(), mode.end(), mode.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (mode == "off" || mode == "plan" || mode == "static_root") {
+                paramip_mode = mode;
+            } else {
+                logger_.log("Warning: unknown paramip_mode='{}' (expected off|plan|static_root), using off",
+                            value);
+                paramip_mode = "off";
+            }
+            continue;
+        }
+        if (key == "paramip_chunks") {
+            paramip_chunks = std::stoi(value);
+            continue;
+        }
+        if (key == "paramip_workers") {
+            paramip_workers = std::stoi(value);
             continue;
         }
         if (key == "parallel_mode") {
@@ -574,6 +666,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     heuristic_deterministic_restarts =
         std::max<int32_t>(1, heuristic_deterministic_restarts);
     max_concurrent_solves = std::max<int32_t>(0, max_concurrent_solves);
+    paramip_chunks = std::max<int32_t>(0, paramip_chunks);
+    paramip_workers = std::max<int32_t>(0, paramip_workers);
     hyper_sb_iter_limit = std::max<int32_t>(1, hyper_sb_iter_limit);
     hyper_sb_min_reliable = std::max<int32_t>(1, hyper_sb_min_reliable);
     hyper_sb_max_candidates = std::max<int32_t>(1, hyper_sb_max_candidates);
@@ -625,6 +719,42 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     const int32_t n = problem_.num_nodes();
     const int32_t m = problem_.num_edges();
+
+    if (paramip_mode != "off") {
+        const int32_t requested_chunks = std::max<int32_t>(2, paramip_chunks);
+        const int32_t depth = ceil_log2_chunks(requested_chunks);
+        auto split_nodes = choose_paramip_split_nodes(problem_, depth);
+        auto chunk_plan = build_paramip_chunk_plan(split_nodes);
+        const int32_t workers = (paramip_workers > 0)
+            ? paramip_workers
+            : std::max<int32_t>(1, static_cast<int32_t>(std::thread::hardware_concurrency()));
+        logger_.log("ParaMIP plan: mode={}, requested_chunks={}, depth={}, chunks={}, workers={}",
+                    paramip_mode, requested_chunks, depth,
+                    static_cast<int32_t>(chunk_plan.size()), workers);
+        if (static_cast<int32_t>(split_nodes.size()) < depth) {
+            logger_.log("ParaMIP plan: limited split nodes ({}/{}) due to instance size",
+                        static_cast<int32_t>(split_nodes.size()), depth);
+        }
+        if (workflow_dump && !chunk_plan.empty()) {
+            const int32_t dump_limit = std::min<int32_t>(
+                8, static_cast<int32_t>(chunk_plan.size()));
+            for (int32_t i = 0; i < dump_limit; ++i) {
+                const auto& chunk = chunk_plan[static_cast<size_t>(i)];
+                std::ostringstream ss;
+                ss << "  chunk#" << chunk.id << ": ";
+                for (size_t k = 0; k < chunk.fixings.size(); ++k) {
+                    if (k > 0) ss << ", ";
+                    ss << "y[" << chunk.fixings[k].node << "]="
+                       << (chunk.fixings[k].value ? 1 : 0);
+                }
+                logger_.log("{}", ss.str());
+            }
+        }
+        if (paramip_mode == "static_root") {
+            logger_.log("ParaMIP static_root: execution path is not enabled yet; running single-solve baseline");
+        }
+    }
+
     std::vector<double> fwd_bounds, bwd_bounds;
     std::vector<double> all_pairs;
     heuristic::HeuristicResult warm_start{{}, std::numeric_limits<double>::infinity()};
