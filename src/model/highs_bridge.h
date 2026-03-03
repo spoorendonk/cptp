@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <limits>
 #include <atomic>
-#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -14,7 +13,6 @@
 #include "Highs.h"
 #include "core/problem.h"
 #include "core/solution.h"
-#include "model/async_incumbent.h"
 #include "preprocess/shared_bounds.h"
 #include "sep/separation_context.h"
 #include "sep/separation_oracle.h"
@@ -97,23 +95,8 @@ class HiGHSBridge {
     void set_shared_bounds_store(std::shared_ptr<preprocess::SharedBoundsStore> store) {
         shared_bounds_ = std::move(store);
     }
-
-    /// Optional async incumbent upper bound produced outside HiGHS.
-    void set_async_upper_bound(std::shared_ptr<std::atomic<double>> ub) {
-        async_upper_bound_ = std::move(ub);
-    }
-
-    /// Optional async incumbent produced outside HiGHS callbacks.
-    void set_async_incumbent_store(std::shared_ptr<model::AsyncIncumbentStore> store) {
-        async_incumbent_store_ = std::move(store);
-    }
     void set_interrupt_flag(std::shared_ptr<std::atomic<bool>> flag) {
         interrupt_flag_ = std::move(flag);
-    }
-
-    /// Optional deterministic checkpoint hook called at propagator callbacks.
-    void set_deterministic_checkpoint_hook(std::function<void()> hook) {
-        deterministic_checkpoint_hook_ = std::move(hook);
     }
 
     /// Install domain propagator that fixes edges during B&C based on labeling bounds.
@@ -131,8 +114,6 @@ class HiGHSBridge {
     /// Set heuristic strategy: 0=all, 1=LP-threshold, 2=RINS, 3=neighborhood.
     void set_heuristic_strategy(int s) { heuristic_strategy_ = s; }
     void set_heuristic_node_interval(int64_t interval) { heuristic_node_interval_ = interval; }
-    void set_heuristic_async_injection(bool enable) { heuristic_async_injection_ = enable; }
-    void set_heuristic_deterministic_mode(bool enable) { heuristic_deterministic_mode_ = enable; }
     void set_heuristic_deterministic_restarts(int32_t restarts) {
         heuristic_deterministic_restarts_ = restarts;
     }
@@ -174,10 +155,7 @@ class HiGHSBridge {
     // All-pairs labeling bounds for stronger Trigger B propagation
     std::vector<double> all_pairs_;    // flat n×n: d(s,v) = all_pairs_[s*n+v]
     std::shared_ptr<preprocess::SharedBoundsStore> shared_bounds_;
-    std::shared_ptr<std::atomic<double>> async_upper_bound_;
-    std::shared_ptr<model::AsyncIncumbentStore> async_incumbent_store_;
     std::shared_ptr<std::atomic<bool>> interrupt_flag_;
-    std::function<void()> deterministic_checkpoint_hook_;
 
     // RC fixing settings and statistics
     RCFixingSettings rc_settings_;
@@ -205,8 +183,6 @@ class HiGHSBridge {
     double heuristic_budget_ms_ = 20.0;
     int heuristic_strategy_ = 0;  // 0=all, 1=threshold, 2=RINS, 3=neighborhood
     int64_t heuristic_node_interval_ = 200;
-    bool heuristic_async_injection_ = true;
-    bool heuristic_deterministic_mode_ = false;
     int32_t heuristic_deterministic_restarts_ = 32;
     std::shared_ptr<WorkUnitBudget> work_unit_budget_;
 

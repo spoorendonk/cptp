@@ -1071,16 +1071,14 @@ TEST_CASE("Warm-start: deterministic path produces identical results", "[heurist
     REQUIRE(r1.col_values == r2.col_values);
 }
 
-TEST_CASE("Warm-start: opportunistic mode produces valid solution", "[heuristic]") {
+TEST_CASE("Warm-start: time budget option is deterministic no-op", "[heuristic][determinism]") {
     auto prob = make_small_problem();
 
-    // time_budget_ms > 0 triggers opportunistic (non-deterministic) mode
-    auto result = rcspp::heuristic::build_warm_start(prob, 50, 100.0);
+    auto base = rcspp::heuristic::build_warm_start(prob, 50, 0.0);
+    auto with_budget = rcspp::heuristic::build_warm_start(prob, 50, 100.0);
 
-    REQUIRE(result.objective < std::numeric_limits<double>::max());
-    REQUIRE(result.col_values.size() ==
-            static_cast<size_t>(prob.num_edges() + prob.num_nodes()));
-    REQUIRE(result.col_values[prob.num_edges() + prob.source()] == 1.0);
+    REQUIRE(with_budget.objective == base.objective);
+    REQUIRE(with_budget.col_values == base.col_values);
 }
 
 TEST_CASE("WorkUnitBudget enforces cap and reservation", "[heuristic][determinism]") {

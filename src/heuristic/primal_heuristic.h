@@ -1,21 +1,17 @@
 #pragma once
 
 #include <algorithm>
-#include <atomic>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <numeric>
 #include <random>
 #include <span>
-#include <thread>
 #include <vector>
 
 #include <tbb/parallel_for.h>
-#include <tbb/task_group.h>
+#include <tbb/task_arena.h>
 
 #include "core/problem.h"
 #include "preprocess/edge_elimination.h"
@@ -30,6 +26,8 @@ struct ReducedGraph {
 };
 
 namespace detail {
+
+inline constexpr double kNoSolution = std::numeric_limits<double>::infinity();
 
 /// Find edge index between u and v, or -1 if not found.
 /// When edge_active is non-empty, inactive edges return -1.
@@ -119,9 +117,10 @@ inline void local_search(const Problem& prob,
                          const std::vector<bool>& edge_active = {},
                          int max_iter = 200) {
     const int32_t n = prob.num_nodes();
-    // Minimum tour size for node drop: tours need >= 4 (depot + 2 customers + depot),
-    // paths need >= 3 (source + 1 customer + target).
-    const int32_t min_drop_size = prob.is_tour() ? 5 : 4;
+    // Minimum size before allowing node drop:
+    // tours keep at least [depot, customer, depot] (size 3),
+    // paths keep at least [source, target] plus one optional customer (size 3).
+    const int32_t min_drop_size = prob.is_tour() ? 4 : 4;
 
     for (int iter = 0; iter < max_iter; ++iter) {
         bool improved = false;
@@ -250,16 +249,16 @@ single_restart(const Problem& prob,
     if (!is_tour) remaining_cap -= prob.demand(target);
 
     if (remaining_cap < 0.0) {
-        return {std::move(tour), std::numeric_limits<double>::max()};
+        return {std::move(tour), kNoSolution};
     }
 
     greedy_insert(prob, tour, in_tour, remaining_cap, order, edge_active);
 
-    // Ensure enough customers for a valid solution.
-    // Tour needs >= 4 elements [depot, a, b, depot] (binary edges: can't use same edge twice).
-    // Path needs >= 2 elements [source, target] (always valid, edge source->target).
-    int32_t min_valid_size = is_tour ? 4 : 2;
-    int32_t min_construction_size = is_tour ? 3 : 2;
+    // Ensure enough nodes for a valid solution.
+    // Tour allows [depot, customer, depot] because depot-incident x_e can be 2.
+    // Path needs >= 2 elements [source, target].
+    int32_t min_valid_size = is_tour ? 3 : 2;
+    int32_t min_construction_size = 2;
 
     while (static_cast<int32_t>(tour.size()) <= min_construction_size && !customers.empty()) {
         double bd = std::numeric_limits<double>::max();
@@ -297,8 +296,146 @@ single_restart(const Problem& prob,
 
     double obj = (static_cast<int32_t>(tour.size()) >= min_valid_size)
                      ? tour_objective(prob, tour)
-                     : std::numeric_limits<double>::max();
+                     : kNoSolution;
     return {std::move(tour), obj};
+}
+
+/// Deterministic fallback constructor used when restart search finds no feasible tour/path.
+inline std::vector<int32_t> fallback_feasible(const Problem& prob,
+                                              const std::vector<bool>& edge_active = {}) {
+    const int32_t n = prob.num_nodes();
+    const int32_t source = prob.source();
+    const int32_t target = prob.target();
+    const bool is_tour = prob.is_tour();
+
+    double remaining_cap = prob.capacity() - prob.demand(source);
+    if (!is_tour) remaining_cap -= prob.demand(target);
+    if (remaining_cap < 0.0) return {};
+
+    constexpr double kBig = 1e15;
+    if (is_tour) {
+        int32_t best = -1;
+        double best_obj = kNoSolution;
+        for (int32_t c = 0; c < n; ++c) {
+            if (c == source) continue;
+            if (prob.demand(c) > remaining_cap) continue;
+            const double c1 = edge_cost(prob, source, c, edge_active);
+            const double c2 = edge_cost(prob, c, source, edge_active);
+            if (c1 > kBig || c2 > kBig) continue;
+            const std::vector<int32_t> cand = {source, c, source};
+            const double obj = tour_objective(prob, cand);
+            if (obj < best_obj) {
+                best_obj = obj;
+                best = c;
+            }
+        }
+        if (best >= 0) return {source, best, source};
+        return {};
+    }
+
+    const double direct = edge_cost(prob, source, target, edge_active);
+    if (direct <= kBig) return {source, target};
+
+    int32_t best = -1;
+    double best_obj = kNoSolution;
+    for (int32_t c = 0; c < n; ++c) {
+        if (c == source || c == target) continue;
+        if (prob.demand(c) > remaining_cap) continue;
+        const double c1 = edge_cost(prob, source, c, edge_active);
+        const double c2 = edge_cost(prob, c, target, edge_active);
+        if (c1 > kBig || c2 > kBig) continue;
+        const std::vector<int32_t> cand = {source, c, target};
+        const double obj = tour_objective(prob, cand);
+        if (obj < best_obj) {
+            best_obj = obj;
+            best = c;
+        }
+    }
+    if (best >= 0) return {source, best, target};
+    return {};
+}
+
+/// Enumerate all 1-customer / 2-customer seeds, choose the best objective seed,
+/// then run local search from that seed.
+inline std::pair<std::vector<int32_t>, double>
+best_small_seed_with_local_search(const Problem& prob,
+                                  const std::vector<int32_t>& customers,
+                                  const std::vector<bool>& edge_active = {}) {
+    const int32_t n = prob.num_nodes();
+    const int32_t source = prob.source();
+    const int32_t target = prob.target();
+    const bool is_tour = prob.is_tour();
+
+    double base_remaining = prob.capacity() - prob.demand(source);
+    if (!is_tour) base_remaining -= prob.demand(target);
+    if (base_remaining < 0.0) return {{}, kNoSolution};
+
+    constexpr double kBig = 1e15;
+    std::vector<int32_t> best_seed;
+    double best_seed_obj = kNoSolution;
+
+    auto seed_valid_edges = [&](std::span<const int32_t> seq) {
+        for (size_t i = 0; i + 1 < seq.size(); ++i) {
+            if (edge_cost(prob, seq[i], seq[i + 1], edge_active) > kBig) return false;
+        }
+        return true;
+    };
+
+    auto try_seed = [&](std::vector<int32_t> seed, double used_demand) {
+        if (used_demand > base_remaining + 1e-9) return;
+        if (!seed_valid_edges(seed)) return;
+        double obj = tour_objective(prob, seed);
+        if (obj < best_seed_obj) {
+            best_seed_obj = obj;
+            best_seed = std::move(seed);
+        }
+    };
+
+    // Path-only zero-customer seed.
+    if (!is_tour) {
+        try_seed({source, target}, 0.0);
+    }
+
+    // All single-customer seeds.
+    for (int32_t c : customers) {
+        double used = prob.demand(c);
+        if (is_tour) {
+            try_seed({source, c, source}, used);
+        } else {
+            try_seed({source, c, target}, used);
+        }
+    }
+
+    // All two-customer seeds.
+    for (size_t i = 0; i < customers.size(); ++i) {
+        const int32_t a = customers[i];
+        for (size_t j = i + 1; j < customers.size(); ++j) {
+            const int32_t b = customers[j];
+            const double used = prob.demand(a) + prob.demand(b);
+            if (is_tour) {
+                try_seed({source, a, b, source}, used);
+            } else {
+                try_seed({source, a, b, target}, used);
+                try_seed({source, b, a, target}, used);
+            }
+        }
+    }
+
+    if (best_seed.empty()) return {{}, kNoSolution};
+
+    std::vector<bool> in_tour(n, false);
+    for (int32_t v : best_seed) {
+        if (v >= 0 && v < n) in_tour[v] = true;
+    }
+
+    double remaining_cap = base_remaining;
+    for (size_t i = 1; i + 1 < best_seed.size(); ++i) {
+        int32_t v = best_seed[i];
+        if (v != source && v != target) remaining_cap -= prob.demand(v);
+    }
+
+    local_search(prob, best_seed, in_tour, remaining_cap, edge_active);
+    return {best_seed, tour_objective(prob, best_seed)};
 }
 
 /// Convert a tour (node sequence) to a MIP solution vector.
@@ -309,7 +446,7 @@ inline std::vector<double> tour_to_solution(const Problem& prob,
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
-    int32_t min_valid_size = prob.is_tour() ? 4 : 2;
+    int32_t min_valid_size = prob.is_tour() ? 3 : 2;
 
     std::vector<double> sol(m + n, 0.0);
     sol[m + source] = 1.0;
@@ -320,7 +457,7 @@ inline std::vector<double> tour_to_solution(const Problem& prob,
             sol[m + tour[i]] = 1.0;
         for (size_t i = 0; i + 1 < tour.size(); ++i) {
             int32_t e = find_edge(g, tour[i], tour[i + 1]);
-            if (e >= 0) sol[e] = 1.0;
+            if (e >= 0) sol[e] += 1.0;
         }
     }
     return sol;
@@ -459,8 +596,7 @@ inline ReducedGraph reduce_neighborhood(const Problem& prob,
 /// Build an initial solution via parallel randomized construction + local search.
 /// Runs on the complete graph. Used before MIP solve.
 /// num_restarts: total number of restarts (including 3 deterministic orderings).
-/// time_budget_ms: when > 0, use opportunistic (non-deterministic) time-based
-///     restarts instead of a fixed count — allows more restarts on fast hardware.
+/// time_budget_ms: deprecated in deterministic-only mode.
 /// Returns solution vector + objective value.
 inline HeuristicResult build_initial_solution(const Problem& prob,
                                               int num_restarts = 50,
@@ -469,7 +605,8 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
                                               std::span<const double> fwd_bounds = {},
                                               std::span<const double> bwd_bounds = {},
                                               double correction = 0.0,
-                                              double upper_bound = std::numeric_limits<double>::infinity()) {
+                                              double upper_bound = std::numeric_limits<double>::infinity(),
+                                              int32_t max_workers = 0) {
     const int32_t n = prob.num_nodes();
     const int32_t m = prob.num_edges();
     const int32_t source = prob.source();
@@ -539,90 +676,81 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
     }
 
     std::vector<int32_t> best_tour;
-    double best_obj = std::numeric_limits<double>::max();
+    double best_obj = detail::kNoSolution;
 
-    if (time_budget_ms > 0.0) {
-        // --- Opportunistic mode: time-based workers, non-deterministic seeds ---
-        auto deadline = std::chrono::steady_clock::now()
-                      + std::chrono::microseconds(
-                            static_cast<int64_t>(time_budget_ms * 1000));
-
-        std::mutex best_mtx;
-        std::atomic<int> next_restart{0};
-
-        auto worker = [&]() {
-            std::mt19937 rng(std::random_device{}());
-            while (std::chrono::steady_clock::now() < deadline) {
-                if (work_budget && !work_budget->try_consume(1)) break;
-                int r = next_restart.fetch_add(1, std::memory_order_relaxed);
-                std::vector<int32_t> order;
-                if (r < static_cast<int>(fixed_orders.size())) {
-                    order = fixed_orders[r];
-                } else {
-                    order = customers;
-                    std::shuffle(order.begin(), order.end(), rng);
-                }
-                auto [tour, obj] = detail::single_restart(
-                    prob, customers, order, edge_active);
-                if (obj < best_obj) {
-                    std::lock_guard lock(best_mtx);
-                    if (obj < best_obj) {
-                        best_obj = obj;
-                        best_tour = std::move(tour);
-                    }
-                }
-            }
-        };
-
-        unsigned hw = std::thread::hardware_concurrency();
-        unsigned num_workers = std::max(1u, hw);
-        {
-            tbb::task_group tg;
-            for (unsigned i = 0; i < num_workers; ++i)
-                tg.run(worker);
-            tg.wait();
+    // Stage 0: enumerate all 1/2-customer seeds and start local search from best seed.
+    // This gives a robust early incumbent before randomized restarts.
+    {
+        auto [seed_tour, seed_obj] =
+            detail::best_small_seed_with_local_search(prob, customers, edge_active);
+        if (!seed_tour.empty() && seed_obj < best_obj) {
+            best_tour = std::move(seed_tour);
+            best_obj = seed_obj;
         }
-    } else {
-        // --- Deterministic mode: fixed restarts, deterministic seeds ---
-        const int num_fixed = static_cast<int>(fixed_orders.size());
-        const int num_random = std::max(0, num_restarts - num_fixed);
-        fixed_orders.reserve(num_fixed + num_random);
-        for (int r = 0; r < num_random; ++r) {
-            std::mt19937 rng(static_cast<uint32_t>(r));
-            auto order = customers;
-            std::shuffle(order.begin(), order.end(), rng);
-            fixed_orders.push_back(std::move(order));
-        }
+    }
 
-        int total_restarts = static_cast<int>(fixed_orders.size());
-        if (work_budget) {
-            total_restarts = static_cast<int>(
-                std::min<int64_t>(total_restarts,
-                    work_budget->reserve_up_to(total_restarts)));
-        }
-        if (total_restarts <= 0) {
-            return {{}, std::numeric_limits<double>::max()};
-        }
+    (void)time_budget_ms;  // deterministic-only workflow
 
-        struct RestartResult {
-            std::vector<int32_t> tour;
-            double obj;
-        };
-        std::vector<RestartResult> results(total_restarts);
+    const int num_fixed = static_cast<int>(fixed_orders.size());
+    const int num_random = std::max(0, num_restarts - num_fixed);
+    fixed_orders.reserve(num_fixed + num_random);
+    for (int r = 0; r < num_random; ++r) {
+        std::mt19937 rng(static_cast<uint32_t>(r));
+        auto order = customers;
+        std::shuffle(order.begin(), order.end(), rng);
+        fixed_orders.push_back(std::move(order));
+    }
 
+    int total_restarts = static_cast<int>(fixed_orders.size());
+    if (work_budget) {
+        total_restarts = static_cast<int>(
+            std::min<int64_t>(total_restarts,
+                work_budget->reserve_up_to(total_restarts)));
+    }
+    if (total_restarts <= 0) {
+        return {{}, detail::kNoSolution};
+    }
+
+    struct RestartResult {
+        std::vector<int32_t> tour;
+        double obj;
+    };
+    std::vector<RestartResult> results(total_restarts);
+
+    auto run_restarts = [&]() {
         tbb::parallel_for(0, total_restarts, [&](int i) {
             auto [tour, obj] = detail::single_restart(
                 prob, customers, fixed_orders[i], edge_active);
             results[i] = {std::move(tour), obj};
         });
+    };
+    if (max_workers > 0) {
+        tbb::task_arena arena(max_workers);
+        arena.execute(run_restarts);
+    } else {
+        run_restarts();
+    }
 
-        for (int i = 0; i < total_restarts; ++i) {
-            if (results[i].obj < best_obj) {
-                best_obj = results[i].obj;
-                best_tour = std::move(results[i].tour);
-            }
+    for (int i = 0; i < total_restarts; ++i) {
+        if (results[i].obj < best_obj) {
+            best_obj = results[i].obj;
+            best_tour = std::move(results[i].tour);
         }
     }
+
+    if (best_tour.empty()) {
+        best_tour = detail::fallback_feasible(prob, edge_active);
+    }
+    const bool valid_obj =
+        std::isfinite(best_obj) &&
+        best_obj < std::numeric_limits<double>::max() / 2.0;
+    if (!valid_obj) {
+        best_tour = detail::fallback_feasible(prob, edge_active);
+    }
+    if (best_tour.empty()) {
+        return {{}, detail::kNoSolution};
+    }
+    best_obj = detail::tour_objective(prob, best_tour);
 
     // Convert best tour to MIP solution vector
     auto sol = detail::tour_to_solution(prob, best_tour);
@@ -637,10 +765,11 @@ inline HeuristicResult build_warm_start(const Problem& prob,
                                         std::span<const double> fwd_bounds = {},
                                         std::span<const double> bwd_bounds = {},
                                         double correction = 0.0,
-                                        double upper_bound = std::numeric_limits<double>::infinity()) {
+                                        double upper_bound = std::numeric_limits<double>::infinity(),
+                                        int32_t max_workers = 0) {
     return build_initial_solution(
         prob, num_restarts, time_budget_ms, work_budget,
-        fwd_bounds, bwd_bounds, correction, upper_bound);
+        fwd_bounds, bwd_bounds, correction, upper_bound, max_workers);
 }
 
 /// LP-guided primal heuristic: builds reduced graphs from LP relaxation
@@ -662,6 +791,7 @@ inline HeuristicResult lp_guided_heuristic(
     const int32_t source = prob.source();
     const int32_t target = prob.target();
     const double Q = prob.capacity();
+    (void)time_budget_ms;  // deterministic-only workflow
 
     // Build reduced graphs for selected strategies
     std::vector<ReducedGraph> graphs;
@@ -676,7 +806,7 @@ inline HeuristicResult lp_guided_heuristic(
     for (auto& g : graphs) strategies.push_back(&g);
     const int num_strategies = static_cast<int>(strategies.size());
     if (num_strategies == 0)
-        return {{}, std::numeric_limits<double>::max()};
+        return {{}, detail::kNoSolution};
 
     // Build customer lists per strategy (only active nodes)
     std::vector<std::vector<int32_t>> strategy_customers(num_strategies);
@@ -704,117 +834,56 @@ inline HeuristicResult lp_guided_heuristic(
         return order;
     };
 
-    if (max_restarts > 0) {
-        // Deterministic mode: fixed restarts with deterministic seeds.
-        int total_restarts = max_restarts;
-        if (work_budget) {
-            total_restarts = static_cast<int>(
-                std::min<int64_t>(total_restarts,
-                    work_budget->reserve_up_to(total_restarts)));
-        }
-        if (total_restarts <= 0) {
-            return {{}, std::numeric_limits<double>::max()};
-        }
-
-        struct RestartResult {
-            std::vector<int32_t> tour;
-            double obj = std::numeric_limits<double>::max();
-        };
-        std::vector<RestartResult> results(static_cast<size_t>(total_restarts));
-
-        tbb::parallel_for(0, total_restarts, [&](int r) {
-            const int strat = r % num_strategies;
-            const auto& customers = strategy_customers[strat];
-            const auto& ea = strategies[strat]->edge_active;
-
-            std::vector<int32_t> order;
-            if (r < num_strategies) {
-                order = make_lp_order(customers);
-            } else {
-                order = customers;
-                std::mt19937 rng(restart_seed + static_cast<uint32_t>(r));
-                std::shuffle(order.begin(), order.end(), rng);
-            }
-
-            auto [tour, obj] = detail::single_restart(prob, customers, order, ea);
-            results[static_cast<size_t>(r)] = {std::move(tour), obj};
-        });
-
-        double best_obj = std::numeric_limits<double>::max();
-        std::vector<int32_t> best_tour;
-        for (int r = 0; r < total_restarts; ++r) {
-            const auto& rr = results[static_cast<size_t>(r)];
-            if (rr.obj < best_obj) {
-                best_obj = rr.obj;
-                best_tour = rr.tour;
-            }
-        }
-        if (best_tour.empty()) {
-            return {{}, std::numeric_limits<double>::max()};
-        }
-        auto sol = detail::tour_to_solution(prob, best_tour);
-        return {std::move(sol), best_obj};
-    } else {
-        // Opportunistic mode: time-based workers, non-deterministic seeds.
-        auto deadline = std::chrono::steady_clock::now()
-                      + std::chrono::microseconds(static_cast<int64_t>(time_budget_ms * 1000));
-
-        std::mutex best_mtx;
-        std::vector<int32_t> best_tour;
-        double best_obj = std::numeric_limits<double>::max();
-        std::atomic<int> next_restart{0};
-
-        auto worker = [&]() {
-            std::mt19937 rng(std::random_device{}());
-
-            while (std::chrono::steady_clock::now() < deadline) {
-                if (work_budget && !work_budget->try_consume(1)) break;
-                int r = next_restart.fetch_add(1, std::memory_order_relaxed);
-                int strat = r % num_strategies;
-
-                const auto& customers = strategy_customers[strat];
-                const auto& ea = strategies[strat]->edge_active;
-
-                std::vector<int32_t> order;
-                if (r < num_strategies) {
-                    // First round per strategy: LP-weighted ordering
-                    order = make_lp_order(customers);
-                } else {
-                    // Subsequent rounds: random shuffle
-                    order = customers;
-                    std::shuffle(order.begin(), order.end(), rng);
-                }
-
-                auto [tour, obj] = detail::single_restart(prob, customers, order, ea);
-
-                if (obj < best_obj) {
-                    std::lock_guard lock(best_mtx);
-                    if (obj < best_obj) {
-                        best_obj = obj;
-                        best_tour = std::move(tour);
-                    }
-                }
-            }
-        };
-
-        // Launch parallel workers
-        unsigned hw = std::thread::hardware_concurrency();
-        unsigned num_workers = std::max(1u, hw);
-
-        {
-            tbb::task_group tg;
-            for (unsigned i = 0; i < num_workers; ++i)
-                tg.run(worker);
-            tg.wait();
-        }
-
-        if (best_tour.empty()) {
-            return {{}, std::numeric_limits<double>::max()};
-        }
-
-        auto sol = detail::tour_to_solution(prob, best_tour);
-        return {std::move(sol), best_obj};
+    const int restart_target =
+        (max_restarts > 0) ? max_restarts : std::max(1, 8 * num_strategies);
+    int total_restarts = restart_target;
+    if (work_budget) {
+        total_restarts = static_cast<int>(
+            std::min<int64_t>(total_restarts,
+                work_budget->reserve_up_to(total_restarts)));
     }
+    if (total_restarts <= 0) {
+        return {{}, detail::kNoSolution};
+    }
+
+    struct RestartResult {
+        std::vector<int32_t> tour;
+        double obj = detail::kNoSolution;
+    };
+    std::vector<RestartResult> results(static_cast<size_t>(total_restarts));
+
+    tbb::parallel_for(0, total_restarts, [&](int r) {
+        const int strat = r % num_strategies;
+        const auto& customers = strategy_customers[strat];
+        const auto& ea = strategies[strat]->edge_active;
+
+        std::vector<int32_t> order;
+        if (r < num_strategies) {
+            order = make_lp_order(customers);
+        } else {
+            order = customers;
+            std::mt19937 rng(restart_seed + static_cast<uint32_t>(r));
+            std::shuffle(order.begin(), order.end(), rng);
+        }
+
+        auto [tour, obj] = detail::single_restart(prob, customers, order, ea);
+        results[static_cast<size_t>(r)] = {std::move(tour), obj};
+    });
+
+    double best_obj = detail::kNoSolution;
+    std::vector<int32_t> best_tour;
+    for (int r = 0; r < total_restarts; ++r) {
+        const auto& rr = results[static_cast<size_t>(r)];
+        if (rr.obj < best_obj) {
+            best_obj = rr.obj;
+            best_tour = rr.tour;
+        }
+    }
+    if (best_tour.empty()) {
+        return {{}, detail::kNoSolution};
+    }
+    auto sol = detail::tour_to_solution(prob, best_tour);
+    return {std::move(sol), best_obj};
 }
 
 }  // namespace rcspp::heuristic

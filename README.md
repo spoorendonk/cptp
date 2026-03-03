@@ -5,10 +5,10 @@ Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP) followi
 ## Capabilities
 
 - **Cut separation**: SEC (Gomory-Hu), RCI, Multistar/GLM, RGLM, Comb, SPI (shortest-path inequalities — node-incompatibility cuts derived from all-pairs shortest-path bounds and Held-Karp DP; novel to this solver)
-- **Primal heuristic**: warm-start incumbent finding with async injection
+- **Primal heuristic**: deterministic warm-start incumbent finding (staged before HiGHS)
 - **Domain propagation**: Lagrangian reduced-cost fixing (adaptive, periodic, root-only)
 - **Preprocessing**: edge/node elimination, ng/DSSR route bounding
-- **Concurrency**: deterministic and opportunistic parallel modes
+- **Concurrency**: deterministic staged preprocessing + deterministic callback scheduling
 - **MIP backend**: [HiGHS](https://highs.dev) with hyperplane strong branching. Uses patched internal callbacks for user cut separation (cut pool injection via `HighsUserSeparator`) and domain propagation (Lagrangian fixing during B&B via propagator callback)
 
 ## Build
