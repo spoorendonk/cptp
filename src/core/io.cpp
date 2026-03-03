@@ -32,7 +32,7 @@ bool starts_with(const std::string& s, const std::string& prefix) {
 
 /// Detect format by peeking at file content.
 /// TSPLIB files typically start with "NAME" or have keywords like "TYPE",
-/// "DIMENSION", etc. PathWyse files start with numeric data.
+/// "DIMENSION", etc. Numeric files start with numeric data.
 bool is_tsplib_format(const std::filesystem::path& path) {
     std::ifstream f(path);
     std::string line;
@@ -44,7 +44,7 @@ bool is_tsplib_format(const std::filesystem::path& path) {
             starts_with(line, "TYPE") || starts_with(line, "DIMENSION")) {
             return true;
         }
-        // If first non-empty line is numeric, assume PathWyse
+        // If first non-empty line is numeric, assume numeric format
         return false;
     }
     return false;
@@ -68,7 +68,7 @@ Problem load(const std::filesystem::path& path) {
     if (is_tsplib_format(path)) {
         return load_tsplib(path);
     }
-    return load_pathwyse(path);
+    return load_numeric(path);
 }
 
 Problem load_tsplib(const std::filesystem::path& path) {
@@ -265,13 +265,13 @@ Problem load_tsplib(const std::filesystem::path& path) {
     return prob;
 }
 
-Problem load_pathwyse(const std::filesystem::path& path) {
+Problem load_numeric(const std::filesystem::path& path) {
     std::ifstream f(path);
     if (!f.is_open()) {
         throw std::runtime_error("Cannot open: " + path.string());
     }
 
-    // PathWyse format:
+    // Numeric format:
     // Line 1: num_nodes num_arcs
     // Next num_nodes lines: node_id profit demand
     // Next num_arcs lines: tail head cost (directed arcs)

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(rcspp-solver LANGUAGES CXX)
+project(cptp LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -40,8 +40,8 @@ target_link_libraries(rcspp PUBLIC TBB::tbb highs)
 rcspp_set_compiler_flags(rcspp)
 
 # ---------- CLI ----------
-add_executable(rcspp-solve src/cli/main.cpp)
-target_link_libraries(rcspp-solve PRIVATE rcspp)
+add_executable(cptp-solve src/cli/main.cpp)
+target_link_libraries(cptp-solve PRIVATE rcspp)
 
 # ---------- Python bindings ----------
 option(RCSPP_BUILD_PYTHON "Build Python bindings" OFF)

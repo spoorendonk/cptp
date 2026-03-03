@@ -1,15 +1,15 @@
-"""CLI entry point: python -m rcspp_bac <instance> [options]."""
+"""CLI entry point: python -m cptp <instance> [options]."""
 
 import argparse
 import sys
 
-from rcspp_bac._rcspp_bac import Model, load as _load
+from cptp._cptp import Model, load as _load
 
 
 def _rebuild_with_endpoints(problem, source, target):
     """Rebuild a Problem with overridden source/target."""
     import numpy as np
-    from rcspp_bac._rcspp_bac import Problem
+    from cptp._cptp import Problem
 
     return Problem(
         num_nodes=problem.num_nodes,
@@ -26,8 +26,8 @@ def _rebuild_with_endpoints(problem, source, target):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        prog="rcspp-bac",
-        description="Branch-and-cut solver for the Resource Constrained Shortest Path Problem",
+        prog="cptp",
+        description="Branch-and-cut solver for the Capacitated Profitable Tour Problem",
     )
     parser.add_argument("instance", help="Path to instance file (.txt, .sppcc, or .vrp)")
     parser.add_argument("--source", type=int, default=None, help="Override source node")

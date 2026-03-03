@@ -1,45 +1,17 @@
-# rcspp-bac
+# cptp — Capacitated Profitable Tour Problem Solver
 
-`rcspp-bac` is a branch-and-cut solver for the Resource Constrained Shortest Path Problem (RCSPP) with profits, capacity, and optional customer visits.
-Given a graph, edge costs, node profits, node demands, and capacity \(Q\), it finds a minimum-cost-minus-profit route as either a closed tour or an open s-t path.
-
-The tour variant follows the CPTP formulation from Jepsen et al. (2014): *A branch-and-cut algorithm for the capacitated profitable tour problem*, Discrete Optimization 14, 78-96, https://doi.org/10.1016/j.disopt.2014.07.002.
-
-## Mathematical Model
-
-For graph \(G=(V,E)\), costs \(c_e\), profits \(p_i\), demands \(d_i\), and capacity \(Q\):
-
-\[
-\begin{aligned}
-\min \quad & \sum_{e \in E} c_e x_e - \sum_{i \in V} p_i y_i \\\\
-\text{s.t.} \quad
-& \sum_{e \in \delta(i)} x_e =
-\begin{cases}
-y_i, & i \in \{s,t\} \\\\
-2y_i, & i \in V \setminus \{s,t\}
-\end{cases}
-&& \forall i \in V \\\\
-& \sum_{i \in V} d_i y_i \le Q \\\\
-& y_s = 1,\; y_t = 1 \\\\
-& x_e \in \{0,1\} && \forall e \in E \\\\
-& y_i \in \{0,1\} && \forall i \in V
-\end{aligned}
-\]
-
-Connectivity and capacity-defining inequalities are separated dynamically during branch-and-cut.
+Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP) following [Jepsen et al. (2014)](https://doi.org/10.1016/j.disopt.2014.08.001). Also solves open s–t path variants.
 
 ## Capabilities
 
-- Delivers competitive performance on benchmark instance sets (results: [Benchmarks](docs/benchmarks.md)).
-- Solves RCSPP instances as either closed tours or open s-t paths through one CLI/API workflow.
-- Targets strong primal solutions and tighter dual bounds on difficult instances (how: [Primal Heuristic](docs/primal-heuristic.md), [Domain Propagator](docs/domain-propagator.md)).
-- Strengthens LP relaxations during branch-and-cut with multiple cut families (how: [Cut Separation](docs/separation.md)).
-- Reduces search space with preprocessing and route-bounding techniques (how: [Preprocessing](docs/preprocessing.md), [ng/DSSR Bounds](docs/ng-dssr-labelling.md)).
-- Runs on HiGHS with a documented end-to-end solve pipeline (how: [Algorithms Overview](docs/algorithms.md)).
+- **Cut separation**: SEC (Gomory-Hu), RCI, Multistar/GLM, RGLM, Comb, SPI (shortest-path inequalities — node-incompatibility cuts derived from all-pairs shortest-path bounds and Held-Karp DP; novel to this solver)
+- **Primal heuristic**: warm-start incumbent finding with async injection
+- **Domain propagation**: Lagrangian reduced-cost fixing (adaptive, periodic, root-only)
+- **Preprocessing**: edge/node elimination, ng/DSSR route bounding
+- **Concurrency**: deterministic and opportunistic parallel modes
+- **MIP backend**: [HiGHS](https://highs.dev) with hyperplane strong branching. Uses patched internal callbacks for user cut separation (cut pool injection via `HighsUserSeparator`) and domain propagation (Lagrangian fixing during B&B via propagator callback)
 
-## Getting Started (CLI)
-
-Build:
+## Build
 
 ```bash
 apt install libtbb-dev
@@ -47,24 +19,60 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 ```
 
-Run:
+## Run
 
 ```bash
-./build/rcspp-solve <instance> [--source <node>] [--target <node>] [--<highs_option> <value> ...]
+./build/cptp-solve <instance> [--source <node>] [--target <node>] [--<option> <value> ...]
+
+# Examples
+./build/cptp-solve tests/data/tiny4.txt --time_limit 30 --output_flag false
+./build/cptp-solve tests/data/tiny4.txt --source 0 --target 3
 ```
 
-Examples:
+## Python
 
 ```bash
-./build/rcspp-solve tests/data/tiny4.txt --time_limit 30 --output_flag false
-./build/rcspp-solve tests/data/tiny4_path.txt
-./build/rcspp-solve tests/data/tiny4.txt --source 0 --target 3
-./build/rcspp_tests
-pytest tests/python/test_solver.py
-RCSPP_RUN_LOCAL_INSTALL_TEST=1 pytest tests/python/test_local_install.py
+pip install cptp
 ```
 
-See:
-- [CLI Usage + Parameters](docs/cli.md) (includes parameter table placeholder)
-- [Instance Formats](docs/instance-formats.md)
-- [C++ and Python API](docs/api.md)
+```python
+import cptp
+
+# Load and solve an instance file
+prob = cptp.load("instance.txt")
+model = cptp.Model()
+model.set_problem(prob)
+result = model.solve([("time_limit", "60")])
+
+# Or build from arrays
+result = cptp.solve(
+    num_nodes=4, edges=edges, edge_costs=costs,
+    profits=profits, demands=demands, capacity=10.0,
+)
+```
+
+## Instance Formats
+
+- **Numeric (.txt)**: native format — nodes (id, profit, demand), directed arcs (tail, head, cost), capacity, optional source/target
+- **TSPLIB (.vrp)**: standard CVRP format with CAPACITY, DEMAND_SECTION, etc.
+- **SPPCC (.sppcc)**: SPPRCLIB column-generation subproblem format
+
+## Benchmarks
+
+| Set | Instances | Solved | Rate |
+|---|--:|--:|--:|
+| SPPRCLIB (45 instances, 45–262 nodes) | 45 | 45 | 100% |
+| Roberti Set 3 (31 instances, 76–200 nodes, 300s) | 31 | 22 | 71% |
+
+Single-thread, AMD Ryzen 9 3950X. See `benchmarks/` for full results and reproduction scripts.
+
+## Tests
+
+```bash
+./build/rcspp_tests                    # C++ tests
+pytest tests/python/test_solver.py     # Python tests
+```
+
+## License
+
+MIT

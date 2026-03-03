@@ -1,4 +1,4 @@
-# rcspp-bac — Resource Constrained Shortest Path Branch-and-Cut Solver
+# cptp — Capacitated Profitable Tour Problem Solver
 
 ## Quick Reference
 
