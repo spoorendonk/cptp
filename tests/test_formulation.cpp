@@ -8,7 +8,7 @@
 #include "Highs.h"
 
 // Build and solve formulation WITHOUT separators.
-// Then verify a known PathWyse tour is feasible.
+// Then verify a known optimal tour is feasible.
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <instance.sppcc>\n", argv[0]);

@@ -19,10 +19,8 @@ static rcspp::SolveResult solve_instance(const char* path, int time_limit = 120)
     return model.solve(opts);
 }
 
-// --- Known optimal values (verified against PathWyse) ---
+// --- Known optimal values ---
 // Format: {instance_path, expected_objective}
-//
-// Objectives include depot node weight, matching PathWyse convention.
 
 TEST_CASE("tiny4 optimal", "[optimal]") {
     auto r = solve_instance("tests/data/tiny4.txt", 30);

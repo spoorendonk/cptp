@@ -13,7 +13,7 @@ Problem load(const std::filesystem::path& path);
 /// Load TSPLIB95 / CVRP format (.vrp, .tsp).
 Problem load_tsplib(const std::filesystem::path& path);
 
-/// Load PathWyse format (.txt).
-Problem load_pathwyse(const std::filesystem::path& path);
+/// Load numeric format (.txt).
+Problem load_numeric(const std::filesystem::path& path);
 
 }  // namespace rcspp::io

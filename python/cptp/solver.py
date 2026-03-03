@@ -1,7 +1,7 @@
-"""High-level convenience wrapper around the C++ RCSPP solver."""
+"""High-level convenience wrapper around the C++ CPTP solver."""
 
 import numpy as np
-from rcspp_bac._rcspp_bac import Model as _Model, SolveResult
+from cptp._cptp import Model as _Model, SolveResult
 
 
 def solve(
@@ -18,7 +18,7 @@ def solve(
     num_threads: int | None = None,
     verbose: bool = False,
 ) -> SolveResult:
-    """Solve an RCSPP instance.
+    """Solve a CPTP instance.
 
     Args:
         num_nodes: Number of nodes in the graph.

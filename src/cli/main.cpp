@@ -8,7 +8,8 @@
 #include "model/model.h"
 
 static void print_usage(const char* prog) {
-    std::cerr << "Usage: " << prog
+    std::cerr << "cptp-solve — Capacitated Profitable Tour Problem solver\n\n"
+              << "Usage: " << prog
               << " <instance> [--source <node>] [--target <node>] [--<highs_option> <value> ...]\n"
               << "\nOptions:\n"
               << "  --source <node>        Source node (overrides file value)\n"

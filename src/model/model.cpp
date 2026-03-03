@@ -185,7 +185,7 @@ void Model::build_problem() {
 SolveResult Model::solve(const SolverOptions& options) {
     build_problem();
 
-    logger_.log("rcspp-bac v0.1");
+    logger_.log("cptp v0.1");
 
     Timer timer;
 

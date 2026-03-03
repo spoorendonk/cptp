@@ -2,7 +2,7 @@
 
 This is opt-in because it builds the C++ extension in a fresh virtualenv.
 Run with:
-    RCSPP_RUN_LOCAL_INSTALL_TEST=1 pytest tests/python/test_local_install.py -v
+    CPTP_RUN_LOCAL_INSTALL_TEST=1 pytest tests/python/test_local_install.py -v
 """
 
 import os
@@ -18,8 +18,8 @@ DATA_DIR = REPO_ROOT / "tests" / "data"
 
 
 @pytest.mark.skipif(
-    os.environ.get("RCSPP_RUN_LOCAL_INSTALL_TEST") != "1",
-    reason="Set RCSPP_RUN_LOCAL_INSTALL_TEST=1 to run local install smoke test.",
+    os.environ.get("CPTP_RUN_LOCAL_INSTALL_TEST") != "1",
+    reason="Set CPTP_RUN_LOCAL_INSTALL_TEST=1 to run local install smoke test.",
 )
 def test_local_editable_install_and_use(tmp_path: Path):
     """Create a venv, pip install -e ., and run a tiny API smoke check."""
@@ -49,7 +49,7 @@ def test_local_editable_install_and_use(tmp_path: Path):
 
     smoke = textwrap.dedent(
         f"""
-        from rcspp_bac import load, Model, has_highs
+        from cptp import load, Model, has_highs
         prob = load(r"{DATA_DIR / 'tiny4.txt'}")
         model = Model()
         model.set_problem(prob)
