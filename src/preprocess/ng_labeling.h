@@ -19,7 +19,7 @@ namespace rcspp::preprocess::ng {
 
 struct DssrOptions {
     int32_t initial_ng_size = 4;
-    int32_t max_ng_size = 12;
+    int32_t max_ng_size = 6;
     int32_t dssr_iterations = 6;
     bool enable_simd = true;
 };

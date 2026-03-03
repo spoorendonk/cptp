@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <limits>
 #include <atomic>
 #include <functional>
@@ -38,10 +39,6 @@ struct RCFixingSettings {
 /// Wires the CPTP formulation and custom separators into HiGHS.
 class HiGHSBridge {
  public:
-    using RootLpCaptureCallback = std::function<void(
-        const std::vector<double>&, const std::vector<double>&,
-        const HighsBasis&, const HighsSolution&, double)>;
-
     HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
                  double frac_tol = sep::kDefaultFracTol);
     ~HiGHSBridge();
@@ -118,10 +115,6 @@ class HiGHSBridge {
     void set_deterministic_checkpoint_hook(std::function<void()> hook) {
         deterministic_checkpoint_hook_ = std::move(hook);
     }
-    void set_root_lp_capture_callback(RootLpCaptureCallback cb) {
-        root_lp_capture_callback_ = std::move(cb);
-        root_lp_captured_.store(false, std::memory_order_relaxed);
-    }
 
     /// Install domain propagator that fixes edges during B&C based on labeling bounds.
     void install_propagator();
@@ -185,8 +178,6 @@ class HiGHSBridge {
     std::shared_ptr<model::AsyncIncumbentStore> async_incumbent_store_;
     std::shared_ptr<std::atomic<bool>> interrupt_flag_;
     std::function<void()> deterministic_checkpoint_hook_;
-    RootLpCaptureCallback root_lp_capture_callback_;
-    std::atomic<bool> root_lp_captured_{false};
 
     // RC fixing settings and statistics
     RCFixingSettings rc_settings_;

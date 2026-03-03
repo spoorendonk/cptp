@@ -88,7 +88,7 @@ Related existing knobs in the same area:
 - `dssr_background_auto_min_epochs` (default `4`): minimum async DSSR stages before `auto` early-stop checks
 - `dssr_background_auto_no_progress_limit` (default `6`): `auto` stops after this many non-improving stages
 - `ng_initial_size` (default `4`)
-- `ng_max_size` (default `12`)
+- `ng_max_size` (default `6`)
 - `ng_dssr_iters` (default `6`)
 - `ng_simd` (default `true`)
 - `preproc_adaptive` (default `true`)
@@ -102,21 +102,9 @@ Related existing knobs in the same area:
 - `preproc_second_ws_budget_ms_max` (default `400`)
 - `preproc_second_ws_budget_scale` (default `8`)
 - `workflow_dump` (default `false`): logs startup/solve task DAG (including current async DSSR wiring)
-- `paramip_mode` (default `off`): `off/plan/static_root`
-- `paramip_chunks` (default `0`): requested root partition chunks for ParaMIP planning
-- `paramip_workers` (default `0`): target worker count (`0` = hardware-concurrency default)
-- `paramip_root_probes` (default `0`): Stage-0 root-only probe solves with different seeds (`0` = auto)
-- `paramip_root_pick` (default `auto`): root candidate selection policy `auto/best/first`
 
 Note:
 - Edge elimination requires a finite incumbent upper bound plus labeling bounds; if no UB is available yet, elimination is skipped.
-- `paramip_mode=static_root` executes chunked root partition solves (threads=1 per chunk).
-- `static_root` includes Stage-0 root probing (`mip_max_nodes=1`) across different seeds, then
-  uses the selected root LP to choose chunk split vars (most-fractional `y` first) and
-  reuses the selected seed/cutoff for chunk solves.
-- Chunk solves reuse parent preprocessing and receive the selected root LP basis/solution as warm-start.
-- In `parallel_mode=deterministic`, static-root chunks run in fixed order.
-- In `parallel_mode=opportunistic`, static-root chunks run with a worker pool (`paramip_workers`).
 
 ## 4) Reduced-cost fixing
 

@@ -87,7 +87,7 @@ void HiGHSBridge::build_formulation() {
         }
     }
 
-    // Optional fixed-y assignments (used by ParaMIP root partitioning).
+    // Optional fixed-y assignments supplied by the caller.
     if (!fixed_y_.empty() && fixed_y_.size() == static_cast<size_t>(n)) {
         for (int32_t i = 0; i < n; ++i) {
             if (i == prob_.source() || i == prob_.target()) continue;
@@ -276,16 +276,6 @@ void HiGHSBridge::install_separators() {
                     std::lock_guard lock(*lp_cache_mutex_);
                     *cached_x_lp_ = x_vals;
                     *cached_y_lp_ = y_vals;
-                }
-
-                // Capture the main root LP once when requested by the caller.
-                if (root_lp_capture_callback_ &&
-                    !root_lp_captured_.exchange(true, std::memory_order_relaxed)) {
-                    const auto basis = lpRelaxation.getLpSolver().getBasis();
-                    const auto root_sol = lpRelaxation.getLpSolver().getSolution();
-                    const double root_bound = lpRelaxation.getObjective();
-                    root_lp_capture_callback_(
-                        x_vals, y_vals, basis, root_sol, root_bound);
                 }
             }
 
@@ -549,26 +539,6 @@ void HiGHSBridge::install_propagator() {
             if (mipsolver.submip) return;
 
             if (checkpoint_hook) checkpoint_hook();
-
-            if (root_lp_capture_callback_) {
-                bool expected = false;
-                if (root_lp_captured_.compare_exchange_strong(
-                        expected, true, std::memory_order_relaxed)) {
-                    const auto& lp_sol = lp.getSolution();
-                    if (static_cast<int32_t>(lp_sol.col_value.size()) >= m + n) {
-                        std::vector<double> x_lp(m);
-                        std::vector<double> y_lp(n);
-                        std::copy_n(lp_sol.col_value.begin(), m, x_lp.begin());
-                        std::copy_n(lp_sol.col_value.begin() + m, n, y_lp.begin());
-                        const auto basis = lp.getLpSolver().getBasis();
-                        const auto root_sol = lp.getLpSolver().getSolution();
-                        const double root_bound = lp.getObjective();
-                        root_lp_capture_callback_(x_lp, y_lp, basis, root_sol, root_bound);
-                    } else {
-                        root_lp_captured_.store(false, std::memory_order_relaxed);
-                    }
-                }
-            }
 
             if (shared_bounds) {
                 auto snap = shared_bounds->snapshot();

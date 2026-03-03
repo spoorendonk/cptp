@@ -41,7 +41,7 @@ labeling (DSSR style):
 Main options (from `Model::solve` options map):
 
 - `ng_initial_size` (default 4)
-- `ng_max_size` (default 12)
+- `ng_max_size` (default 6)
 - `ng_dssr_iters` (default 6)
 - `ng_simd` (default true)
 - `preproc_adaptive` (default true)

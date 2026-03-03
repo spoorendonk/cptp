@@ -223,7 +223,7 @@ SPPRCLIB instances).
 | `--dssr_background_auto_min_epochs N` | 4 | Minimum async DSSR stages before `auto` early-stop checks |
 | `--dssr_background_auto_no_progress_limit N` | 6 | `auto` policy stop threshold for consecutive non-improving stages |
 | `--ng_initial_size N` | 4 | Initial ng neighborhood size |
-| `--ng_max_size N` | 12 | Maximum ng neighborhood size |
+| `--ng_max_size N` | 6 | Maximum ng neighborhood size |
 | `--ng_dssr_iters N` | 6 | DSSR iterations per labeling run |
 | `--ng_simd true` | true | Enable AVX2 prefilter path for dominance candidate scans |
 | `--preproc_adaptive true` | true | Enable adaptive two-stage warm-start before HiGHS |
