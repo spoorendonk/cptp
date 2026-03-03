@@ -69,7 +69,7 @@ Single-thread, AMD Ryzen 9 3950X. See `benchmarks/` for full results and reprodu
 ## Tests
 
 ```bash
-./build/rcspp_tests                    # C++ tests
+./build/cptp_tests                    # C++ tests
 pytest tests/python/test_solver.py     # Python tests
 ```
 
