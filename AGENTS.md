@@ -1,4 +1,4 @@
-# rcspp-bac — Resource Constrained Shortest Path Branch-and-Cut Solver
+# cptp — Capacitated Profitable Tour Problem Solver
 
 ## Quick Reference
 
@@ -7,7 +7,7 @@
 cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
 
 # test
-./build/rcspp_tests && pytest tests/python/test_solver.py
+./build/cptp_tests && pytest tests/python/test_solver.py
 ```
 
 ## Git

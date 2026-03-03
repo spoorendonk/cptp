@@ -1,4 +1,4 @@
-from rcspp_bac._rcspp_bac import (
+from cptp._cptp import (
     # Core types
     Problem,
     SeparatorStats,
@@ -9,7 +9,7 @@ from rcspp_bac._rcspp_bac import (
     Model,
     has_highs,
 )
-from rcspp_bac.solver import solve
+from cptp.solver import solve
 
 __all__ = [
     # Core types

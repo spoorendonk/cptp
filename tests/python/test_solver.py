@@ -1,4 +1,4 @@
-"""Test the Python RCSPP solver bindings."""
+"""Test the Python CPTP solver bindings."""
 
 import subprocess
 import sys
@@ -7,8 +7,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import rcspp_bac
-from rcspp_bac import Model, Problem, SolveResult, Status, SeparatorStats, load, solve
+import cptp
+from cptp import Model, Problem, SolveResult, Status, SeparatorStats, load, solve
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 OPTS = [("time_limit", "30"), ("output_flag", "false")]
@@ -70,8 +70,8 @@ def test_model_st_path():
 
 # ---------- load() + set_problem() ----------
 
-def test_load_pathwyse_tour():
-    """Load PathWyse tour instance and solve via set_problem."""
+def test_load_numeric_tour():
+    """Load numeric tour instance and solve via set_problem."""
     prob = load(str(DATA_DIR / "tiny4.txt"))
     assert prob.num_nodes == 4
     assert prob.num_edges == 6
@@ -85,8 +85,8 @@ def test_load_pathwyse_tour():
     assert result.objective == pytest.approx(-11.0)
 
 
-def test_load_pathwyse_path():
-    """Load PathWyse s-t path instance and solve."""
+def test_load_numeric_path():
+    """Load numeric s-t path instance and solve."""
     prob = load(str(DATA_DIR / "tiny4_path.txt"))
     assert not prob.is_tour
     assert prob.source != prob.target
@@ -247,9 +247,9 @@ def test_solve_wrapper_path():
 # ---------- CLI (__main__) ----------
 
 def test_cli_tour():
-    """python -m rcspp_bac on a tour instance."""
+    """python -m cptp on a tour instance."""
     result = subprocess.run(
-        [sys.executable, "-m", "rcspp_bac", str(DATA_DIR / "tiny4.txt")],
+        [sys.executable, "-m", "cptp", str(DATA_DIR / "tiny4.txt")],
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0
@@ -258,9 +258,9 @@ def test_cli_tour():
 
 
 def test_cli_path_override():
-    """python -m rcspp_bac with --source/--target override."""
+    """python -m cptp with --source/--target override."""
     result = subprocess.run(
-        [sys.executable, "-m", "rcspp_bac", str(DATA_DIR / "tiny4.txt"),
+        [sys.executable, "-m", "cptp", str(DATA_DIR / "tiny4.txt"),
          "--source", "0", "--target", "3"],
         capture_output=True, text=True, timeout=60,
     )

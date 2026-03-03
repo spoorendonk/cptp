@@ -337,7 +337,7 @@ TEST_CASE("Problem is_tour() and source/target accessors", "[problem]") {
     REQUIRE(path_prob.depot() == 0);  // backward compat: returns source
 }
 
-TEST_CASE("PathWyse IO: load tour (no source/target line)", "[io]") {
+TEST_CASE("Numeric IO: load tour (no source/target line)", "[io]") {
     auto prob = rcspp::io::load("tests/data/tiny4.txt");
     REQUIRE(prob.is_tour());
     REQUIRE(prob.source() == 0);
@@ -346,7 +346,7 @@ TEST_CASE("PathWyse IO: load tour (no source/target line)", "[io]") {
     REQUIRE(prob.capacity() == 7.0);
 }
 
-TEST_CASE("PathWyse IO: load path (with source/target line)", "[io]") {
+TEST_CASE("Numeric IO: load path (with source/target line)", "[io]") {
     auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
     REQUIRE_FALSE(prob.is_tour());
     REQUIRE(prob.source() == 0);

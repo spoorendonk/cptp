@@ -22,8 +22,8 @@ vec_view_numpy(const std::vector<T>& v, nb::handle parent) {
         const_cast<T*>(v.data()), {v.size()}, parent);
 }
 
-NB_MODULE(_rcspp_bac, m) {
-    m.doc() = "RCSPP Branch-and-Cut Solver";
+NB_MODULE(_cptp, m) {
+    m.doc() = "CPTP Branch-and-Cut Solver";
 
     // --- Status enum ---
     nb::enum_<rcspp::SolveResult::Status>(m, "Status")
