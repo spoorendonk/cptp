@@ -280,7 +280,10 @@ def test_binary_output_has_stage_headers():
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0
+    assert "Running HiGHS " in result.stdout
     assert "Lower bounds calculation:" in result.stdout
+    assert "fwd_reachable=" in result.stdout
+    assert "bwd_reachable=" in result.stdout
     assert "Construction heuristic:" in result.stdout
     assert "Preprocess:" in result.stdout
     assert "Local search:" in result.stdout
@@ -288,6 +291,46 @@ def test_binary_output_has_stage_headers():
     assert "Startup Stage" not in result.stdout
     assert "Instance:" not in result.stdout
     assert "\nObjective: " not in result.stdout
+
+
+def test_binary_output_all_pairs_block_before_local_search():
+    """all_pairs_propagation prints a dedicated block before local search."""
+    if not BIN_PATH.exists():
+        pytest.skip("cptp-solve binary not built")
+
+    result = subprocess.run(
+        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
+         "--time_limit", "10", "--threads", "1", "--random_seed", "0",
+         "--all_pairs_propagation", "true",
+         "--output_flag", "true"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0
+    assert "Preprocess:" in result.stdout
+    assert "Lower bounds all pairs calculation:" in result.stdout
+    assert "all_pairs_reachable=" in result.stdout
+    assert "Local search:" in result.stdout
+    preprocess_idx = result.stdout.index("Preprocess:")
+    all_pairs_idx = result.stdout.index("Lower bounds all pairs calculation:")
+    local_search_idx = result.stdout.index("Local search:")
+    assert preprocess_idx < all_pairs_idx < local_search_idx
+
+
+def test_binary_output_propagator_summary_format():
+    """Propagator summary uses sweep+chain fixings and no UB-improvements field."""
+    if not BIN_PATH.exists():
+        pytest.skip("cptp-solve binary not built")
+
+    result = subprocess.run(
+        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
+         "--time_limit", "10", "--threads", "1", "--random_seed", "0",
+         "--output_flag", "true"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0
+    assert "Propagator:" in result.stdout
+    assert "sweep + " in result.stdout
+    assert "UB improvements" not in result.stdout
 
 
 def test_binary_output_flag_false_is_silent():
