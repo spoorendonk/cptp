@@ -33,14 +33,14 @@ def load_known_optimals() -> dict[str, float]:
 
 def run_solver(instance_path: Path, time_limit: int,
                cutoff: float | None = None,
-               disable_heuristics: bool = False) -> dict:
+               skip_warm_start: bool = False) -> dict:
     """Run cptp-solve and parse output."""
     args = [str(CPTP_BIN), str(instance_path),
             "--time_limit", str(time_limit),
             "--output_flag", "false"]
     if cutoff is not None:
         args += ["--cutoff", str(cutoff)]
-    if disable_heuristics:
+    if skip_warm_start:
         args += ["--heu_ws", "false"]
 
     result = {"status": "ERROR", "obj": None, "bound": None, "gap": None,
@@ -139,7 +139,7 @@ def main():
         normal = run_solver(inst_path, time_limit)
 
         # Prove-only: feed known optimal as cutoff, disable heuristics
-        prove = run_solver(inst_path, time_limit, cutoff=opt, disable_heuristics=True)
+        prove = run_solver(inst_path, time_limit, cutoff=opt, skip_warm_start=True)
 
         # Format
         n_time = f"{normal['time']:.2f}s" if normal["time"] else "N/A"

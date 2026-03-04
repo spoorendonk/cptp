@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPI (Shortest Path Inequality) separator parameter sweep
-# Compares: baseline (no SPI) vs all_pairs_propagation=true (SPI + lifting)
+# Compares: baseline (no SPI) vs all_pairs_bounds=true (SPI + lifting)
 # Across a representative set of SPPRCLIB instances.
 
 set -euo pipefail
