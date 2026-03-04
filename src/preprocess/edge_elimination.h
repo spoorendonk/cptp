@@ -45,8 +45,6 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
     labels[root].push_back({root_cost, root_demand, -1});
     best_cost[root] = root_cost;
 
-    constexpr int32_t kMaxLabelsPerNode = 50;
-
     struct QueueEntry {
         int32_t node;
         int32_t label_idx;
@@ -85,14 +83,7 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                 return new_cost <= ex.cost && new_demand <= ex.demand;
             });
 
-            if (static_cast<int32_t>(v_labels.size()) >= kMaxLabelsPerNode) {
-                auto worst = std::max_element(v_labels.begin(), v_labels.end(),
-                    [](const Label& a, const Label& b) { return a.cost < b.cost; });
-                if (new_cost >= worst->cost) continue;
-                *worst = {new_cost, new_demand, u};
-            } else {
-                v_labels.push_back({new_cost, new_demand, u});
-            }
+            v_labels.push_back({new_cost, new_demand, u});
 
             int32_t new_idx = static_cast<int32_t>(v_labels.size()) - 1;
             for (int32_t i = 0; i < static_cast<int32_t>(v_labels.size()); ++i) {

@@ -50,6 +50,7 @@ HiGHSBridge::~HiGHSBridge() {
 }
 
 void HiGHSBridge::add_separator(std::unique_ptr<sep::Separator> sep) {
+    if (sep) separator_stats_.try_emplace(sep->name(), SeparatorStats{});
     separators_.push_back(std::move(sep));
 }
 
@@ -87,7 +88,23 @@ void HiGHSBridge::build_formulation() {
         }
     }
 
-    // Edge elimination: capacity-aware labeling bounds (possibly async-updated).
+    // Optional fixed-y assignments supplied by the caller.
+    if (!fixed_y_.empty() && fixed_y_.size() == static_cast<size_t>(n)) {
+        for (int32_t i = 0; i < n; ++i) {
+            if (i == prob_.source() || i == prob_.target()) continue;
+            const int8_t fix = fixed_y_[static_cast<size_t>(i)];
+            if (fix == 0) {
+                col_upper[m + i] = 0.0;
+                for (auto e : graph.incident_edges(i)) {
+                    col_upper[e] = 0.0;
+                }
+            } else if (fix == 1) {
+                col_lower[m + i] = 1.0;
+            }
+        }
+    }
+
+    // Edge elimination: capacity-aware labeling bounds (staged preprocessing).
     std::vector<double> elim_fwd = fwd_bounds_;
     std::vector<double> elim_bwd = bwd_bounds_;
     double elim_corr = correction_;
@@ -317,8 +334,9 @@ void HiGHSBridge::install_separators() {
                         return a.violation > b.violation;
                     });
                 int32_t added = 0;
+                if (max_cuts == 0) return;
                 for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
-                    if (max_cuts > 0 && added >= max_cuts) break;
+                    if (max_cuts >= 0 && added >= max_cuts) break;
                     auto& cut = cuts[j];
                     if (cut.violation < min_viol) continue;
                     // Translate cut indices from original to reduced space
@@ -382,13 +400,14 @@ void HiGHSBridge::install_separators() {
                         : max_cuts_per_sep_;
 
                     auto& cuts = results[i];
+                    if (max_cuts == 0) continue;
                     std::stable_sort(cuts.begin(), cuts.end(),
                         [](const sep::Cut& a, const sep::Cut& b) {
                             return a.violation > b.violation;
                         });
                     int32_t added = 0;
                     for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
-                        if (max_cuts > 0 && added >= max_cuts) break;
+                        if (max_cuts >= 0 && added >= max_cuts) break;
                         auto& cut = cuts[j];
                         if (cut.violation < min_viol) continue;
                         std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
@@ -487,8 +506,6 @@ void HiGHSBridge::install_propagator() {
     // Mutable snapshot consumed by callback; refreshed from shared store.
     auto bounds_snapshot = std::make_shared<preprocess::BoundSnapshot>(std::move(initial_snapshot));
     auto shared_bounds = shared_bounds_;
-    auto async_ub = async_upper_bound_;
-    auto checkpoint_hook = deterministic_checkpoint_hook_;
 
     // All-pairs bounds for stronger Trigger B (empty if not computed)
     auto ap = std::make_shared<std::vector<double>>(std::move(all_pairs_));
@@ -516,13 +533,11 @@ void HiGHSBridge::install_propagator() {
     }
 
     HighsUserPropagator::setCallback(
-        [=, &prob = prob_](HighsDomain& domain,
+        [=, this, &prob = prob_](HighsDomain& domain,
                            const HighsMipSolver& mipsolver,
                            const HighsLpRelaxation& lp) {
             // Skip sub-MIPs: different column space
             if (mipsolver.submip) return;
-
-            if (checkpoint_hook) checkpoint_hook();
 
             if (shared_bounds) {
                 auto snap = shared_bounds->snapshot();
@@ -537,9 +552,6 @@ void HiGHSBridge::install_propagator() {
             if (f.empty() || b.empty()) return;
 
             double ub = mipsolver.mipdata_->upper_limit;
-            if (async_ub) {
-                ub = std::min(ub, async_ub->load(std::memory_order_relaxed));
-            }
             if (ub >= inf) return;
 
             (*propagator_calls)++;
@@ -904,15 +916,15 @@ void HiGHSBridge::install_propagator() {
 }
 
 void HiGHSBridge::install_heuristic_callback() {
-    if (!heuristic_callback_) return;
+    const bool heuristic_enabled = heuristic_callback_;
+    const bool interrupt_enabled = static_cast<bool>(interrupt_flag_);
+    if (!heuristic_enabled && !interrupt_enabled) return;
 
     auto calls = heuristic_calls_;
     auto solutions = heuristic_solutions_;
     double budget_ms = heuristic_budget_ms_;
     int strategy = heuristic_strategy_;
     int64_t node_interval = std::max<int64_t>(1, heuristic_node_interval_);
-    bool async_injection = heuristic_async_injection_;
-    bool deterministic_mode = heuristic_deterministic_mode_;
     int deterministic_restarts = std::max<int32_t>(1, heuristic_deterministic_restarts_);
     auto work_budget = work_unit_budget_;
 
@@ -922,20 +934,24 @@ void HiGHSBridge::install_heuristic_callback() {
     auto cached_x = cached_x_lp_;
     auto cached_y = cached_y_lp_;
     auto cache_mtx = lp_cache_mutex_;
-    auto async_store = async_incumbent_store_;
-    auto last_async_version = std::make_shared<uint64_t>(0);
     highs_.setCallback(
-        [this, cached_x, cached_y, cache_mtx, calls, solutions, budget_ms,
-         last_node_count, strategy, async_store, last_async_version,
-         node_interval, async_injection, deterministic_mode,
+        [this, heuristic_enabled, cached_x, cached_y, cache_mtx, calls, solutions,
+         last_node_count, strategy,
+         node_interval,
          deterministic_restarts, work_budget](
             int callback_type, const std::string& /*message*/,
             const HighsCallbackOutput* data_out,
             HighsCallbackInput* data_in,
             void* /*user_data*/) {
             if (callback_type == static_cast<int>(HighsCallbackType::kCallbackMipInterrupt)) {
+                if (interrupt_flag_ &&
+                    interrupt_flag_->load(std::memory_order_relaxed)) {
+                    data_in->user_interrupt = true;
+                    return;
+                }
+                if (!heuristic_enabled) return;
+
                 // Only stop when HiGHS has already accepted an incumbent.
-                // Otherwise we may terminate before an async candidate is injected.
                 if (std::isfinite(data_out->mip_primal_bound) &&
                     std::isfinite(data_out->mip_dual_bound) &&
                     data_out->mip_primal_bound <= data_out->mip_dual_bound + 1e-6) {
@@ -943,6 +959,8 @@ void HiGHSBridge::install_heuristic_callback() {
                 }
                 return;
             }
+
+            if (!heuristic_enabled) return;
 
             // Only handle kCallbackMipUserSolution below.
             if (callback_type != static_cast<int>(HighsCallbackType::kCallbackMipUserSolution)) {
@@ -953,22 +971,6 @@ void HiGHSBridge::install_heuristic_callback() {
             if (data_out->external_solution_query_origin ==
                 kExternalMipSolutionQueryOriginAfterSetup) {
                 return;
-            }
-
-            // Inject asynchronous incumbent (e.g., ng/DSSR path) as soon as a
-            // newer candidate is available.
-            if (async_injection && async_store) {
-                auto snap = async_store->snapshot();
-                if (snap.version > *last_async_version) {
-                    *last_async_version = snap.version;
-                    if (!snap.col_values.empty() &&
-                        snap.objective < data_out->mip_primal_bound - 1e-6) {
-                        data_in->user_has_solution = true;
-                        data_in->user_solution = std::move(snap.col_values);
-                        (*solutions)++;
-                        return;
-                    }
-                }
             }
 
             // Rate-limit: skip if not enough nodes since last call
@@ -996,19 +998,12 @@ void HiGHSBridge::install_heuristic_callback() {
 
             (*calls)++;
 
-            heuristic::HeuristicResult result;
-            if (deterministic_mode) {
-                result = heuristic::lp_guided_heuristic(
-                    prob_, x_lp, y_lp, incumbent,
-                    0.0, strategy,
-                    deterministic_restarts,
-                    static_cast<uint32_t>(current_nodes),
-                    work_budget);
-            } else {
-                result = heuristic::lp_guided_heuristic(
-                    prob_, x_lp, y_lp, incumbent,
-                    budget_ms, strategy, 0, 0u, work_budget);
-            }
+            heuristic::HeuristicResult result = heuristic::lp_guided_heuristic(
+                prob_, x_lp, y_lp, incumbent,
+                0.0, strategy,
+                deterministic_restarts,
+                static_cast<uint32_t>(current_nodes),
+                work_budget);
 
             if (!result.col_values.empty() &&
                 result.objective < data_out->mip_primal_bound - 1e-6) {
@@ -1019,9 +1014,15 @@ void HiGHSBridge::install_heuristic_callback() {
         },
         nullptr);
 
-    highs_.startCallback(HighsCallbackType::kCallbackMipUserSolution);
+    if (heuristic_enabled) {
+        highs_.startCallback(HighsCallbackType::kCallbackMipUserSolution);
+    }
     highs_.startCallback(HighsCallbackType::kCallbackMipInterrupt);
-    logger_.log("Installed LP-guided heuristic callback (budget={}ms)", budget_ms);
+    if (heuristic_enabled) {
+        logger_.log("Installed LP-guided heuristic callback (budget={}ms)", budget_ms);
+    } else {
+        logger_.log("Installed MIP interrupt callback");
+    }
 }
 
 std::vector<int32_t> HiGHSBridge::order_path(
@@ -1081,15 +1082,24 @@ SolveResult HiGHSBridge::extract_result() const {
 
     auto model_status = highs_.getModelStatus();
     switch (model_status) {
+        case HighsModelStatus::kNotset:
+            // In some callback-heavy runs HiGHS can return kNotset at exit;
+            // treat this as an interrupted run and recover incumbent/bounds.
+            result.status = SolveResult::Status::TimeLimit;
+            break;
         case HighsModelStatus::kOptimal:
             result.status = SolveResult::Status::Optimal;
             break;
         case HighsModelStatus::kInfeasible:
+        case HighsModelStatus::kUnboundedOrInfeasible:
             result.status = SolveResult::Status::Infeasible;
             return result;
         case HighsModelStatus::kUnbounded:
             result.status = SolveResult::Status::Unbounded;
             return result;
+        case HighsModelStatus::kModelEmpty:
+            result.status = SolveResult::Status::Optimal;
+            break;
         case HighsModelStatus::kObjectiveBound:
         case HighsModelStatus::kObjectiveTarget:
             result.status = SolveResult::Status::Feasible;
@@ -1100,6 +1110,9 @@ SolveResult HiGHSBridge::extract_result() const {
             break;
         case HighsModelStatus::kTimeLimit:
         case HighsModelStatus::kIterationLimit:
+        case HighsModelStatus::kSolutionLimit:
+        case HighsModelStatus::kMemoryLimit:
+        case HighsModelStatus::kUnknown:
             result.status = SolveResult::Status::TimeLimit;
             break;
         default:
@@ -1109,7 +1122,15 @@ SolveResult HiGHSBridge::extract_result() const {
 
     highs_.getInfoValue("objective_function_value", result.objective);
 
-    highs_.getInfoValue("mip_node_count", result.nodes);
+    int64_t mip_nodes = 0;
+    if (highs_.getInfoValue("mip_node_count", mip_nodes) == HighsStatus::kOk) {
+        result.nodes = mip_nodes;
+    }
+    HighsInt simplex_iters = -1;
+    if (highs_.getInfoValue("simplex_iteration_count", simplex_iters)
+        == HighsStatus::kOk) {
+        result.simplex_iterations = static_cast<int64_t>(simplex_iters);
+    }
     highs_.getInfoValue("mip_dual_bound", result.bound);
     double mip_gap = 0.0;
     highs_.getInfoValue("mip_gap", mip_gap);

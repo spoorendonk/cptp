@@ -23,6 +23,7 @@ struct SolveResult {
     double gap = 1.0;
     double time_seconds = 0.0;
     int64_t nodes = 0;
+    int64_t simplex_iterations = -1;
 
     std::vector<int32_t> tour;       // ordered node indices
     std::vector<int32_t> tour_arcs;  // arc indices in tour
