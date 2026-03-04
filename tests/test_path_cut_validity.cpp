@@ -26,9 +26,9 @@
 namespace {
 
 struct SupportData {
-    rcspp::digraph graph;
+    cptp::digraph graph;
     std::vector<double> capacity;
-    std::unique_ptr<rcspp::gomory_hu_tree> tree;
+    std::unique_ptr<cptp::gomory_hu_tree> tree;
 };
 
 struct IntegerPathSolution {
@@ -37,8 +37,8 @@ struct IntegerPathSolution {
 };
 
 struct EquivalentInstances {
-    rcspp::Problem tour;
-    rcspp::Problem path;
+    cptp::Problem tour;
+    cptp::Problem path;
 };
 
 struct EquivalentSample {
@@ -48,11 +48,11 @@ struct EquivalentSample {
     std::vector<double> y_path;
 };
 
-SupportData build_support(const rcspp::Problem& prob,
+SupportData build_support(const cptp::Problem& prob,
                           std::span<const double> x_values,
                           double tol = 1e-6) {
     const auto& g = prob.graph();
-    rcspp::digraph_builder builder(prob.num_nodes());
+    cptp::digraph_builder builder(prob.num_nodes());
     for (auto e : g.edges()) {
         const double xval = x_values[e];
         if (xval <= tol) continue;
@@ -62,11 +62,11 @@ SupportData build_support(const rcspp::Problem& prob,
         builder.add_arc(v, u, xval);
     }
     auto [support_graph, cap] = builder.build();
-    auto tree = std::make_unique<rcspp::gomory_hu_tree>(support_graph, cap, prob.source());
+    auto tree = std::make_unique<cptp::gomory_hu_tree>(support_graph, cap, prob.source());
     return {std::move(support_graph), std::move(cap), std::move(tree)};
 }
 
-double evaluate_cut_lhs(const rcspp::sep::Cut& cut,
+double evaluate_cut_lhs(const cptp::sep::Cut& cut,
                         std::span<const double> x_values,
                         std::span<const double> y_values) {
     const int32_t m = static_cast<int32_t>(x_values.size());
@@ -85,7 +85,7 @@ int64_t quantize_coeff(double v) {
 
 using CutSignature = std::pair<int64_t, std::vector<std::pair<int32_t, int64_t>>>;
 
-std::vector<CutSignature> normalize_cut_signatures(const std::vector<rcspp::sep::Cut>& cuts) {
+std::vector<CutSignature> normalize_cut_signatures(const std::vector<cptp::sep::Cut>& cuts) {
     std::vector<CutSignature> out;
     out.reserve(cuts.size());
     for (const auto& cut : cuts) {
@@ -111,7 +111,7 @@ std::vector<CutSignature> normalize_cut_signatures(const std::vector<rcspp::sep:
     return out;
 }
 
-int32_t edge_index(const rcspp::Problem& prob, int32_t a, int32_t b) {
+int32_t edge_index(const cptp::Problem& prob, int32_t a, int32_t b) {
     if (a > b) std::swap(a, b);
     const auto& g = prob.graph();
     for (int32_t e : g.incident_edges(a)) {
@@ -120,9 +120,9 @@ int32_t edge_index(const rcspp::Problem& prob, int32_t a, int32_t b) {
     return -1;
 }
 
-rcspp::Problem make_validation_path_problem() {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges;
+cptp::Problem make_validation_path_problem() {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges;
     std::vector<double> costs;
 
     // Complete graph on 6 nodes: source=0, target=5.
@@ -146,7 +146,7 @@ rcspp::Problem make_validation_path_problem() {
     return prob;
 }
 
-std::vector<IntegerPathSolution> enumerate_feasible_paths(const rcspp::Problem& prob) {
+std::vector<IntegerPathSolution> enumerate_feasible_paths(const cptp::Problem& prob) {
     const auto& g = prob.graph();
     const int32_t n = prob.num_nodes();
     const int32_t m = prob.num_edges();
@@ -199,8 +199,8 @@ std::vector<IntegerPathSolution> enumerate_feasible_paths(const rcspp::Problem& 
 
 EquivalentInstances make_equivalent_instances() {
     // Tour: depot 0, customers 1..4.
-    rcspp::Problem tour;
-    std::vector<rcspp::Edge> edges_tour;
+    cptp::Problem tour;
+    std::vector<cptp::Edge> edges_tour;
     std::vector<double> costs_tour;
     for (int i = 0; i <= 4; ++i) {
         for (int j = i + 1; j <= 4; ++j) {
@@ -218,8 +218,8 @@ EquivalentInstances make_equivalent_instances() {
     tour.build(5, edges_tour, costs_tour, profits_tour, demands_tour, 7.0, 0, 0);
 
     // Path equivalent via depot split: source 0, customers 1..4, target 5.
-    rcspp::Problem path;
-    std::vector<rcspp::Edge> edges_path;
+    cptp::Problem path;
+    std::vector<cptp::Edge> edges_path;
     std::vector<double> costs_path;
 
     for (int i = 1; i <= 4; ++i) {
@@ -245,8 +245,8 @@ EquivalentInstances make_equivalent_instances() {
 
 EquivalentInstances make_comb_equivalent_instances() {
     // Tour with 6 customers (1..6) and depot 0.
-    rcspp::Problem tour;
-    std::vector<rcspp::Edge> edges_tour;
+    cptp::Problem tour;
+    std::vector<cptp::Edge> edges_tour;
     std::vector<double> costs_tour;
     for (int i = 0; i <= 6; ++i) {
         for (int j = i + 1; j <= 6; ++j) {
@@ -259,8 +259,8 @@ EquivalentInstances make_comb_equivalent_instances() {
     tour.build(7, edges_tour, costs_tour, profits_tour, demands_tour, 100.0, 0, 0);
 
     // Depot-split path equivalent: source 0, target 7, customers 1..6.
-    rcspp::Problem path;
-    std::vector<rcspp::Edge> edges_path;
+    cptp::Problem path;
+    std::vector<cptp::Edge> edges_path;
     std::vector<double> costs_path;
     for (int i = 1; i <= 6; ++i) {
         for (int j = i + 1; j <= 6; ++j) {
@@ -416,7 +416,7 @@ struct SetStats {
     double star_sum = 0.0;
 };
 
-SetStats compute_set_stats(const rcspp::Problem& prob,
+SetStats compute_set_stats(const cptp::Problem& prob,
                            std::span<const double> x_values,
                            std::span<const double> y_values,
                            std::span<const uint8_t> in_S) {
@@ -445,7 +445,7 @@ SetStats compute_set_stats(const rcspp::Problem& prob,
 }
 
 std::vector<std::pair<std::vector<double>, std::vector<double>>>
-build_fractional_samples(const rcspp::Problem& prob) {
+build_fractional_samples(const cptp::Problem& prob) {
     const int32_t m = prob.num_edges();
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
@@ -497,19 +497,19 @@ build_fractional_samples(const rcspp::Problem& prob) {
     return samples;
 }
 
-std::vector<double> compute_all_pairs(const rcspp::Problem& prob) {
+std::vector<double> compute_all_pairs(const cptp::Problem& prob) {
     const int32_t n = prob.num_nodes();
     constexpr double inf = std::numeric_limits<double>::infinity();
     std::vector<double> all_pairs(static_cast<size_t>(n) * n, inf);
     for (int32_t s = 0; s < n; ++s) {
-        auto row = rcspp::preprocess::forward_labeling(prob, s);
+        auto row = cptp::preprocess::forward_labeling(prob, s);
         std::copy(row.begin(), row.end(),
                   all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
     }
     return all_pairs;
 }
 
-double compute_comb_lhs(const rcspp::Problem& prob,
+double compute_comb_lhs(const cptp::Problem& prob,
                         std::span<const double> x,
                         std::span<const double> y,
                         std::span<const uint8_t> in_handle,
@@ -541,7 +541,7 @@ double compute_comb_lhs(const rcspp::Problem& prob,
     return lhs;
 }
 
-double compute_comb_lhs_path_split(const rcspp::Problem& prob,
+double compute_comb_lhs_path_split(const cptp::Problem& prob,
                                    std::span<const double> x,
                                    std::span<const double> y,
                                    std::span<const uint8_t> in_handle,
@@ -580,7 +580,7 @@ double compute_comb_lhs_path_split(const rcspp::Problem& prob,
 }
 
 template <typename SeparatorT>
-void validate_separator_on_path(const rcspp::Problem& prob,
+void validate_separator_on_path(const cptp::Problem& prob,
                                 const std::vector<IntegerPathSolution>& feasible_paths,
                                 const std::vector<std::pair<std::vector<double>, std::vector<double>>>& samples,
                                 SeparatorT separator,
@@ -590,7 +590,7 @@ void validate_separator_on_path(const rcspp::Problem& prob,
 
     for (const auto& [x_values, y_values] : samples) {
         auto support = build_support(prob, x_values);
-        rcspp::sep::SeparationContext ctx{
+        cptp::sep::SeparationContext ctx{
             .problem = prob,
             .x_values = x_values,
             .y_values = y_values,
@@ -626,18 +626,18 @@ TEST_CASE("Path cut families generate only valid cuts on all feasible s-t paths"
     auto samples = build_fractional_samples(prob);
 
     SECTION("RCI") {
-        validate_separator_on_path(prob, feasible_paths, samples, rcspp::sep::RCISeparator{});
+        validate_separator_on_path(prob, feasible_paths, samples, cptp::sep::RCISeparator{});
     }
     SECTION("Multistar") {
-        validate_separator_on_path(prob, feasible_paths, samples, rcspp::sep::MultistarSeparator{});
+        validate_separator_on_path(prob, feasible_paths, samples, cptp::sep::MultistarSeparator{});
     }
     SECTION("Comb") {
         // Comb is enabled in path mode; this verifies validity if cuts are produced.
         validate_separator_on_path(prob, feasible_paths, samples,
-                                   rcspp::sep::CombSeparator{}, false);
+                                   cptp::sep::CombSeparator{}, false);
     }
     SECTION("RGLM") {
-        validate_separator_on_path(prob, feasible_paths, samples, rcspp::sep::RGLMSeparator{});
+        validate_separator_on_path(prob, feasible_paths, samples, cptp::sep::RGLMSeparator{});
     }
 }
 
@@ -732,7 +732,7 @@ TEST_CASE("Equivalent tour and s-t path emit matching SPI customer cuts",
     constexpr double ub = 90.0;
     constexpr double tol = 1e-6;
 
-    auto normalize_spi = [](const std::vector<rcspp::sep::Cut>& cuts,
+    auto normalize_spi = [](const std::vector<cptp::sep::Cut>& cuts,
                             int32_t y_offset) {
         std::set<uint32_t> keys;
         for (const auto& cut : cuts) {
@@ -755,7 +755,7 @@ TEST_CASE("Equivalent tour and s-t path emit matching SPI customer cuts",
         auto support_tour = build_support(inst.tour, sample.x_tour);
         auto support_path = build_support(inst.path, sample.x_path);
 
-        rcspp::sep::SeparationContext ctx_tour{
+        cptp::sep::SeparationContext ctx_tour{
             .problem = inst.tour,
             .x_values = sample.x_tour,
             .y_values = sample.y_tour,
@@ -766,7 +766,7 @@ TEST_CASE("Equivalent tour and s-t path emit matching SPI customer cuts",
             .upper_bound = ub,
             .all_pairs = ap_tour,
         };
-        rcspp::sep::SeparationContext ctx_path{
+        cptp::sep::SeparationContext ctx_path{
             .problem = inst.path,
             .x_values = sample.x_path,
             .y_values = sample.y_path,
@@ -778,8 +778,8 @@ TEST_CASE("Equivalent tour and s-t path emit matching SPI customer cuts",
             .all_pairs = ap_path,
         };
 
-        rcspp::sep::SPISeparator spi_tour;
-        rcspp::sep::SPISeparator spi_path;
+        cptp::sep::SPISeparator spi_tour;
+        cptp::sep::SPISeparator spi_path;
         const auto cuts_tour = spi_tour.separate(ctx_tour);
         const auto cuts_path = spi_path.separate(ctx_path);
 
@@ -797,7 +797,7 @@ TEST_CASE("Comb path emits valid cuts on crafted sample", "[comb][path][validity
     const int32_t target = inst.path.target();
     const int32_t st_edge = edge_index(inst.path, inst.path.source(), target);
     REQUIRE(st_edge >= 0);
-    rcspp::sep::SeparationContext ctx{
+    cptp::sep::SeparationContext ctx{
         .problem = inst.path,
         .x_values = sample.x_path,
         .y_values = sample.y_path,
@@ -806,7 +806,7 @@ TEST_CASE("Comb path emits valid cuts on crafted sample", "[comb][path][validity
         .tol = 1e-6,
         .flow_tree = support.tree.get(),
     };
-    rcspp::sep::CombSeparator comb;
+    cptp::sep::CombSeparator comb;
     const auto cuts = comb.separate(ctx);
     REQUIRE(!cuts.empty());
 
@@ -856,7 +856,7 @@ TEST_CASE("Comb expression and separator behavior match across equivalent tour/p
     // best violation should agree under the mapped LP sample.
     auto support_tour = build_support(inst.tour, sample.x_tour);
     auto support_path = build_support(inst.path, sample.x_path);
-    rcspp::sep::SeparationContext ctx_tour{
+    cptp::sep::SeparationContext ctx_tour{
         .problem = inst.tour,
         .x_values = sample.x_tour,
         .y_values = sample.y_tour,
@@ -865,7 +865,7 @@ TEST_CASE("Comb expression and separator behavior match across equivalent tour/p
         .tol = 1e-6,
         .flow_tree = support_tour.tree.get(),
     };
-    rcspp::sep::SeparationContext ctx_path{
+    cptp::sep::SeparationContext ctx_path{
         .problem = inst.path,
         .x_values = sample.x_path,
         .y_values = sample.y_path,
@@ -874,8 +874,8 @@ TEST_CASE("Comb expression and separator behavior match across equivalent tour/p
         .tol = 1e-6,
         .flow_tree = support_path.tree.get(),
     };
-    rcspp::sep::CombSeparator comb_tour;
-    rcspp::sep::CombSeparator comb_path;
+    cptp::sep::CombSeparator comb_tour;
+    cptp::sep::CombSeparator comb_path;
     const auto cuts_tour = comb_tour.separate(ctx_tour);
     const auto cuts_path = comb_path.separate(ctx_path);
     REQUIRE(!cuts_tour.empty());
@@ -895,7 +895,7 @@ TEST_CASE("Comb expression and separator behavior match across equivalent tour/p
         }
     }
 
-    auto max_violation = [](const std::vector<rcspp::sep::Cut>& cuts) {
+    auto max_violation = [](const std::vector<cptp::sep::Cut>& cuts) {
         double best = -std::numeric_limits<double>::infinity();
         for (const auto& c : cuts) best = std::max(best, c.violation);
         return best;
@@ -914,7 +914,7 @@ TEST_CASE("Comb path ignores split-terminal artifact variables", "[comb][path][i
 
     auto run_comb_path = [&](const EquivalentSample& sample) {
         auto support = build_support(inst.path, sample.x_path);
-        rcspp::sep::SeparationContext ctx{
+        cptp::sep::SeparationContext ctx{
             .problem = inst.path,
             .x_values = sample.x_path,
             .y_values = sample.y_path,
@@ -923,7 +923,7 @@ TEST_CASE("Comb path ignores split-terminal artifact variables", "[comb][path][i
             .tol = 1e-6,
             .flow_tree = support.tree.get(),
         };
-        rcspp::sep::CombSeparator comb;
+        cptp::sep::CombSeparator comb;
         return comb.separate(ctx);
     };
 

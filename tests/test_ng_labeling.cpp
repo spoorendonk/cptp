@@ -13,17 +13,17 @@ using Catch::Matchers::WithinAbs;
 
 TEST_CASE("ng DSSR with ng_size=1 matches 2-cycle labeling baseline",
           "[labeling][ng]") {
-    auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
+    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
 
-    auto fwd_old = rcspp::preprocess::forward_labeling(prob, prob.source());
-    auto bwd_old = rcspp::preprocess::backward_labeling(prob, prob.target());
+    auto fwd_old = cptp::preprocess::forward_labeling(prob, prob.source());
+    auto bwd_old = cptp::preprocess::backward_labeling(prob, prob.target());
 
-    rcspp::preprocess::ng::DssrOptions opts;
+    cptp::preprocess::ng::DssrOptions opts;
     opts.initial_ng_size = 1;
     opts.max_ng_size = 1;
     opts.dssr_iterations = 1;
 
-    auto bounds = rcspp::preprocess::ng::compute_bounds(
+    auto bounds = cptp::preprocess::ng::compute_bounds(
         prob, prob.source(), prob.target(), opts);
 
     REQUIRE(bounds.fwd.size() == fwd_old.size());
@@ -35,7 +35,7 @@ TEST_CASE("ng DSSR with ng_size=1 matches 2-cycle labeling baseline",
 }
 
 TEST_CASE("shared bounds store tightens monotonically", "[labeling][shared_bounds]") {
-    rcspp::preprocess::BoundSnapshot init{
+    cptp::preprocess::BoundSnapshot init{
         .fwd = {1.0, 2.0, 3.0},
         .bwd = {1.5, 2.5, 3.5},
         .correction = 0.0,
@@ -43,7 +43,7 @@ TEST_CASE("shared bounds store tightens monotonically", "[labeling][shared_bound
         .version = 0,
     };
 
-    rcspp::preprocess::SharedBoundsStore store(init);
+    cptp::preprocess::SharedBoundsStore store(init);
 
     SECTION("weaker update does not change snapshot") {
         bool changed = store.publish_tightening(
@@ -76,13 +76,13 @@ TEST_CASE("shared bounds store tightens monotonically", "[labeling][shared_bound
 
 TEST_CASE("ng DSSR reports finite elementary path bound on tiny path",
           "[labeling][ng]") {
-    auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
-    rcspp::preprocess::ng::DssrOptions opts;
+    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+    cptp::preprocess::ng::DssrOptions opts;
     opts.initial_ng_size = 4;
     opts.max_ng_size = 8;
     opts.dssr_iterations = 4;
 
-    auto bounds = rcspp::preprocess::ng::compute_bounds(
+    auto bounds = cptp::preprocess::ng::compute_bounds(
         prob, prob.source(), prob.target(), opts);
 
     REQUIRE(bounds.fwd.size() == static_cast<size_t>(prob.num_nodes()));
@@ -97,21 +97,21 @@ TEST_CASE("ng DSSR reports finite elementary path bound on tiny path",
 
 TEST_CASE("ng DSSR accepts ng_initial_size=0",
           "[labeling][ng]") {
-    auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
+    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
 
-    rcspp::preprocess::ng::DssrOptions opts0;
+    cptp::preprocess::ng::DssrOptions opts0;
     opts0.initial_ng_size = 0;
     opts0.max_ng_size = 1;
     opts0.dssr_iterations = 1;
 
-    rcspp::preprocess::ng::DssrOptions opts1;
+    cptp::preprocess::ng::DssrOptions opts1;
     opts1.initial_ng_size = 1;
     opts1.max_ng_size = 1;
     opts1.dssr_iterations = 1;
 
-    auto b0 = rcspp::preprocess::ng::compute_bounds(
+    auto b0 = cptp::preprocess::ng::compute_bounds(
         prob, prob.source(), prob.target(), opts0);
-    auto b1 = rcspp::preprocess::ng::compute_bounds(
+    auto b1 = cptp::preprocess::ng::compute_bounds(
         prob, prob.source(), prob.target(), opts1);
 
     REQUIRE(b0.fwd.size() == b1.fwd.size());
@@ -124,13 +124,13 @@ TEST_CASE("ng DSSR accepts ng_initial_size=0",
 
 TEST_CASE("ng DSSR with zero-init still yields finite target bound",
           "[labeling][ng]") {
-    auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
-    rcspp::preprocess::ng::DssrOptions opts;
+    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+    cptp::preprocess::ng::DssrOptions opts;
     opts.initial_ng_size = 0;
     opts.max_ng_size = 3;
     opts.dssr_iterations = 4;
 
-    auto bounds = rcspp::preprocess::ng::compute_bounds(
+    auto bounds = cptp::preprocess::ng::compute_bounds(
         prob, prob.source(), prob.target(), opts);
 
     REQUIRE(bounds.fwd.size() == static_cast<size_t>(prob.num_nodes()));
@@ -142,7 +142,7 @@ TEST_CASE("ng DSSR with zero-init still yields finite target bound",
 
 TEST_CASE("ng label update marks predecessor bit (prevents 3-cycle return to root)",
           "[labeling][ng]") {
-    auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
+    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
     const int32_t n = prob.num_nodes();
     REQUIRE(n >= 3);
 
@@ -151,7 +151,7 @@ TEST_CASE("ng label update marks predecessor bit (prevents 3-cycle return to roo
         ng_neighbors[static_cast<size_t>(i)] = {0, 1, 2};
     }
 
-    auto run = rcspp::preprocess::ng::detail::run_labeling(
+    auto run = cptp::preprocess::ng::detail::run_labeling(
         prob, 0, prob.edge_costs(), prob.profits(), ng_neighbors, true);
 
     // With predecessor-marking update, node 0 cannot be revisited via 0->1->2->0.
@@ -159,7 +159,7 @@ TEST_CASE("ng label update marks predecessor bit (prevents 3-cycle return to roo
 }
 
 TEST_CASE("async incumbent store keeps best objective", "[labeling][async_incumbent]") {
-    rcspp::model::AsyncIncumbentStore store;
+    cptp::model::AsyncIncumbentStore store;
     REQUIRE(store.publish_if_better({1.0, 0.0, 1.0}, -10.0));
     REQUIRE_FALSE(store.publish_if_better({0.0, 1.0, 0.0}, -5.0));
     REQUIRE(store.publish_if_better({0.0, 1.0, 1.0}, -12.0));

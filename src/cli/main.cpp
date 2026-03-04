@@ -62,7 +62,7 @@ int main(int argc, char* argv[]) {
     std::filesystem::path instance_path = first_arg;
 
     // Parse arguments: extract --source/--target, forward rest to HiGHS
-    rcspp::SolverOptions options;
+    cptp::SolverOptions options;
     int override_source = -1;
     int override_target = -1;
 
@@ -82,7 +82,7 @@ int main(int argc, char* argv[]) {
     }
 
     try {
-        auto problem = rcspp::io::load(instance_path);
+        auto problem = cptp::io::load(instance_path);
 
         // Apply CLI overrides for source/target
         if (override_source >= 0 || override_target >= 0) {
@@ -95,7 +95,7 @@ int main(int argc, char* argv[]) {
                           // Actually, set_problem on Model handles this already.
                           // For CLI override, we re-build the problem.
                           [&] {
-                              std::vector<rcspp::Edge> edges;
+                              std::vector<cptp::Edge> edges;
                               const auto& g = problem.graph();
                               for (auto e : g.edges())
                                   edges.push_back({g.edge_source(e), g.edge_target(e)});
@@ -118,7 +118,7 @@ int main(int argc, char* argv[]) {
         }
         std::cout << ")\n";
 
-        rcspp::Model model;
+        cptp::Model model;
         model.set_problem(std::move(problem));
 
         auto result = model.solve(options);
@@ -145,7 +145,7 @@ int main(int argc, char* argv[]) {
                 "SEC", "RCI", "Multistar", "Comb", "RGLM", "SPI"
             };
             auto print_sep_row = [](const std::string& name,
-                                    const rcspp::SeparatorStats& stats) {
+                                    const cptp::SeparatorStats& stats) {
                 std::cout << "  " << std::setw(10) << std::left << name
                           << std::right
                           << std::setw(6) << stats.cuts_added << " cuts"

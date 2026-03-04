@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace rcspp::preprocess {
+namespace cptp::preprocess {
 
 BoundPropagator::BoundPropagator(const Problem& prob,
                                  std::vector<double> fwd_bounds,
@@ -172,4 +172,4 @@ std::vector<int32_t> BoundPropagator::propagate_fixed_edge(
     return fixings;
 }
 
-}  // namespace rcspp::preprocess
+}  // namespace cptp::preprocess

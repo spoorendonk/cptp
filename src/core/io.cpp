@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
-namespace rcspp::io {
+namespace cptp::io {
 
 namespace {
 
@@ -320,4 +320,4 @@ Problem load_numeric(const std::filesystem::path& path) {
     return prob;
 }
 
-}  // namespace rcspp::io
+}  // namespace cptp::io

@@ -11,17 +11,17 @@ else()
     find_package(nanobind CONFIG REQUIRED)
 endif()
 
-nanobind_add_module(rcspp_python
+nanobind_add_module(cptp_python
     bindings.cpp
     NB_STATIC
 )
-set_target_properties(rcspp_python PROPERTIES OUTPUT_NAME "_cptp")
+set_target_properties(cptp_python PROPERTIES OUTPUT_NAME "_cptp")
 
-target_link_libraries(rcspp_python PRIVATE cptp)
-target_compile_definitions(rcspp_python PRIVATE CPTP_HAS_HIGHS)
-target_include_directories(rcspp_python PRIVATE
+target_link_libraries(cptp_python PRIVATE cptp)
+target_compile_definitions(cptp_python PRIVATE CPTP_HAS_HIGHS)
+target_include_directories(cptp_python PRIVATE
     ${highs_SOURCE_DIR}/src
     ${highs_BINARY_DIR}
 )
 
-install(TARGETS rcspp_python LIBRARY DESTINATION cptp)
+install(TARGETS cptp_python LIBRARY DESTINATION cptp)

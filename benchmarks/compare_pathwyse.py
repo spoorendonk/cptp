@@ -302,7 +302,7 @@ def convert_instance(instance_path: Path, tmpdir: Path) -> tuple[Path, int]:
 def run_single(pw_bin: Path, instance_path: Path, expected: float | None,
                time_limit: int, verbose: bool) -> dict:
     """Run PathWyse on one instance, return result dict."""
-    tmpdir = Path(tempfile.mkdtemp(prefix="rcspp_pw_"))
+    tmpdir = Path(tempfile.mkdtemp(prefix="cptp_pw_"))
     try:
         pw_instance, scale = convert_instance(instance_path, tmpdir)
         result = run_pathwyse(pw_bin, pw_instance, time_limit=time_limit)

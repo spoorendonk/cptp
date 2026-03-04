@@ -5,7 +5,7 @@
 #include "core/gomory_hu.h"
 #include "core/problem.h"
 
-namespace rcspp::sep {
+namespace cptp::sep {
 
 std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
     const auto& prob = ctx.problem;
@@ -78,4 +78,4 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
     return all_cuts;
 }
 
-}  // namespace rcspp::sep
+}  // namespace cptp::sep

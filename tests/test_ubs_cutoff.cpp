@@ -6,15 +6,15 @@
 
 using Catch::Matchers::WithinAbs;
 
-static const rcspp::SolverOptions quiet = {
+static const cptp::SolverOptions quiet = {
     {"output_flag", "false"},
 };
 
 /// Solve with known UB cutoff and all heuristics disabled (prove-only mode).
-static rcspp::SolveResult prove_instance(const char* path, double cutoff,
+static cptp::SolveResult prove_instance(const char* path, double cutoff,
                                           int time_limit = 120) {
-    auto prob = rcspp::io::load(path);
-    rcspp::Model model;
+    auto prob = cptp::io::load(path);
+    cptp::Model model;
     model.set_problem(std::move(prob));
     auto opts = quiet;
     opts.push_back({"time_limit", std::to_string(time_limit)});
@@ -24,9 +24,9 @@ static rcspp::SolveResult prove_instance(const char* path, double cutoff,
 }
 
 /// Solve normally (baseline).
-static rcspp::SolveResult solve_instance(const char* path, int time_limit = 120) {
-    auto prob = rcspp::io::load(path);
-    rcspp::Model model;
+static cptp::SolveResult solve_instance(const char* path, int time_limit = 120) {
+    auto prob = cptp::io::load(path);
+    cptp::Model model;
     model.set_problem(std::move(prob));
     auto opts = quiet;
     opts.push_back({"time_limit", std::to_string(time_limit)});
@@ -93,12 +93,12 @@ TEST_CASE("prove-only matches normal solve: tiny4", "[prove]") {
 // ── RC fixing tests ──
 
 /// Solve with RC fixing enabled in prove-only mode.
-static rcspp::SolveResult prove_rc_fixing(const char* path, double cutoff,
+static cptp::SolveResult prove_rc_fixing(const char* path, double cutoff,
                                            const char* strategy = "root_only",
                                            bool fix_to_one = false,
                                            int time_limit = 30) {
-    auto prob = rcspp::io::load(path);
-    rcspp::Model model;
+    auto prob = cptp::io::load(path);
+    cptp::Model model;
     model.set_problem(std::move(prob));
     auto opts = quiet;
     opts.push_back({"time_limit", std::to_string(time_limit)});
@@ -144,8 +144,8 @@ TEST_CASE("rc_fixing matches baseline objective: tiny4", "[prove][rc_fixing]") {
 }
 
 TEST_CASE("rc_fixing periodic: tiny4 tour optimal", "[prove][rc_fixing]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
-    rcspp::Model model;
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
+    cptp::Model model;
     model.set_problem(std::move(prob));
     auto opts = quiet;
     opts.push_back({"time_limit", "30"});
@@ -197,8 +197,8 @@ TEST_CASE("rc_fixing default active in normal solve: tiny4", "[rc_fixing]") {
 }
 
 TEST_CASE("rc_fixing default active in normal solve: tiny4 path", "[rc_fixing]") {
-    auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
-    rcspp::Model model;
+    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+    cptp::Model model;
     model.set_problem(std::move(prob));
     auto r = model.solve(quiet);
     REQUIRE(r.is_optimal());
@@ -206,8 +206,8 @@ TEST_CASE("rc_fixing default active in normal solve: tiny4 path", "[rc_fixing]")
 }
 
 TEST_CASE("rc_fixing periodic: tiny4 path optimal", "[prove][rc_fixing]") {
-    auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
-    rcspp::Model model;
+    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+    cptp::Model model;
     model.set_problem(std::move(prob));
     auto opts = quiet;
     opts.push_back({"time_limit", "30"});
@@ -221,8 +221,8 @@ TEST_CASE("rc_fixing periodic: tiny4 path optimal", "[prove][rc_fixing]") {
 }
 
 TEST_CASE("rc_fixing periodic + fix_to_one: tiny4 tour", "[prove][rc_fixing]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
-    rcspp::Model model;
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
+    cptp::Model model;
     model.set_problem(std::move(prob));
     auto opts = quiet;
     opts.push_back({"time_limit", "30"});

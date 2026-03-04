@@ -6,7 +6,7 @@
 
 #include "core/problem.h"
 
-namespace rcspp::preprocess {
+namespace cptp::preprocess {
 
 /// Dijkstra from a given root with weight = demand(target_node).
 /// Returns dist[v] = minimum cumulative demand on any path from root to v.
@@ -78,4 +78,4 @@ inline std::vector<bool> demand_reachability(const Problem& prob) {
     return reachable;
 }
 
-}  // namespace rcspp::preprocess
+}  // namespace cptp::preprocess

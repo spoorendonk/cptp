@@ -16,16 +16,16 @@
 namespace {
 
 struct SupportData {
-    rcspp::digraph graph;
+    cptp::digraph graph;
     std::vector<double> capacity;
-    std::unique_ptr<rcspp::gomory_hu_tree> tree;
+    std::unique_ptr<cptp::gomory_hu_tree> tree;
 };
 
-SupportData build_support(const rcspp::Problem& prob,
+SupportData build_support(const cptp::Problem& prob,
                           std::span<const double> x_values,
                           double tol = 1e-6) {
     const auto& g = prob.graph();
-    rcspp::digraph_builder builder(prob.num_nodes());
+    cptp::digraph_builder builder(prob.num_nodes());
     for (auto e : g.edges()) {
         const double xval = x_values[e];
         if (xval <= tol) continue;
@@ -35,25 +35,25 @@ SupportData build_support(const rcspp::Problem& prob,
         builder.add_arc(v, u, xval);
     }
     auto [support_graph, cap] = builder.build();
-    auto tree = std::make_unique<rcspp::gomory_hu_tree>(support_graph, cap, prob.source());
+    auto tree = std::make_unique<cptp::gomory_hu_tree>(support_graph, cap, prob.source());
     return {std::move(support_graph), std::move(cap), std::move(tree)};
 }
 
-std::vector<double> compute_all_pairs(const rcspp::Problem& prob) {
+std::vector<double> compute_all_pairs(const cptp::Problem& prob) {
     const int32_t n = prob.num_nodes();
     constexpr double inf = std::numeric_limits<double>::infinity();
     std::vector<double> all_pairs(static_cast<size_t>(n) * n, inf);
     for (int32_t s = 0; s < n; ++s) {
-        auto row = rcspp::preprocess::forward_labeling(prob, s);
+        auto row = cptp::preprocess::forward_labeling(prob, s);
         std::copy(row.begin(), row.end(),
                   all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
     }
     return all_pairs;
 }
 
-rcspp::Problem make_spi_path_problem() {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges;
+cptp::Problem make_spi_path_problem() {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges;
     std::vector<double> costs;
 
     for (int i = 0; i < 5; ++i) {
@@ -94,7 +94,7 @@ TEST_CASE("SPI separator: path problem emits violated cuts with all-pairs", "[sp
     }
 
     auto support = build_support(prob, x_values);
-    rcspp::sep::SeparationContext ctx{
+    cptp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
         .y_values = y_values,
@@ -106,7 +106,7 @@ TEST_CASE("SPI separator: path problem emits violated cuts with all-pairs", "[sp
         .all_pairs = all_pairs,
     };
 
-    rcspp::sep::SPISeparator spi;
+    cptp::sep::SPISeparator spi;
     const auto cuts = spi.separate(ctx);
     REQUIRE(!cuts.empty());
     for (const auto& cut : cuts) {
@@ -128,7 +128,7 @@ TEST_CASE("SPI separator: path problem returns no cuts without all-pairs", "[spi
     for (int i = 1; i < 4; ++i) y_values[i] = 0.7;
 
     auto support = build_support(prob, x_values);
-    rcspp::sep::SeparationContext ctx{
+    cptp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = x_values,
         .y_values = y_values,
@@ -139,7 +139,7 @@ TEST_CASE("SPI separator: path problem returns no cuts without all-pairs", "[spi
         .upper_bound = 5.0,
     };
 
-    rcspp::sep::SPISeparator spi;
+    cptp::sep::SPISeparator spi;
     const auto cuts = spi.separate(ctx);
     REQUIRE(cuts.empty());
 }

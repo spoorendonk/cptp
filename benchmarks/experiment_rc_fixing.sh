@@ -5,7 +5,7 @@ set -euo pipefail
 # Output: benchmarks/rc_fixing_study.csv
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$ROOT_DIR/build/rcspp-solve"
+BIN="$ROOT_DIR/build/cptp-solve"
 OUT_CSV="$ROOT_DIR/benchmarks/rc_fixing_study.csv"
 
 if [[ ! -x "$BIN" ]]; then

@@ -10,11 +10,11 @@
 #include "sep/separation_context.h"
 #include "sep/separator.h"
 
-namespace rcspp {
+namespace cptp {
 class Problem;
 }
 
-namespace rcspp::sep {
+namespace cptp::sep {
 
 /// Solver-independent separation oracle.
 ///
@@ -29,7 +29,7 @@ namespace rcspp::sep {
 ///   auto cuts = oracle.separate(x_vals, y_vals, x_off, y_off);
 ///
 /// Usage (Python — via bindings):
-///   oracle = rcspp_bac.SeparationOracle(prob)
+///   oracle = cptp_bac.SeparationOracle(prob)
 ///   oracle.add_default_separators()
 ///   cuts = oracle.separate(x_vals, y_vals, x_off, y_off)
 class SeparationOracle {
@@ -83,4 +83,4 @@ class SeparationOracle {
     int32_t max_cuts_per_sep_ = 3;
 };
 
-}  // namespace rcspp::sep
+}  // namespace cptp::sep

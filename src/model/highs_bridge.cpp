@@ -23,7 +23,7 @@
 #include <tbb/parallel_for.h>
 #include <tbb/task_group.h>
 
-namespace rcspp {
+namespace cptp {
 
 HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
                          double frac_tol)
@@ -1192,4 +1192,4 @@ SolveResult HiGHSBridge::extract_result() const {
     return result;
 }
 
-}  // namespace rcspp
+}  // namespace cptp

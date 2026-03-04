@@ -8,7 +8,7 @@
 #include <tuple>
 #include <vector>
 
-namespace rcspp {
+namespace cptp {
 
 /// Simple directed graph with CSR storage for out-arcs and in-arcs.
 /// Used by separators to build support graphs for max-flow.
@@ -114,4 +114,4 @@ class digraph_builder {
     std::vector<double> caps_;
 };
 
-}  // namespace rcspp
+}  // namespace cptp

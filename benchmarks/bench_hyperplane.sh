@@ -4,7 +4,7 @@
 
 set -uo pipefail
 
-SOLVER="./build/rcspp-solve"
+SOLVER="./build/cptp-solve"
 INST_DIR="benchmarks/instances/spprclib"
 TIME_LIMIT="${1:-120}"
 

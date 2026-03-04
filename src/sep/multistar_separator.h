@@ -2,7 +2,7 @@
 
 #include "sep/separator.h"
 
-namespace rcspp::sep {
+namespace cptp::sep {
 
 /// Multistar inequality separator.
 /// Strengthens capacity cuts using knapsack-like reasoning.
@@ -12,4 +12,4 @@ class MultistarSeparator : public Separator {
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 };
 
-}  // namespace rcspp::sep
+}  // namespace cptp::sep

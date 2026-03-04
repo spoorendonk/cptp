@@ -10,9 +10,9 @@
 #include "model/resource.h"
 #include "util/logger.h"
 
-namespace rcspp {
+namespace cptp {
 
-/// User-facing model: build an RCSPP instance and solve it.
+/// User-facing model: build an CPTP instance and solve it.
 class Model {
  public:
     Model();
@@ -51,4 +51,4 @@ class Model {
     bool built_ = false;
 };
 
-}  // namespace rcspp
+}  // namespace cptp

@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace rcspp::model_detail {
+namespace cptp::model_detail {
 
 struct DssrEpochUpdate {
     int32_t epoch = 0;
@@ -164,4 +164,4 @@ class DssrEpochQueue {
     bool producer_done_ = false;
 };
 
-}  // namespace rcspp::model_detail
+}  // namespace cptp::model_detail

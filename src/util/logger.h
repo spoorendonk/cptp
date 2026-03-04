@@ -6,7 +6,7 @@
 #include <ostream>
 #include <string_view>
 
-namespace rcspp {
+namespace cptp {
 
 class Logger {
  public:
@@ -30,4 +30,4 @@ class Logger {
     std::mutex mu_;
 };
 
-}  // namespace rcspp
+}  // namespace cptp

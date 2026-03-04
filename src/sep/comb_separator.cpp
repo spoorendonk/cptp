@@ -5,7 +5,7 @@
 
 #include "core/problem.h"
 
-namespace rcspp::sep {
+namespace cptp::sep {
 
 std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
     const auto& prob = ctx.problem;
@@ -190,4 +190,4 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
     return cuts;
 }
 
-}  // namespace rcspp::sep
+}  // namespace cptp::sep

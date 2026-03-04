@@ -8,7 +8,7 @@
 
 #include "core/digraph.h"
 
-namespace rcspp {
+namespace cptp {
 
 /// Dinitz max-flow on a digraph with double capacities.
 class dinitz {
@@ -144,4 +144,4 @@ class dinitz {
     double flow_value_ = 0.0;
 };
 
-}  // namespace rcspp
+}  // namespace cptp
