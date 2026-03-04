@@ -241,7 +241,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         // --- Bounds & Preprocessing ---
         if (key == "two_cycle_elim_bounds") { two_cycle_elim_bounds = parse_bool(value); continue; }
-        if (key == "all_pairs_bounds" || key == "all_pairs_bounds") {
+        if (key == "all_pairs_bounds" || key == "all_pairs_propagation") {
             all_pairs_bounds = parse_bool(value); continue;
         }
         if (key == "edge_elimination") { edge_elimination = parse_bool(value); continue; }
@@ -321,6 +321,11 @@ SolveResult Model::solve(const SolverOptions& options) {
                 logger_.log("Warning: internal options are no longer supported and will be ignored");
                 warned_legacy_internal_option = true;
             }
+            continue;
+        }
+        if (key == "disable_heuristics") {
+            logger_.log("Warning: disable_heuristics is deprecated; use --heu_ws false instead");
+            heu_ws = !parse_bool(value);
             continue;
         }
         if (key == "preproc_stage1_bounds" || key == "ng_initial_size" ||
@@ -490,9 +495,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (cutoff < std::numeric_limits<double>::infinity()) {
         highs.setOptionValue("objective_bound", cutoff);
     }
-    if (!heu_ws) {
-        highs.setOptionValue("mip_heuristic_effort", 0.0);
-    }
+    // Note: HiGHS internal heuristics (mip_heuristic_effort) are controlled
+    // separately via the HiGHS option passthrough, not by heu_ws.
     // Enforce disabled presolve even if user passed --presolve.
     highs.setOptionValue("presolve", "off");
 

@@ -12,9 +12,6 @@ namespace {
 
 constexpr double kInf = std::numeric_limits<double>::infinity();
 
-// Default constants moved to SPISeparator members; these are used as
-// fallback defaults in the anonymous-namespace helpers that take them as params.
-
 // ─────────────────────────────────────────────────────────────────────
 // Held-Karp DP: exact minimum-cost Hamiltonian path
 // ─────────────────────────────────────────────────────────────────────
