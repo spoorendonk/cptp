@@ -6,44 +6,105 @@
 #include <iostream>
 #include <string>
 
+#include "Highs.h"
 #include "core/io.h"
 #include "model/model.h"
 
 static void print_usage(const char* prog) {
+    // All parameter lines use a fixed 42-char left column so descriptions align.
     std::cerr << "cptp-solve — Capacitated Profitable Tour Problem solver\n\n"
               << "Usage: " << prog
-              << " <instance> [--source <node>] [--target <node>] [--<highs_option> <value> ...]\n"
-              << "\nOptions:\n"
-              << "  --source <node>        Source node (overrides file value)\n"
-              << "  --target <node>        Target node (overrides file value)\n"
-              << "                         If source != target, solves s-t path instead of tour\n"
-              << "  --cutoff <value>       Known UB for prove-only mode (skip finding incumbent)\n"
-              << "  --disable_heuristics true  Disable warm-start and HiGHS MIP heuristics\n"
-              << "\nSolver options:\n"
-              << "  --rc_fixing <strategy> Lagrangian reduced-cost fixing strategy:\n"
-              << "                         off (default) | root_only | on_ub_improvement | periodic | adaptive\n"
-              << "  --rc_fixing_interval N Interval for periodic strategy (default 100)\n"
-              << "  --rc_fixing_to_one true  Enable fix-to-1 for node variables (expensive)\n"
-              << "  --deterministic_work_units N  Global cap for non-HiGHS heuristic work\n"
-              << "                         (0 = uncapped/count-only, default)\n"
-              << "  --heuristic_deterministic_restarts N  Fixed restarts per callback in deterministic mode\n"
-              << "  --max_concurrent_solves N  Limit number of concurrent model solves in-process\n"
-              << "                             (0 = no per-call cap; default)\n"
-              << "  --heuristic_node_interval N  Heuristic callback cadence in B&B nodes (default 200)\n"
-              << "  --enable_sec/--enable_rci/--enable_multistar/--enable_comb/--enable_spi true|false\n"
-              << "                         Enable or disable cut families\n"
-              << "  --max_cuts_<family> N  Per-family cut cap (sec,rci,multistar,comb,rglm,spi)\n"
-              << "  --min_violation_<family> X  Per-family min violation filter\n"
-              << "  --edge_elimination true/false  Enable preprocessing edge elimination (default true)\n"
-              << "  --edge_elimination_nodes true/false  Also fix nodes if all incident edges are eliminated\n"
-              << "  --workflow_dump true/false  Print startup/solve DAG wiring (default false)\n"
-              << "  --branch_hyper_sb_max_depth/iter_limit/min_reliable/max_candidates <int>\n"
-              << "                         Hyperplane strong-branching tuning\n"
-              << "\nAll other options are forwarded to HiGHS. Common ones:\n"
-              << "  --time_limit <sec>     Time limit (default 600)\n"
-              << "  --threads <n>          Thread count\n"
-              << "  --output_flag false    Suppress HiGHS output\n"
-              << "\nSee HiGHS documentation for the full list.\n";
+              << " <instance> [--source <node>] [--target <node>] [--<option> <value> ...]\n"
+              //
+              << "\nGeneral:\n"
+              << "  --source <node>                          Source node (overrides file value)\n"
+              << "  --target <node>                          Target node (overrides file value)\n"
+              << "                                           If source != target, solves s-t path\n"
+              << "  --cutoff <value>                         Known UB for prove-only mode\n"
+              << "  --time_limit <sec>                       Wall-clock time limit (adjusted for preprocessing)\n"
+              << "  --threads N                              HiGHS thread count\n"
+              << "  --output_flag true/false                 HiGHS console output (default true)\n"
+              //
+              << "\nBounds & Preprocessing:\n"
+              << "  --two_cycle_elim_bounds true/false       2-cycle labeling bounds (default true)\n"
+              << "                                           When false, disables edge elim & propagation\n"
+              << "  --all_pairs_bounds true/false            All-pairs bounds for propagation + SPI\n"
+              << "                                           (default false)\n"
+              << "  --edge_elimination true/false            Edge elimination (default true, needs bounds)\n"
+              << "  --edge_elimination_nodes true/false      Node fixing from eliminated edges\n"
+              << "                                           (default true, needs bounds)\n"
+              //
+              << "\nPropagation:\n"
+              << "  --bounds_propagation true/false          Bounds-based domain propagation\n"
+              << "                                           (default true, needs bounds)\n"
+              << "  --rc_fixing <strategy>                   Reduced-cost fixing strategy\n"
+              << "                                           off|root_only|on_ub_improvement|periodic|adaptive\n"
+              << "  --rc_fixing_interval N                   Interval for periodic strategy (default 100)\n"
+              << "  --rc_fixing_to_one true/false            Fix-to-1 for node variables\n"
+              << "                                           (default false, expensive)\n"
+              //
+              << "\nHeuristics:\n"
+              << "  Warm-start (construction + local search):\n"
+              << "  --heu_ws true/false                      Enable warm-start heuristic (default true)\n"
+              << "  --heu_ws_ls_max_iter N                   Local search iteration limit (default 200)\n"
+              << "\n"
+              << "  LP-guided (B&C callback):\n"
+              << "  --heu_lpg true/false                     Enable LP-guided heuristic (default true)\n"
+              << "  --heu_lpg_strategy N                     0=all, 1=LP-threshold, 2=RINS, 3=neighborhood\n"
+              << "  --heu_lpg_budget_ms N                    Time budget per callback in ms (default 20)\n"
+              << "  --heu_lpg_node_interval N                Callback cadence in B&B nodes (default 200)\n"
+              << "  --heu_lpg_deterministic_restarts N       Fixed restarts per callback\n"
+              << "  --heu_lpg_edge_threshold X               LP-threshold edge cutoff (default 0.1)\n"
+              << "  --heu_lpg_node_threshold X               LP-threshold node cutoff (default 0.5)\n"
+              << "  --heu_lpg_lp_threshold X                 RINS LP edge cutoff (default 0.1)\n"
+              << "  --heu_lpg_seed_threshold X               Neighborhood seed edge cutoff (default 0.3)\n"
+              << "\n"
+              << "  HiGHS sub-MIP:\n"
+              << "  --heu_highs_submip_sec true/false        SEC in HiGHS sub-MIPs (default true)\n"
+              //
+              << "\nSeparation (global):\n"
+              << "  --separation_interval N                  Separate every N-th callback (default 1)\n"
+              << "  --separation_tol X                       Fractional separation tolerance (default 0.01)\n"
+              << "  --max_cuts_per_round N                   Global cut cap: pool all cuts, sort by\n"
+              << "                                           violation, add top N (default 10, 0=unlimited)\n"
+              //
+              << "\nSeparation (per cut family):\n"
+              << "  --enable_<family> true/false             Enable/disable a cut family\n"
+              << "  --min_violation_<family> X               Pre-filter threshold before pooling\n"
+              << "\n"
+              << "  --enable_sec true/false                  SEC (default true)\n"
+              << "  --min_violation_sec X                    SEC min violation\n"
+              << "  --enable_rci true/false                  RCI (default true)\n"
+              << "  --min_violation_rci X                    RCI min violation\n"
+              << "  --enable_multistar true/false            Multistar (default true)\n"
+              << "  --min_violation_multistar X              Multistar min violation\n"
+              << "  --enable_comb true/false                 Comb (default true)\n"
+              << "  --min_violation_comb X                   Comb min violation\n"
+              << "  --enable_rglm true/false                 RGLM (default false)\n"
+              << "  --min_violation_rglm X                   RGLM min violation\n"
+              << "\n"
+              << "  SPI (requires --all_pairs_bounds true):\n"
+              << "  --enable_spi true/false                  SPI (default true)\n"
+              << "  --min_violation_spi X                    SPI min violation\n"
+              << "  --spi_max_dp_size N                      Largest node set for exact Held-Karp\n"
+              << "                                           lower bound; O(2^N·N²) (default 15)\n"
+              << "  --spi_max_seeds N                        Infeasible pairs to grow into larger\n"
+              << "                                           cuts, most-violated first (default 50)\n"
+              << "  --spi_max_grow_candidates N              High-y nodes tried when extending a\n"
+              << "                                           seed pair (default 40)\n"
+              //
+              << "\nBranching:\n"
+              << "  --branch_hyper <mode>                    Hyperplane branching mode\n"
+              << "                                           off|pairs|clusters|demand|cardinality|all\n"
+              << "  --branch_hyper_sb_max_depth N            Strong-branching max depth\n"
+              << "  --branch_hyper_sb_iter_limit N           Strong-branching iteration limit\n"
+              << "  --branch_hyper_sb_min_reliable N         Strong-branching min reliable\n"
+              << "  --branch_hyper_sb_max_candidates N       Strong-branching max candidates\n"
+              //
+              << "\nHiGHS:\n"
+              << "  Unrecognized --key value pairs are forwarded to HiGHS.\n"
+              << "  Presolve is always disabled (cptp requires stable column mapping).\n"
+              << "  --highs_help                             Print all HiGHS options and exit\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -55,6 +116,11 @@ int main(int argc, char* argv[]) {
     std::string first_arg = argv[1];
     if (first_arg == "-h" || first_arg == "--help") {
         print_usage(argv[0]);
+        return 0;
+    }
+    if (first_arg == "--highs_help") {
+        Highs highs;
+        highs.writeOptions("");
         return 0;
     }
 
@@ -71,6 +137,10 @@ int main(int argc, char* argv[]) {
             override_source = std::stoi(argv[++i]);
         } else if (arg == "--target" && i + 1 < argc) {
             override_target = std::stoi(argv[++i]);
+        } else if (arg == "--highs_help") {
+            Highs highs;
+            highs.writeOptions("");
+            return 0;
         } else if (arg.starts_with("--") && i + 1 < argc) {
             options.emplace_back(arg.substr(2), argv[++i]);
         } else {

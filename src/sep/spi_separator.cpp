@@ -12,15 +12,8 @@ namespace {
 
 constexpr double kInf = std::numeric_limits<double>::infinity();
 
-/// Maximum set size for exact Held-Karp DP.
-/// k=15 → 2^15 * 15 entries * 8 bytes ≈ 3.7 MB.
-constexpr int32_t kMaxDPSize = 15;
-
-/// Maximum infeasible pairs to seed set-extension from.
-constexpr size_t kMaxSeeds = 50;
-
-/// Maximum candidates to try adding during greedy extension.
-constexpr size_t kMaxGrowCandidates = 40;
+// Default constants moved to SPISeparator members; these are used as
+// fallback defaults in the anonymous-namespace helpers that take them as params.
 
 // ─────────────────────────────────────────────────────────────────────
 // Held-Karp DP: exact minimum-cost Hamiltonian path
@@ -99,10 +92,11 @@ double held_karp(int32_t source, int32_t target,
 /// nodes in `set`.  Returns -∞ if the set is too large for exact DP.
 double compute_set_lb(const Problem& prob,
                       std::span<const double> all_pairs,
-                      const std::vector<int32_t>& set) {
+                      const std::vector<int32_t>& set,
+                      int32_t max_dp_size = 15) {
     const int32_t n = prob.num_nodes();
     const int32_t k = static_cast<int32_t>(set.size());
-    if (k == 0 || k > kMaxDPSize) return -kInf;
+    if (k == 0 || k > max_dp_size) return -kInf;
 
     const int32_t source = prob.source();
     const int32_t target = prob.is_tour() ? source : prob.target();
@@ -123,9 +117,10 @@ void greedy_grow(const Problem& prob,
                  std::span<const double> all_pairs,
                  double ub,
                  std::vector<int32_t>& set,
-                 const std::vector<int32_t>& candidates) {
+                 const std::vector<int32_t>& candidates,
+                 int32_t max_dp_size = 15) {
     for (size_t ci = 0; ci < candidates.size(); ++ci) {
-        if (static_cast<int32_t>(set.size()) >= kMaxDPSize) break;
+        if (static_cast<int32_t>(set.size()) >= max_dp_size) break;
 
         int32_t v = candidates[ci];
 
@@ -138,7 +133,7 @@ void greedy_grow(const Problem& prob,
 
         // Try adding
         set.push_back(v);
-        double lb = compute_set_lb(prob, all_pairs, set);
+        double lb = compute_set_lb(prob, all_pairs, set, max_dp_size);
         if (lb <= ub + 1e-6) {
             set.pop_back();  // didn't help — remove
         }
@@ -282,9 +277,10 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
               [](const Candidate& a, const Candidate& b) { return a.y > b.y; });
 
     // Flat candidate node list (y-descending) for grow phase
+    const size_t grow_cap = static_cast<size_t>(max_grow_candidates_);
     std::vector<int32_t> cand_nodes;
-    cand_nodes.reserve(std::min(cands.size(), kMaxGrowCandidates));
-    for (size_t i = 0; i < std::min(cands.size(), kMaxGrowCandidates); ++i) {
+    cand_nodes.reserve(std::min(cands.size(), grow_cap));
+    for (size_t i = 0; i < std::min(cands.size(), grow_cap); ++i) {
         cand_nodes.push_back(cands[i].node);
     }
 
@@ -310,7 +306,7 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
             double violation = yi + yj - 1.0;
             if (violation <= tol) continue;
 
-            double lb = compute_set_lb(prob, ctx.all_pairs, {i, j});
+            double lb = compute_set_lb(prob, ctx.all_pairs, {i, j}, max_dp_size_);
             if (lb > ub + 1e-6) {
                 // Lift: scan for nodes that can replace either member
                 std::vector<int32_t> base_set = {i, j};
@@ -359,14 +355,14 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
         return false;
     };
 
-    size_t num_seeds = std::min(seeds.size(), kMaxSeeds);
+    size_t num_seeds = std::min(seeds.size(), static_cast<size_t>(max_seeds_));
     for (size_t si = 0; si < num_seeds; ++si) {
         auto [pi, pj, _] = seeds[si];
 
         std::vector<int32_t> set = {pi, pj};
 
         // Grow: add high-y candidates that maintain infeasibility
-        greedy_grow(prob, ctx.all_pairs, ub, set, cand_nodes);
+        greedy_grow(prob, ctx.all_pairs, ub, set, cand_nodes, max_dp_size_);
 
         if (static_cast<int32_t>(set.size()) <= 2) continue;  // pair already emitted
 

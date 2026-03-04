@@ -1,7 +1,5 @@
 #include "model/model.h"
 #include "model/highs_bridge.h"
-#include "model/solve_concurrency_guard.h"
-
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -156,38 +154,51 @@ SolveResult Model::solve(const SolverOptions& options) {
     highs.setOptionValue("mip_pscost_minreliable", 0);
 
     // Intercept our custom options, forward the rest to HiGHS
+    // --- Bounds & Preprocessing ---
+    bool two_cycle_elim_bounds = true;
+    bool all_pairs_bounds = false;
+    bool edge_elimination = true;
+    bool edge_elimination_nodes = true;
+    bool bounds_propagation = true;
+
+    // --- Separation (global) ---
     int32_t separation_interval = 1;
-    int32_t max_cuts_per_sep = 3;  // top-k most-violated per separator per round
     double separation_tol = sep::kDefaultFracTol;
-    bool all_pairs_propagation = false;
-    bool enable_rglm = false;
-    bool submip_separation = true;
-    bool heuristic_callback = true;
-    double heuristic_budget_ms = 20.0;
-    int heuristic_strategy = 0;
-    std::string branch_hyper = "off";
-    bool output_flag = true;
-    int64_t deterministic_work_units = 0;
-    int32_t heuristic_deterministic_restarts = 32;
-    int64_t heuristic_node_interval = 200;
-    bool workflow_dump = false;
-    bool warned_legacy_internal_option = false;
-    int32_t max_concurrent_solves = 0;
+    int32_t max_cuts_per_round = 10;
+
+    // --- Heuristics: warm-start ---
+    bool heu_ws = true;
+    int32_t heu_ws_ls_max_iter = 200;
+
+    // --- Heuristics: LP-guided ---
+    bool heu_lpg = true;
+    int heu_lpg_strategy = 0;
+    double heu_lpg_budget_ms = 20.0;
+    int64_t heu_lpg_node_interval = 200;
+    int32_t heu_lpg_deterministic_restarts = 32;
+    double heu_lpg_edge_threshold = 0.1;
+    double heu_lpg_node_threshold = 0.5;
+    double heu_lpg_lp_threshold = 0.1;
+    double heu_lpg_seed_threshold = 0.3;
+
+    // --- Heuristics: HiGHS sub-MIP ---
+    bool heu_highs_submip_sec = true;
+
+    // --- SPI separator ---
+    int32_t spi_max_dp_size = 15;
+    int32_t spi_max_seeds = 50;
+    int32_t spi_max_grow_candidates = 40;
+
+    // --- RC fixing ---
+    RCFixingSettings rc_settings;
+
+    // --- Cut families ---
     bool enable_sec = true;
     bool enable_rci = true;
     bool enable_multistar = true;
     bool enable_comb = true;
+    bool enable_rglm = false;
     bool enable_spi = true;
-    bool edge_elimination = true;
-    bool edge_elimination_nodes = true;
-    double cutoff = std::numeric_limits<double>::infinity();
-    bool disable_heuristics = false;
-    int32_t preproc_fast_restarts = 12;
-    int32_t hyper_sb_max_depth = 0;
-    int32_t hyper_sb_iter_limit = 100;
-    int32_t hyper_sb_min_reliable = 4;
-    int32_t hyper_sb_max_candidates = 3;
-    RCFixingSettings rc_settings;
     int32_t max_cuts_sec = -1;
     int32_t max_cuts_rci = -1;
     int32_t max_cuts_multistar = -1;
@@ -200,129 +211,73 @@ SolveResult Model::solve(const SolverOptions& options) {
     double min_violation_comb = -1.0;
     double min_violation_rglm = -1.0;
     double min_violation_spi = -1.0;
+
+    // --- Other ---
+    std::string branch_hyper = "off";
+    bool output_flag = true;
+    double cutoff = std::numeric_limits<double>::infinity();
+    int32_t preproc_fast_restarts = 12;
+    int32_t hyper_sb_max_depth = 0;
+    int32_t hyper_sb_iter_limit = 100;
+    int32_t hyper_sb_min_reliable = 4;
+    int32_t hyper_sb_max_candidates = 3;
+
+    double user_time_limit = -1.0;  // -1 = no limit specified
+
+    bool warned_legacy_internal_option = false;
     std::map<std::string, std::string> accepted_highs_options;
     bool threads_option_explicit = false;
+
+    auto parse_bool = [](const std::string& v) {
+        return v == "true" || v == "1";
+    };
+
     for (const auto& [key, value] : options) {
         if (key == "presolve") {
-            // Our callback/cut plumbing assumes original column space and
-            // stable row/col mappings; keep presolve disabled for now.
             if (value != "off" && value != "false" && value != "0") {
                 logger_.log("Warning: option presolve={} requested, but cptp-bac currently forces presolve=off", value);
             }
             continue;
         }
-        if (key == "separation_interval") {
-            separation_interval = std::stoi(value);
-            continue;
+        // --- Bounds & Preprocessing ---
+        if (key == "two_cycle_elim_bounds") { two_cycle_elim_bounds = parse_bool(value); continue; }
+        if (key == "all_pairs_bounds" || key == "all_pairs_bounds") {
+            all_pairs_bounds = parse_bool(value); continue;
         }
-        if (key == "max_cuts_per_separator") {
-            max_cuts_per_sep = std::stoi(value);
-            continue;
+        if (key == "edge_elimination") { edge_elimination = parse_bool(value); continue; }
+        if (key == "edge_elimination_nodes") { edge_elimination_nodes = parse_bool(value); continue; }
+        if (key == "bounds_propagation") { bounds_propagation = parse_bool(value); continue; }
+        // --- Separation ---
+        if (key == "separation_interval") { separation_interval = std::stoi(value); continue; }
+        if (key == "separation_tol") { separation_tol = std::stod(value); continue; }
+        if (key == "max_cuts_per_round") { max_cuts_per_round = std::stoi(value); continue; }
+        // Legacy: accept old name
+        if (key == "max_cuts_per_separator") { max_cuts_per_round = std::stoi(value); continue; }
+        // --- Heuristics: warm-start ---
+        if (key == "heu_ws") { heu_ws = parse_bool(value); continue; }
+        if (key == "!heu_ws") { heu_ws = !parse_bool(value); continue; }
+        if (key == "heu_ws_ls_max_iter") { heu_ws_ls_max_iter = std::stoi(value); continue; }
+        // --- Heuristics: LP-guided ---
+        if (key == "heu_lpg" || key == "heuristic_callback") { heu_lpg = parse_bool(value); continue; }
+        if (key == "heu_lpg_strategy" || key == "heuristic_strategy") { heu_lpg_strategy = std::stoi(value); continue; }
+        if (key == "heu_lpg_budget_ms" || key == "heuristic_budget_ms") { heu_lpg_budget_ms = std::stod(value); continue; }
+        if (key == "heu_lpg_node_interval" || key == "heuristic_node_interval") { heu_lpg_node_interval = std::stoll(value); continue; }
+        if (key == "heu_lpg_deterministic_restarts" || key == "heuristic_deterministic_restarts") {
+            heu_lpg_deterministic_restarts = std::stoi(value); continue;
         }
-        if (key == "separation_tol") {
-            separation_tol = std::stod(value);
-            continue;
+        if (key == "heu_lpg_edge_threshold") { heu_lpg_edge_threshold = std::stod(value); continue; }
+        if (key == "heu_lpg_node_threshold") { heu_lpg_node_threshold = std::stod(value); continue; }
+        if (key == "heu_lpg_lp_threshold") { heu_lpg_lp_threshold = std::stod(value); continue; }
+        if (key == "heu_lpg_seed_threshold") { heu_lpg_seed_threshold = std::stod(value); continue; }
+        // --- Heuristics: HiGHS sub-MIP ---
+        if (key == "heu_highs_submip_sec" || key == "submip_separation") {
+            heu_highs_submip_sec = parse_bool(value); continue;
         }
-        if (key == "all_pairs_propagation") {
-            all_pairs_propagation = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "enable_rglm") {
-            enable_rglm = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "submip_separation") {
-            submip_separation = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "heuristic_callback") {
-            heuristic_callback = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "heuristic_budget_ms") {
-            heuristic_budget_ms = std::stod(value);
-            continue;
-        }
-        if (key == "heuristic_strategy") {
-            heuristic_strategy = std::stoi(value);
-            continue;
-        }
-        if (key == "heuristic_node_interval") {
-            heuristic_node_interval = std::stoll(value);
-            continue;
-        }
-        if (key == "workflow_dump") {
-            workflow_dump = (value == "true" || value == "1");
-            continue;
-        }
-        if (key.rfind("_internal_", 0) == 0) {
-            if (!warned_legacy_internal_option) {
-                logger_.log("Warning: internal options are no longer supported and will be ignored");
-                warned_legacy_internal_option = true;
-            }
-            continue;
-        }
-        if (key == "deterministic_work_units") {
-            deterministic_work_units = std::stoll(value);
-            continue;
-        }
-        if (key == "heuristic_deterministic_restarts") {
-            heuristic_deterministic_restarts = std::stoi(value);
-            continue;
-        }
-        if (key == "branch_hyper") {
-            branch_hyper = value;
-            continue;
-        }
-        if (key == "cutoff") {
-            cutoff = std::stod(value);
-            continue;
-        }
-        if (key == "max_concurrent_solves") {
-            max_concurrent_solves = std::stoi(value);
-            continue;
-        }
-        if (key == "enable_sec") {
-            enable_sec = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "enable_rci") {
-            enable_rci = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "enable_multistar") {
-            enable_multistar = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "enable_comb") {
-            enable_comb = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "enable_spi") {
-            enable_spi = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "edge_elimination") {
-            edge_elimination = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "edge_elimination_nodes") {
-            edge_elimination_nodes = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "disable_heuristics") {
-            disable_heuristics = (value == "true" || value == "1");
-            continue;
-        }
-        if (key == "preproc_stage1_bounds" || key == "ng_initial_size" ||
-            key == "ng_max_size" || key == "ng_dssr_iters" || key == "ng_simd") {
-            logger_.log("Warning: ng-DSSR option {}={} ignored (ng-DSSR removed, using 2-cycle bounds)", key, value);
-            continue;
-        }
-        if (key == "preproc_fast_restarts") {
-            preproc_fast_restarts = std::stoi(value);
-            continue;
-        }
+        // --- SPI separator ---
+        if (key == "spi_max_dp_size") { spi_max_dp_size = std::stoi(value); continue; }
+        if (key == "spi_max_seeds") { spi_max_seeds = std::stoi(value); continue; }
+        if (key == "spi_max_grow_candidates") { spi_max_grow_candidates = std::stoi(value); continue; }
+        // --- RC fixing ---
         if (key == "rc_fixing") {
             if (value == "root_only") rc_settings.strategy = RCFixingStrategy::root_only;
             else if (value == "on_ub_improvement") rc_settings.strategy = RCFixingStrategy::on_ub_improvement;
@@ -331,80 +286,52 @@ SolveResult Model::solve(const SolverOptions& options) {
             else rc_settings.strategy = RCFixingStrategy::off;
             continue;
         }
-        if (key == "rc_fixing_interval") {
-            rc_settings.periodic_interval = std::stoi(value);
+        if (key == "rc_fixing_interval") { rc_settings.periodic_interval = std::stoi(value); continue; }
+        if (key == "rc_fixing_to_one") { rc_settings.fix_to_one = parse_bool(value); continue; }
+        // --- Cut families ---
+        if (key == "enable_sec") { enable_sec = parse_bool(value); continue; }
+        if (key == "enable_rci") { enable_rci = parse_bool(value); continue; }
+        if (key == "enable_multistar") { enable_multistar = parse_bool(value); continue; }
+        if (key == "enable_comb") { enable_comb = parse_bool(value); continue; }
+        if (key == "enable_rglm") { enable_rglm = parse_bool(value); continue; }
+        if (key == "enable_spi") { enable_spi = parse_bool(value); continue; }
+        if (key == "max_cuts_sec") { max_cuts_sec = std::stoi(value); continue; }
+        if (key == "max_cuts_rci") { max_cuts_rci = std::stoi(value); continue; }
+        if (key == "max_cuts_multistar") { max_cuts_multistar = std::stoi(value); continue; }
+        if (key == "max_cuts_comb") { max_cuts_comb = std::stoi(value); continue; }
+        if (key == "max_cuts_rglm") { max_cuts_rglm = std::stoi(value); continue; }
+        if (key == "max_cuts_spi") { max_cuts_spi = std::stoi(value); continue; }
+        if (key == "min_violation_sec") { min_violation_sec = std::stod(value); continue; }
+        if (key == "min_violation_rci") { min_violation_rci = std::stod(value); continue; }
+        if (key == "min_violation_multistar") { min_violation_multistar = std::stod(value); continue; }
+        if (key == "min_violation_comb") { min_violation_comb = std::stod(value); continue; }
+        if (key == "min_violation_rglm") { min_violation_rglm = std::stod(value); continue; }
+        if (key == "min_violation_spi") { min_violation_spi = std::stod(value); continue; }
+        // --- Other ---
+        if (key == "cutoff") { cutoff = std::stod(value); continue; }
+        if (key == "branch_hyper") { branch_hyper = value; continue; }
+        if (key == "preproc_fast_restarts") { preproc_fast_restarts = std::stoi(value); continue; }
+        if (key == "branch_hyper_sb_max_depth") { hyper_sb_max_depth = std::stoi(value); continue; }
+        if (key == "branch_hyper_sb_iter_limit") { hyper_sb_iter_limit = std::stoi(value); continue; }
+        if (key == "branch_hyper_sb_min_reliable") { hyper_sb_min_reliable = std::stoi(value); continue; }
+        if (key == "branch_hyper_sb_max_candidates") { hyper_sb_max_candidates = std::stoi(value); continue; }
+        if (key == "output_flag") { output_flag = parse_bool(value); continue; }
+        if (key.rfind("_internal_", 0) == 0) {
+            if (!warned_legacy_internal_option) {
+                logger_.log("Warning: internal options are no longer supported and will be ignored");
+                warned_legacy_internal_option = true;
+            }
             continue;
         }
-        if (key == "rc_fixing_to_one") {
-            rc_settings.fix_to_one = (value == "true" || value == "1");
+        if (key == "preproc_stage1_bounds" || key == "ng_initial_size" ||
+            key == "ng_max_size" || key == "ng_dssr_iters" || key == "ng_simd") {
+            logger_.log("Warning: ng-DSSR option {}={} ignored (ng-DSSR removed, using 2-cycle bounds)", key, value);
             continue;
         }
-        if (key == "branch_hyper_sb_max_depth") {
-            hyper_sb_max_depth = std::stoi(value);
-            continue;
-        }
-        if (key == "branch_hyper_sb_iter_limit") {
-            hyper_sb_iter_limit = std::stoi(value);
-            continue;
-        }
-        if (key == "branch_hyper_sb_min_reliable") {
-            hyper_sb_min_reliable = std::stoi(value);
-            continue;
-        }
-        if (key == "branch_hyper_sb_max_candidates") {
-            hyper_sb_max_candidates = std::stoi(value);
-            continue;
-        }
-        if (key == "max_cuts_sec") {
-            max_cuts_sec = std::stoi(value);
-            continue;
-        }
-        if (key == "max_cuts_rci") {
-            max_cuts_rci = std::stoi(value);
-            continue;
-        }
-        if (key == "max_cuts_multistar") {
-            max_cuts_multistar = std::stoi(value);
-            continue;
-        }
-        if (key == "max_cuts_comb") {
-            max_cuts_comb = std::stoi(value);
-            continue;
-        }
-        if (key == "max_cuts_rglm") {
-            max_cuts_rglm = std::stoi(value);
-            continue;
-        }
-        if (key == "max_cuts_spi") {
-            max_cuts_spi = std::stoi(value);
-            continue;
-        }
-        if (key == "min_violation_sec") {
-            min_violation_sec = std::stod(value);
-            continue;
-        }
-        if (key == "min_violation_rci") {
-            min_violation_rci = std::stod(value);
-            continue;
-        }
-        if (key == "min_violation_multistar") {
-            min_violation_multistar = std::stod(value);
-            continue;
-        }
-        if (key == "min_violation_comb") {
-            min_violation_comb = std::stod(value);
-            continue;
-        }
-        if (key == "min_violation_rglm") {
-            min_violation_rglm = std::stod(value);
-            continue;
-        }
-        if (key == "min_violation_spi") {
-            min_violation_spi = std::stod(value);
-            continue;
-        }
-        if (key == "output_flag") {
-            output_flag = (value == "true" || value == "1");
+        if (key == "time_limit") {
+            user_time_limit = std::stod(value);
+            // Don't set on HiGHS yet; we adjust for preprocessing time later.
+            accepted_highs_options[key] = value;
             continue;
         }
         auto status = highs.setOptionValue(key, value);
@@ -416,12 +343,20 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
+    // Cascading disables: two_cycle_elim_bounds=false disables bounds-dependent features
+    if (!two_cycle_elim_bounds) {
+        edge_elimination = false;
+        edge_elimination_nodes = false;
+        bounds_propagation = false;
+        all_pairs_bounds = false;
+        logger_.log("two_cycle_elim_bounds=false: cascading off edge_elimination, edge_elimination_nodes, bounds_propagation, all_pairs_bounds");
+    }
+
     preproc_fast_restarts = std::max<int32_t>(1, preproc_fast_restarts);
-    heuristic_node_interval = std::max<int64_t>(1, heuristic_node_interval);
-    deterministic_work_units = std::max<int64_t>(0, deterministic_work_units);
-    heuristic_deterministic_restarts =
-        std::max<int32_t>(1, heuristic_deterministic_restarts);
-    max_concurrent_solves = std::max<int32_t>(0, max_concurrent_solves);
+    heu_lpg_node_interval = std::max<int64_t>(1, heu_lpg_node_interval);
+    heu_lpg_deterministic_restarts =
+        std::max<int32_t>(1, heu_lpg_deterministic_restarts);
+    heu_ws_ls_max_iter = std::max<int32_t>(1, heu_ws_ls_max_iter);
     hyper_sb_iter_limit = std::max<int32_t>(1, hyper_sb_iter_limit);
     hyper_sb_min_reliable = std::max<int32_t>(1, hyper_sb_min_reliable);
     hyper_sb_max_candidates = std::max<int32_t>(1, hyper_sb_max_candidates);
@@ -481,32 +416,47 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::vector<std::string> nondefault_settings;
     nondefault_settings.push_back("presolve=off");
     nondefault_settings.push_back("mip_pscost_minreliable=0");
+    if (!two_cycle_elim_bounds) nondefault_settings.push_back("two_cycle_elim_bounds=off");
+    if (all_pairs_bounds) nondefault_settings.push_back("all_pairs_bounds=on");
+    if (!edge_elimination) nondefault_settings.push_back("edge_elimination=off");
+    if (!edge_elimination_nodes) nondefault_settings.push_back("edge_elimination_nodes=off");
+    if (!bounds_propagation) nondefault_settings.push_back("bounds_propagation=off");
     if (separation_interval != 1) {
         nondefault_settings.push_back(
             "separation_interval=" + std::to_string(separation_interval));
     }
-    if (max_cuts_per_sep != 3) {
+    if (max_cuts_per_round != 10) {
         nondefault_settings.push_back(
-            "max_cuts_per_separator=" + std::to_string(max_cuts_per_sep));
+            "max_cuts_per_round=" + std::to_string(max_cuts_per_round));
     }
-    if (all_pairs_propagation) nondefault_settings.push_back("all_pairs_propagation=on");
-    if (disable_heuristics) nondefault_settings.push_back("disable_heuristics=on");
-    if (!edge_elimination) nondefault_settings.push_back("edge_elimination=off");
-    if (!edge_elimination_nodes) nondefault_settings.push_back("edge_elimination_nodes=off");
+    if (!heu_ws) nondefault_settings.push_back("heu_ws=off");
+    if (heu_ws_ls_max_iter != 200) {
+        nondefault_settings.push_back(
+            "heu_ws_ls_max_iter=" + std::to_string(heu_ws_ls_max_iter));
+    }
+    if (!heu_lpg) nondefault_settings.push_back("heu_lpg=off");
+    if (heu_lpg_strategy != 0) {
+        nondefault_settings.push_back(
+            "heu_lpg_strategy=" + std::to_string(heu_lpg_strategy));
+    }
+    if (heu_lpg_node_interval != 200) {
+        nondefault_settings.push_back(
+            "heu_lpg_node_interval=" + std::to_string(heu_lpg_node_interval));
+    }
+    if (heu_lpg_deterministic_restarts != 32) {
+        nondefault_settings.push_back(
+            "heu_lpg_deterministic_restarts="
+            + std::to_string(heu_lpg_deterministic_restarts));
+    }
+    if (heu_lpg_edge_threshold != 0.1) nondefault_settings.push_back("heu_lpg_edge_threshold=" + std::to_string(heu_lpg_edge_threshold));
+    if (heu_lpg_node_threshold != 0.5) nondefault_settings.push_back("heu_lpg_node_threshold=" + std::to_string(heu_lpg_node_threshold));
+    if (heu_lpg_lp_threshold != 0.1) nondefault_settings.push_back("heu_lpg_lp_threshold=" + std::to_string(heu_lpg_lp_threshold));
+    if (heu_lpg_seed_threshold != 0.3) nondefault_settings.push_back("heu_lpg_seed_threshold=" + std::to_string(heu_lpg_seed_threshold));
+    if (!heu_highs_submip_sec) nondefault_settings.push_back("heu_highs_submip_sec=off");
+    if (spi_max_dp_size != 15) nondefault_settings.push_back("spi_max_dp_size=" + std::to_string(spi_max_dp_size));
+    if (spi_max_seeds != 50) nondefault_settings.push_back("spi_max_seeds=" + std::to_string(spi_max_seeds));
+    if (spi_max_grow_candidates != 40) nondefault_settings.push_back("spi_max_grow_candidates=" + std::to_string(spi_max_grow_candidates));
     if (branch_hyper != "off") nondefault_settings.push_back("branch_hyper=" + branch_hyper);
-    if (deterministic_work_units > 0) {
-        nondefault_settings.push_back(
-            "deterministic_work_units=" + std::to_string(deterministic_work_units));
-    }
-    if (heuristic_node_interval != 200) {
-        nondefault_settings.push_back(
-            "heuristic_node_interval=" + std::to_string(heuristic_node_interval));
-    }
-    if (heuristic_deterministic_restarts != 32) {
-        nondefault_settings.push_back(
-            "heuristic_deterministic_restarts="
-            + std::to_string(heuristic_deterministic_restarts));
-    }
     if (preproc_fast_restarts != 12) {
         nondefault_settings.push_back(
             "preproc_fast_restarts=" + std::to_string(preproc_fast_restarts));
@@ -533,11 +483,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     logger_.log("  Settings  : {}", settings_summary);
 
-    auto non_highs_work_budget =
-        std::make_shared<WorkUnitBudget>(deterministic_work_units);
-
-    model_detail::SolveConcurrencyGuard solve_guard(max_concurrent_solves);
-
     // When cutoff is provided, set HiGHS objective_bound for node pruning.
     // This sets the initial upper_limit in the MIP solver, enabling pruning
     // of nodes whose LP bound exceeds the cutoff.
@@ -545,7 +490,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (cutoff < std::numeric_limits<double>::infinity()) {
         highs.setOptionValue("objective_bound", cutoff);
     }
-    if (disable_heuristics) {
+    if (!heu_ws) {
         highs.setOptionValue("mip_heuristic_effort", 0.0);
     }
     // Enforce disabled presolve even if user passed --presolve.
@@ -580,48 +525,42 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     {
         Timer preproc_timer;
-        if (workflow_dump) {
-            logger_.log("Workflow DAG (startup):");
-            logger_.log("  Stage1 [Bounds] -> backend=two_cycle");
-            logger_.log("  Stage2 [Construction] -> seed 1/2-customer tours/paths");
-            logger_.log("  Stage3 [EdgeElim on construction UB]");
-            logger_.log("  Stage4 [Parallel local search on reduced graph] -> optional all-pairs bounds");
-            logger_.log("  Stage5 [EdgeElim on local-search UB]");
-            logger_.log("  Stage6 [HiGHS] -> highs.run()");
-        }
-        logger_.log("Startup Stage1 [Bounds]: backend=two_cycle (source={}, target={})",
-                    source, target);
-
         tbb::task_arena preproc_arena(preproc_thread_limit);
-        preproc_arena.execute([&] {
-            tbb::task_group stage1_tg;
-            stage1_tg.run([&] {
-                fwd_bounds = preprocess::labeling_from(problem_, source);
-            });
-            if (source != target) {
+        if (two_cycle_elim_bounds) {
+            logger_.log("Startup Stage1 [Bounds]: backend=two_cycle (source={}, target={})",
+                        source, target);
+            preproc_arena.execute([&] {
+                tbb::task_group stage1_tg;
                 stage1_tg.run([&] {
-                    bwd_bounds = preprocess::labeling_from(problem_, target);
+                    fwd_bounds = preprocess::labeling_from(problem_, source);
                 });
+                if (source != target) {
+                    stage1_tg.run([&] {
+                        bwd_bounds = preprocess::labeling_from(problem_, target);
+                    });
+                }
+                stage1_tg.wait();
+            });
+            if (source == target) {
+                bwd_bounds = fwd_bounds;
             }
-            stage1_tg.wait();
-        });
-        if (source == target) {
-            bwd_bounds = fwd_bounds;
+            logger_.log(
+                "Startup Stage1 [Bounds] done: fwd_finite={}/{}, bwd_finite={}/{}, fwd[target]={}",
+                count_finite_bounds(fwd_bounds), n,
+                count_finite_bounds(bwd_bounds), n,
+                (target >= 0 && target < n && target < static_cast<int32_t>(fwd_bounds.size()))
+                    ? fwd_bounds[static_cast<size_t>(target)]
+                    : std::numeric_limits<double>::infinity());
+        } else {
+            logger_.log("Startup Stage1 [Bounds] skipped: two_cycle_elim_bounds=false");
         }
-        logger_.log(
-            "Startup Stage1 [Bounds] done: fwd_finite={}/{}, bwd_finite={}/{}, fwd[target]={}",
-            count_finite_bounds(fwd_bounds), n,
-            count_finite_bounds(bwd_bounds), n,
-            (target >= 0 && target < n && target < static_cast<int32_t>(fwd_bounds.size()))
-                ? fwd_bounds[static_cast<size_t>(target)]
-                : std::numeric_limits<double>::infinity());
         heuristic::ConstructionPool construction_pool;
         heuristic::HeuristicResult construction_start{{}, std::numeric_limits<double>::infinity()};
         heuristic::HeuristicResult ls_stage4{{}, std::numeric_limits<double>::infinity()};
         double construction_ub = std::numeric_limits<double>::infinity();
         std::vector<bool> stage3_edge_active;
 
-        if (!disable_heuristics) {
+        if (heu_ws) {
             const int32_t candidate_cap = std::max<int32_t>(
                 preproc_fast_restarts, preproc_thread_limit);
             construction_pool = heuristic::build_construction_pool(
@@ -637,7 +576,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                 logger_.log("Startup Stage2 [Construction] done: no feasible incumbent");
             }
         } else {
-            logger_.log("Startup Stage2 [Construction] skipped: disable_heuristics=true");
+            logger_.log("Startup Stage2 [Construction] skipped: heu_ws=false");
         }
 
         if (cutoff >= std::numeric_limits<double>::infinity()) {
@@ -677,21 +616,21 @@ SolveResult Model::solve(const SolverOptions& options) {
 
         preproc_arena.execute([&] {
             tbb::task_group stage4_tg;
-            if (!disable_heuristics && !construction_pool.candidates.empty()) {
+            if (heu_ws && !construction_pool.candidates.empty()) {
                 logger_.log(
-                    "Startup Stage4 [Parallel local search on reduced graph]: starts={}, max_iter=200",
-                    preproc_thread_limit);
+                    "Startup Stage4 [Parallel local search on reduced graph]: starts={}, max_iter={}",
+                    preproc_thread_limit, heu_ws_ls_max_iter);
                 stage4_tg.run([&] {
                     ls_stage4 = heuristic::run_local_search_from_pool(
-                        problem_, construction_pool, preproc_thread_limit, 200,
-                        non_highs_work_budget, preproc_thread_limit,
+                        problem_, construction_pool, preproc_thread_limit, heu_ws_ls_max_iter,
+                        preproc_thread_limit,
                         stage3_edge_active);
                 });
             } else {
                 logger_.log("Startup Stage4 [Parallel local search on reduced graph] skipped");
             }
 
-            if (all_pairs_propagation) {
+            if (all_pairs_bounds) {
                 logger_.log("Startup Stage4 [Parallel local search on reduced graph]: all-pairs 2-cycle bounds running");
                 stage4_tg.run([&] {
                     constexpr double inf = std::numeric_limits<double>::infinity();
@@ -718,7 +657,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                         ls_stage4.objective);
         }
 
-        if (all_pairs_propagation && !all_pairs.empty()) {
+        if (all_pairs_bounds && !all_pairs.empty()) {
             fwd_bounds.assign(
                 all_pairs.begin() + static_cast<ptrdiff_t>(source) * n,
                 all_pairs.begin() + static_cast<ptrdiff_t>(source) * n + n);
@@ -770,16 +709,15 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::vector<int8_t> fixed_y(static_cast<size_t>(n), static_cast<int8_t>(-1));
     HiGHSBridge bridge(problem_, highs, logger_, separation_tol);
     bridge.set_separation_interval(separation_interval);
-    bridge.set_max_cuts_per_separator(max_cuts_per_sep);
-    bridge.set_submip_separation(submip_separation);
+    bridge.set_max_cuts_per_round(max_cuts_per_round);
+    bridge.set_submip_separation(heu_highs_submip_sec);
     bridge.set_upper_bound(warm_start_ub);
     bridge.set_rc_fixing(rc_settings);
     bridge.set_edge_elimination(edge_elimination);
     bridge.set_edge_elimination_nodes(edge_elimination_nodes);
-    bridge.set_heuristic_node_interval(heuristic_node_interval);
-    bridge.set_heuristic_deterministic_restarts(heuristic_deterministic_restarts);
+    bridge.set_heuristic_node_interval(heu_lpg_node_interval);
+    bridge.set_heuristic_deterministic_restarts(heu_lpg_deterministic_restarts);
     bridge.set_fixed_y(fixed_y);
-    bridge.set_work_unit_budget(non_highs_work_budget);
     if (max_cuts_sec >= 0) bridge.set_separator_max_cuts("SEC", max_cuts_sec);
     if (max_cuts_rci >= 0) bridge.set_separator_max_cuts("RCI", max_cuts_rci);
     if (max_cuts_multistar >= 0) bridge.set_separator_max_cuts("Multistar", max_cuts_multistar);
@@ -793,13 +731,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (min_violation_rglm >= 0.0) bridge.set_separator_min_violation("RGLM", min_violation_rglm);
     if (min_violation_spi >= 0.0) bridge.set_separator_min_violation("SPI", min_violation_spi);
 
-    if (workflow_dump) {
-        logger_.log("Workflow DAG (solve):");
-        logger_.log("  build_formulation -> highs.run() with callbacks");
-    }
-
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
-    if (all_pairs_propagation) {
+    if (all_pairs_bounds) {
         bridge.set_all_pairs_bounds(std::move(all_pairs));
     }
 
@@ -814,8 +747,13 @@ SolveResult Model::solve(const SolverOptions& options) {
         bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
     if (enable_comb)
         bridge.add_separator(std::make_unique<sep::CombSeparator>());
-    if (all_pairs_propagation && enable_spi)
-        bridge.add_separator(std::make_unique<sep::SPISeparator>());
+    if (all_pairs_bounds && enable_spi) {
+        auto spi = std::make_unique<sep::SPISeparator>();
+        spi->set_max_dp_size(spi_max_dp_size);
+        spi->set_max_seeds(spi_max_seeds);
+        spi->set_max_grow_candidates(spi_max_grow_candidates);
+        bridge.add_separator(std::move(spi));
+    }
 
     bridge.build_formulation();
     {
@@ -1039,12 +977,17 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     bridge.install_separators();
     bridge.install_propagator();
-    bridge.set_heuristic_callback(heuristic_callback);
-    bridge.set_heuristic_budget_ms(heuristic_budget_ms);
-    bridge.set_heuristic_strategy(heuristic_strategy);
+    bridge.set_heuristic_callback(heu_lpg);
+    bridge.set_heuristic_budget_ms(heu_lpg_budget_ms);
+    bridge.set_heuristic_strategy(heu_lpg_strategy);
+    bridge.set_heu_lpg_edge_threshold(heu_lpg_edge_threshold);
+    bridge.set_heu_lpg_node_threshold(heu_lpg_node_threshold);
+    bridge.set_heu_lpg_lp_threshold(heu_lpg_lp_threshold);
+    bridge.set_heu_lpg_seed_threshold(heu_lpg_seed_threshold);
+    bridge.set_bounds_propagation(bounds_propagation);
     bridge.install_heuristic_callback();
 
-    if (!disable_heuristics && has_feasible_heuristic(warm_start)) {
+    if (heu_ws && has_feasible_heuristic(warm_start)) {
         // Pass heuristic solution to HiGHS (skip if heuristics disabled)
         HighsSolution start;
         start.value_valid = true;
@@ -1055,7 +998,16 @@ SolveResult Model::solve(const SolverOptions& options) {
         highs.setSolution(start);
     }
 
-    logger_.log("Startup Stage6 [HiGHS]: launching highs.run()");
+    // Adjust time_limit to account for preprocessing time already spent.
+    if (user_time_limit > 0.0) {
+        double remaining = user_time_limit - timer.elapsed_seconds();
+        if (remaining < 0.1) remaining = 0.1;  // give HiGHS at least 0.1s
+        highs.setOptionValue("time_limit", remaining);
+        logger_.log("Startup Stage6 [HiGHS]: launching highs.run() (time_limit {:.2f}s, {:.2f}s used by preprocessing)",
+                    remaining, user_time_limit - remaining);
+    } else {
+        logger_.log("Startup Stage6 [HiGHS]: launching highs.run()");
+    }
     highs.run();
 
     // Clear static callbacks/state to avoid leaking between solves
@@ -1063,16 +1015,6 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     auto result = bridge.extract_result();
     result.time_seconds = timer.elapsed_seconds();
-    if (non_highs_work_budget && non_highs_work_budget->used() > 0) {
-        if (non_highs_work_budget->capped()) {
-            logger_.log("Non-HiGHS work units used: {}/{}",
-                        non_highs_work_budget->used(),
-                        non_highs_work_budget->limit());
-        } else {
-            logger_.log("Non-HiGHS work units used: {} (uncapped)",
-                        non_highs_work_budget->used());
-        }
-    }
 
     return result;
 }

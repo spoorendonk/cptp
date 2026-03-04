@@ -174,7 +174,7 @@ TEST_CASE("Model solves s-t path instance", "[model][path]") {
     }
 }
 
-TEST_CASE("Model path: disable_heuristics still keeps optimal objective",
+TEST_CASE("Model path: heu_ws=false still keeps optimal objective",
           "[model][path][regression]") {
     cptp::Model model;
 
@@ -192,7 +192,7 @@ TEST_CASE("Model path: disable_heuristics still keeps optimal objective",
     model.add_capacity_resource(demands, 7.0);
 
     auto opts = quiet;
-    opts.push_back({"disable_heuristics", "true"});
+    opts.push_back({"heu_ws", "false"});
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -221,7 +221,7 @@ TEST_CASE("Model path: async incumbent proof handoff does not stop without solut
     model.add_capacity_resource(demands, 7.0);
 
     auto opts = quiet;
-    opts.push_back({"disable_heuristics", "true"});  // no initial setSolution
+    opts.push_back({"heu_ws", "false"});  // no initial setSolution
 
     auto result = model.solve(opts);
 
@@ -303,7 +303,7 @@ TEST_CASE("Model: submip_separation=false produces valid result", "[model]") {
     model.add_capacity_resource(demands, 10.0);
 
     auto opts = quiet;
-    opts.push_back({"submip_separation", "false"});
+    opts.push_back({"heu_highs_submip_sec", "false"});
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -328,7 +328,7 @@ TEST_CASE("Model: submip_separation=true produces valid result", "[model]") {
     model.add_capacity_resource(demands, 10.0);
 
     auto opts = quiet;
-    opts.push_back({"submip_separation", "true"});
+    opts.push_back({"heu_highs_submip_sec", "true"});
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -353,10 +353,8 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
     model.add_capacity_resource(demands, 7.0);
 
     auto opts = quiet;
-    opts.push_back({"max_concurrent_solves", "1"});
-    opts.push_back({"deterministic_work_units", "128"});
-    opts.push_back({"heuristic_deterministic_restarts", "8"});
-    opts.push_back({"heuristic_node_interval", "50"});
+    opts.push_back({"heu_lpg_deterministic_restarts", "8"});
+    opts.push_back({"heu_lpg_node_interval", "50"});
     opts.push_back({"enable_sec", "true"});
     opts.push_back({"enable_rci", "true"});
     opts.push_back({"enable_multistar", "true"});
@@ -397,8 +395,7 @@ TEST_CASE("Model: deterministic work-unit settings produce stable repeated solve
 
     auto opts = quiet;
     opts.push_back({"threads", "1"});
-    opts.push_back({"deterministic_work_units", "64"});
-    opts.push_back({"heuristic_deterministic_restarts", "8"});
+    opts.push_back({"heu_lpg_deterministic_restarts", "8"});
 
     auto r1 = model.solve(opts);
     auto r2 = model.solve(opts);
@@ -514,7 +511,7 @@ TEST_CASE("Model: connectivity check still enforced with SEC off and submip sepa
     opts.push_back({"enable_comb", "false"});
     opts.push_back({"enable_rglm", "false"});
     opts.push_back({"enable_spi", "false"});
-    opts.push_back({"submip_separation", "false"});
+    opts.push_back({"heu_highs_submip_sec", "false"});
     auto result = model.solve(opts);
 
     REQUIRE(result.is_optimal());
@@ -541,13 +538,13 @@ TEST_CASE("Model: edge elimination toggles preserve tiny optimum", "[model][opti
 
     auto opts_on = quiet;
     opts_on.push_back({"cutoff", "-11.0"});
-    opts_on.push_back({"disable_heuristics", "true"});
+    opts_on.push_back({"heu_ws", "false"});
     opts_on.push_back({"edge_elimination", "true"});
     opts_on.push_back({"edge_elimination_nodes", "true"});
 
     auto opts_off = quiet;
     opts_off.push_back({"cutoff", "-11.0"});
-    opts_off.push_back({"disable_heuristics", "true"});
+    opts_off.push_back({"heu_ws", "false"});
     opts_off.push_back({"edge_elimination", "false"});
     opts_off.push_back({"edge_elimination_nodes", "false"});
 
@@ -674,8 +671,7 @@ TEST_CASE("Model: deterministic parallel settings preserve objective",
     cptp::Model staged_model;
     setup_path_model(staged_model);
     auto staged_opts = quiet;
-    staged_opts.push_back({"deterministic_work_units", "64"});
-    staged_opts.push_back({"heuristic_deterministic_restarts", "8"});
+    staged_opts.push_back({"heu_lpg_deterministic_restarts", "8"});
     staged_opts.push_back({"preproc_fast_restarts", "4"});
     auto staged = staged_model.solve(staged_opts);
     REQUIRE(staged.has_solution());

@@ -4,7 +4,6 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <numeric>
 #include <random>
 #include <span>
@@ -15,8 +14,6 @@
 
 #include "core/problem.h"
 #include "preprocess/edge_elimination.h"
-#include "util/work_unit_budget.h"
-
 namespace cptp::heuristic {
 
 /// Subset of the original problem's edges/nodes, built from LP relaxation values.
@@ -713,7 +710,6 @@ inline HeuristicResult run_local_search_from_pool(
     const ConstructionPool& pool,
     int num_starts,
     int max_ls_iter = 200,
-    const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr,
     int32_t max_workers = 0,
     const std::vector<bool>& edge_active_override = {}) {
     if (pool.candidates.empty()) {
@@ -723,10 +719,6 @@ inline HeuristicResult run_local_search_from_pool(
     const std::vector<bool>& edge_active =
         edge_active_override.empty() ? pool.edge_active : edge_active_override;
     int starts = std::clamp(num_starts, 1, static_cast<int>(pool.candidates.size()));
-    if (work_budget) {
-        starts = static_cast<int>(
-            std::min<int64_t>(starts, work_budget->reserve_up_to(starts)));
-    }
     if (starts <= 0) {
         return {{}, detail::kNoSolution};
     }
@@ -785,7 +777,6 @@ inline HeuristicResult run_local_search_from_pool(
 inline HeuristicResult build_initial_solution(const Problem& prob,
                                               int num_restarts = 50,
                                               double time_budget_ms = 0.0,
-                                              const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr,
                                               std::span<const double> fwd_bounds = {},
                                               std::span<const double> bwd_bounds = {},
                                               double correction = 0.0,
@@ -803,7 +794,7 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
         candidate_cap,
         std::max<int32_t>(1, max_workers > 0 ? max_workers : num_restarts));
     auto improved = run_local_search_from_pool(
-        prob, pool, ls_starts, 200, work_budget, max_workers);
+        prob, pool, ls_starts, 200, max_workers);
 
     if (improved.col_values.empty()
         || improved.objective > construction.objective + 1e-12) {
@@ -816,14 +807,13 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
 inline HeuristicResult build_warm_start(const Problem& prob,
                                         int num_restarts = 50,
                                         double time_budget_ms = 0.0,
-                                        const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr,
                                         std::span<const double> fwd_bounds = {},
                                         std::span<const double> bwd_bounds = {},
                                         double correction = 0.0,
                                         double upper_bound = std::numeric_limits<double>::infinity(),
                                         int32_t max_workers = 0) {
     return build_initial_solution(
-        prob, num_restarts, time_budget_ms, work_budget,
+        prob, num_restarts, time_budget_ms,
         fwd_bounds, bwd_bounds, correction, upper_bound, max_workers);
 }
 
@@ -840,7 +830,10 @@ inline HeuristicResult lp_guided_heuristic(
     int strategy = 0,
     int max_restarts = 0,
     uint32_t restart_seed = 0,
-    const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr) {
+    double edge_threshold = 0.1,
+    double node_threshold = 0.5,
+    double lp_threshold = 0.1,
+    double seed_threshold = 0.3) {
 
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
@@ -851,11 +844,11 @@ inline HeuristicResult lp_guided_heuristic(
     // Build reduced graphs for selected strategies
     std::vector<ReducedGraph> graphs;
     if (strategy == 0 || strategy == 1)
-        graphs.push_back(reduce_lp_threshold(prob, x_lp, y_lp));
+        graphs.push_back(reduce_lp_threshold(prob, x_lp, y_lp, edge_threshold, node_threshold));
     if (strategy == 0 || strategy == 2)
-        graphs.push_back(reduce_rins(prob, x_lp, y_lp, incumbent));
+        graphs.push_back(reduce_rins(prob, x_lp, y_lp, incumbent, lp_threshold));
     if (strategy == 0 || strategy == 3)
-        graphs.push_back(reduce_neighborhood(prob, x_lp, y_lp));
+        graphs.push_back(reduce_neighborhood(prob, x_lp, y_lp, seed_threshold));
 
     std::vector<const ReducedGraph*> strategies;
     for (auto& g : graphs) strategies.push_back(&g);
@@ -892,11 +885,6 @@ inline HeuristicResult lp_guided_heuristic(
     const int restart_target =
         (max_restarts > 0) ? max_restarts : std::max(1, 8 * num_strategies);
     int total_restarts = restart_target;
-    if (work_budget) {
-        total_restarts = static_cast<int>(
-            std::min<int64_t>(total_restarts,
-                work_budget->reserve_up_to(total_restarts)));
-    }
     if (total_restarts <= 0) {
         return {{}, detail::kNoSolution};
     }

@@ -69,7 +69,7 @@ for inst in "${INSTANCES[@]}"; do
 
     # Baseline: no SPI
     result_off=$("$SOLVER" "$INST_DIR/$inst" $BASE_OPTS \
-        --all_pairs_propagation false 2>/dev/null | grep "Objective:" || echo "FAILED")
+        --all_pairs_bounds false 2>/dev/null | grep "Objective:" || echo "FAILED")
 
     printf "%-25s %4s " "$inst" "OFF"
     if [[ "$result_off" == "FAILED" ]]; then
@@ -86,7 +86,7 @@ for inst in "${INSTANCES[@]}"; do
 
     # SPI enabled
     result_on=$("$SOLVER" "$INST_DIR/$inst" $BASE_OPTS \
-        --all_pairs_propagation true 2>/dev/null | grep "Objective:" || echo "FAILED")
+        --all_pairs_bounds true 2>/dev/null | grep "Objective:" || echo "FAILED")
 
     printf "%-25s %4s " "$inst" "ON"
     if [[ "$result_on" == "FAILED" ]]; then

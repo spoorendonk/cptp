@@ -41,7 +41,7 @@ def run_solver(instance_path: Path, time_limit: int,
     if cutoff is not None:
         args += ["--cutoff", str(cutoff)]
     if disable_heuristics:
-        args += ["--disable_heuristics", "true"]
+        args += ["--heu_ws", "false"]
 
     result = {"status": "ERROR", "obj": None, "bound": None, "gap": None,
               "time": None, "nodes": 0, "cuts": 0}

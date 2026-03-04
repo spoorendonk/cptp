@@ -373,7 +373,13 @@ void HiGHSBridge::install_separators() {
                 }
                 tg.wait();
 
-                // Add cuts to the cutpool (limited per separator)
+                // Pool all cuts from all separators, pre-filtered by min_violation
+                struct PooledCut {
+                    size_t sep_idx;
+                    size_t cut_idx;
+                    double violation;
+                };
+                std::vector<PooledCut> pool;
                 for (size_t i = 0; i < separators_.size(); ++i) {
                     const std::string sep_name = separators_[i]->name();
                     auto& stats = separator_stats_[sep_name];
@@ -383,31 +389,45 @@ void HiGHSBridge::install_separators() {
                     const double min_viol = (it_min != per_separator_min_violation_.end())
                         ? it_min->second
                         : 0.0;
+                    // Per-separator cap (optional pre-filter)
                     const auto it_cap = per_separator_max_cuts_.find(sep_name);
-                    const int32_t max_cuts = (it_cap != per_separator_max_cuts_.end())
+                    const int32_t sep_cap = (it_cap != per_separator_max_cuts_.end())
                         ? it_cap->second
-                        : max_cuts_per_sep_;
+                        : 0;  // 0 = unlimited per separator
 
                     auto& cuts = results[i];
-                    if (max_cuts == 0) continue;
                     std::stable_sort(cuts.begin(), cuts.end(),
                         [](const sep::Cut& a, const sep::Cut& b) {
                             return a.violation > b.violation;
                         });
-                    int32_t added = 0;
-                    for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
-                        if (max_cuts >= 0 && added >= max_cuts) break;
-                        auto& cut = cuts[j];
-                        if (cut.violation < min_viol) continue;
-                        std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
-                        cutpool.addCut(mipsolver,
-                                       hi.data(), cut.values.data(),
-                                       static_cast<HighsInt>(hi.size()),
-                                       cut.rhs);
-                        stats.cuts_added++;
-                        total_cuts_++;
-                        added++;
+                    int32_t sep_added = 0;
+                    for (size_t j = 0; j < cuts.size(); ++j) {
+                        if (sep_cap > 0 && sep_added >= sep_cap) break;
+                        if (cuts[j].violation < min_viol) continue;
+                        pool.push_back({i, j, cuts[j].violation});
+                        sep_added++;
                     }
+                }
+
+                // Sort entire pool by violation descending, add top max_cuts_per_round_
+                std::stable_sort(pool.begin(), pool.end(),
+                    [](const PooledCut& a, const PooledCut& b) {
+                        return a.violation > b.violation;
+                    });
+                int32_t round_added = 0;
+                for (const auto& pc : pool) {
+                    if (max_cuts_per_round_ > 0 && round_added >= max_cuts_per_round_) break;
+                    auto& cut = results[pc.sep_idx][pc.cut_idx];
+                    const std::string& sep_name = separators_[pc.sep_idx]->name();
+                    auto& stats = separator_stats_[sep_name];
+                    std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
+                    cutpool.addCut(mipsolver,
+                                   hi.data(), cut.values.data(),
+                                   static_cast<HighsInt>(hi.size()),
+                                   cut.rhs);
+                    stats.cuts_added++;
+                    total_cuts_++;
+                    round_added++;
                 }
             }
             separation_rounds_++;
@@ -446,7 +466,9 @@ void HiGHSBridge::set_all_pairs_bounds(std::vector<double> dist) {
 }
 
 void HiGHSBridge::install_propagator() {
-    if (fwd_bounds_.empty() || bwd_bounds_.empty()) return;
+    // No early return: even without bounds, RC fixing (Trigger C/D) is independent.
+    const bool have_bounds = !fwd_bounds_.empty() && !bwd_bounds_.empty();
+    const bool bounds_prop = bounds_propagation_ && have_bounds;
 
     const auto& graph = prob_.graph();
     const int32_t m = num_edges_;
@@ -533,11 +555,14 @@ void HiGHSBridge::install_propagator() {
             int64_t& fixings = *propagator_fixings;
 
             bool ub_improved = (ub < *last_ub - 1e-9);
-
-            // ── Trigger A: UB improved → full sweep ──
             if (ub_improved) {
                 *last_ub = ub;
                 (*ub_improvements)++;
+            }
+
+            // ── Trigger A: UB improved → full sweep ──
+            // (requires bounds-based propagation)
+            if (bounds_prop && ub_improved) {
                 // Reset processed edges — tighter UB may enable new fixings
                 std::fill(proc.begin(), proc.end(), false);
 
@@ -580,6 +605,8 @@ void HiGHSBridge::install_propagator() {
             }
 
             // ── Trigger B: Fixed edge x_(a,i) = 1 → chained bounds ──
+            // (requires bounds-based propagation)
+            if (bounds_prop) {
             const auto& apd = *ap;
             const bool have_all_pairs = !apd.empty();
             const int32_t depot = prob.depot();
@@ -665,6 +692,7 @@ void HiGHSBridge::install_propagator() {
                     }
                 }
             }
+            }  // if (bounds_prop)
 
             // ── Trigger C: Lagrangian reduced-cost fixing (edges → 0) ──
             // ── Trigger D: Lagrangian reduced-cost fixing (nodes → 1) ──
@@ -883,7 +911,8 @@ void HiGHSBridge::install_propagator() {
             }
         });
 
-    logger_.log("Installed domain propagator with labeling bounds");
+    logger_.log("Installed domain propagator (bounds_propagation={}, have_bounds={})",
+                bounds_prop ? "true" : "false", have_bounds ? "true" : "false");
 }
 
 void HiGHSBridge::install_heuristic_callback() {
@@ -897,19 +926,22 @@ void HiGHSBridge::install_heuristic_callback() {
     int strategy = heuristic_strategy_;
     int64_t node_interval = std::max<int64_t>(1, heuristic_node_interval_);
     int deterministic_restarts = std::max<int32_t>(1, heuristic_deterministic_restarts_);
-    auto work_budget = work_unit_budget_;
-
     // Rate-limit: run heuristic at most once per N nodes.
     auto last_node_count = std::make_shared<int64_t>(0);
 
     auto cached_x = cached_x_lp_;
     auto cached_y = cached_y_lp_;
     auto cache_mtx = lp_cache_mutex_;
+    double lpg_edge_threshold = heu_lpg_edge_threshold_;
+    double lpg_node_threshold = heu_lpg_node_threshold_;
+    double lpg_lp_threshold = heu_lpg_lp_threshold_;
+    double lpg_seed_threshold = heu_lpg_seed_threshold_;
     highs_.setCallback(
         [this, heuristic_enabled, cached_x, cached_y, cache_mtx, calls, solutions,
          last_node_count, strategy,
          node_interval,
-         deterministic_restarts, work_budget](
+         deterministic_restarts,
+         lpg_edge_threshold, lpg_node_threshold, lpg_lp_threshold, lpg_seed_threshold](
             int callback_type, const std::string& /*message*/,
             const HighsCallbackOutput* data_out,
             HighsCallbackInput* data_in,
@@ -974,7 +1006,8 @@ void HiGHSBridge::install_heuristic_callback() {
                 0.0, strategy,
                 deterministic_restarts,
                 static_cast<uint32_t>(current_nodes),
-                work_budget);
+                lpg_edge_threshold, lpg_node_threshold,
+                lpg_lp_threshold, lpg_seed_threshold);
 
             if (!result.col_values.empty() &&
                 result.objective < data_out->mip_primal_bound - 1e-6) {
