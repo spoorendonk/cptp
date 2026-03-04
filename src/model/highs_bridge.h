@@ -164,6 +164,7 @@ class HiGHSBridge {
     std::shared_ptr<int64_t> chain_fixings_;
     std::shared_ptr<int64_t> ub_improvements_;
     std::shared_ptr<int64_t> propagator_calls_;
+    std::shared_ptr<double> propagator_time_seconds_;
 
     // Cut statistics (updated from callback)
     mutable std::map<std::string, SeparatorStats> separator_stats_;
@@ -187,6 +188,8 @@ class HiGHSBridge {
     // Heuristic callback statistics
     std::shared_ptr<int64_t> heuristic_calls_;
     std::shared_ptr<int64_t> heuristic_solutions_;
+    std::shared_ptr<int64_t> heuristic_work_units_;
+    std::shared_ptr<double> heuristic_time_seconds_;
 };
 
 }  // namespace cptp

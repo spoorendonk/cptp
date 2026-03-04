@@ -38,7 +38,9 @@ HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
       cached_y_lp_(std::make_shared<std::vector<double>>()),
       lp_cache_mutex_(std::make_shared<std::mutex>()),
       heuristic_calls_(std::make_shared<int64_t>(0)),
-      heuristic_solutions_(std::make_shared<int64_t>(0)) {
+      heuristic_solutions_(std::make_shared<int64_t>(0)),
+      heuristic_work_units_(std::make_shared<int64_t>(0)),
+      heuristic_time_seconds_(std::make_shared<double>(0.0)) {
     // Integral feasibility: tight but not zero to avoid rejecting
     // valid solutions due to floating-point noise in LP values.
     // Fractional separation uses a looser tolerance (default 1e-2).
@@ -462,6 +464,7 @@ void HiGHSBridge::install_propagator() {
     chain_fixings_ = std::make_shared<int64_t>(0);
     ub_improvements_ = std::make_shared<int64_t>(0);
     propagator_calls_ = std::make_shared<int64_t>(0);
+    propagator_time_seconds_ = std::make_shared<double>(0.0);
     rc_fix0_count_ = std::make_shared<int64_t>(0);
     rc_fix1_count_ = std::make_shared<int64_t>(0);
     rc_label_runs_ = std::make_shared<int64_t>(0);
@@ -472,6 +475,7 @@ void HiGHSBridge::install_propagator() {
     auto chain_fixings = chain_fixings_;
     auto ub_improvements = ub_improvements_;
     auto propagator_calls = propagator_calls_;
+    auto propagator_time = propagator_time_seconds_;
     auto rc_fix0 = rc_fix0_count_;
     auto rc_fix1 = rc_fix1_count_;
     auto rc_runs = rc_label_runs_;
@@ -526,6 +530,7 @@ void HiGHSBridge::install_propagator() {
             if (ub >= inf) return;
 
             (*propagator_calls)++;
+            const auto propagator_t0 = std::chrono::steady_clock::now();
             const auto& ec = *edge_costs;
             const auto& pr = *profits;
             const auto& adjacency = *adj;
@@ -779,7 +784,6 @@ void HiGHSBridge::install_propagator() {
                                     domain.changeBound(
                                         HighsBoundType::kUpper, e, 0.0,
                                         HighsDomain::Reason::unspecified());
-                                    fixings++;
                                     (*rc_fix0)++;
                                 }
                             }
@@ -852,7 +856,6 @@ void HiGHSBridge::install_propagator() {
                                         domain.changeBound(
                                             HighsBoundType::kLower, m + node_i, 1.0,
                                             HighsDomain::Reason::unspecified());
-                                        fixings++;
                                         (*rc_fix1)++;
                                     }
                                 }
@@ -881,19 +884,25 @@ void HiGHSBridge::install_propagator() {
                     }
                 }
             }
+            if (propagator_time) {
+                const auto propagator_t1 = std::chrono::steady_clock::now();
+                *propagator_time += std::chrono::duration<double>(
+                    propagator_t1 - propagator_t0).count();
+            }
         });
 
-    logger_.log("Installed domain propagator with labeling bounds");
 }
 
 void HiGHSBridge::install_heuristic_callback() {
     const bool heuristic_enabled = heuristic_callback_;
     const bool interrupt_enabled = static_cast<bool>(interrupt_flag_);
-    if (!heuristic_enabled && !interrupt_enabled) return;
+    const bool logging_enabled = logger_.enabled();
+    if (!heuristic_enabled && !interrupt_enabled && !logging_enabled) return;
 
     auto calls = heuristic_calls_;
     auto solutions = heuristic_solutions_;
-    double budget_ms = heuristic_budget_ms_;
+    auto heuristic_work_units = heuristic_work_units_;
+    auto heuristic_time_seconds = heuristic_time_seconds_;
     int strategy = heuristic_strategy_;
     int64_t node_interval = std::max<int64_t>(1, heuristic_node_interval_);
     int deterministic_restarts = std::max<int32_t>(1, heuristic_deterministic_restarts_);
@@ -907,13 +916,20 @@ void HiGHSBridge::install_heuristic_callback() {
     auto cache_mtx = lp_cache_mutex_;
     highs_.setCallback(
         [this, heuristic_enabled, cached_x, cached_y, cache_mtx, calls, solutions,
+         heuristic_work_units, heuristic_time_seconds,
          last_node_count, strategy,
          node_interval,
          deterministic_restarts, work_budget](
-            int callback_type, const std::string& /*message*/,
+            int callback_type, const std::string& message,
             const HighsCallbackOutput* data_out,
             HighsCallbackInput* data_in,
             void* /*user_data*/) {
+            if (callback_type == static_cast<int>(HighsCallbackType::kCallbackLogging)) {
+                if (!logger_.enabled()) return;
+                logger_.log(std::string_view{message});
+                return;
+            }
+
             if (callback_type == static_cast<int>(HighsCallbackType::kCallbackMipInterrupt)) {
                 if (interrupt_flag_ &&
                     interrupt_flag_->load(std::memory_order_relaxed)) {
@@ -968,6 +984,8 @@ void HiGHSBridge::install_heuristic_callback() {
             }
 
             (*calls)++;
+            const auto heuristic_t0 = std::chrono::steady_clock::now();
+            const int64_t wu_before = work_budget ? work_budget->used() : 0;
 
             heuristic::HeuristicResult result = heuristic::lp_guided_heuristic(
                 prob_, x_lp, y_lp, incumbent,
@@ -975,12 +993,23 @@ void HiGHSBridge::install_heuristic_callback() {
                 deterministic_restarts,
                 static_cast<uint32_t>(current_nodes),
                 work_budget);
+            if (work_budget && heuristic_work_units) {
+                const int64_t wu_after = work_budget->used();
+                if (wu_after > wu_before) {
+                    *heuristic_work_units += (wu_after - wu_before);
+                }
+            }
 
             if (!result.col_values.empty() &&
                 result.objective < data_out->mip_primal_bound - 1e-6) {
                 data_in->user_has_solution = true;
                 data_in->user_solution = std::move(result.col_values);
                 (*solutions)++;
+            }
+            if (heuristic_time_seconds) {
+                const auto heuristic_t1 = std::chrono::steady_clock::now();
+                *heuristic_time_seconds += std::chrono::duration<double>(
+                    heuristic_t1 - heuristic_t0).count();
             }
         },
         nullptr);
@@ -989,10 +1018,8 @@ void HiGHSBridge::install_heuristic_callback() {
         highs_.startCallback(HighsCallbackType::kCallbackMipUserSolution);
     }
     highs_.startCallback(HighsCallbackType::kCallbackMipInterrupt);
-    if (heuristic_enabled) {
-        logger_.log("Installed LP-guided heuristic callback (budget={}ms)", budget_ms);
-    } else {
-        logger_.log("Installed MIP interrupt callback");
+    if (logging_enabled) {
+        highs_.startCallback(HighsCallbackType::kCallbackLogging);
     }
 }
 
@@ -1137,10 +1164,14 @@ SolveResult HiGHSBridge::extract_result() const {
     result.tour_arcs = std::move(active_edges);
 
     // Print propagator statistics
-    if (propagator_calls_ && *propagator_calls_ > 0) {
-        logger_.log("Propagator: {} calls, {} UB improvements, {} fixings ({} sweep + {} chain)",
-                    *propagator_calls_, *ub_improvements_, *propagator_fixings_,
-                    *sweep_fixings_, *chain_fixings_);
+    if (propagator_calls_) {
+        const int64_t propagator_fixings =
+            (sweep_fixings_ ? *sweep_fixings_ : 0)
+            + (chain_fixings_ ? *chain_fixings_ : 0);
+        logger_.log("Propagator: {} calls, {} fixings ({} sweep + {} chain), {:.3f}s",
+                    *propagator_calls_, propagator_fixings,
+                    *sweep_fixings_, *chain_fixings_,
+                    propagator_time_seconds_ ? *propagator_time_seconds_ : 0.0);
     }
     if (rc_fix0_count_ && (*rc_fix0_count_ > 0 || *rc_fix1_count_ > 0)) {
         logger_.log("RC fixing: {} edges fixed to 0, {} nodes fixed to 1, {} labeling runs, {} callback runs, {:.3f}s",
@@ -1149,10 +1180,24 @@ SolveResult HiGHSBridge::extract_result() const {
                     rc_time_seconds_ ? *rc_time_seconds_ : 0.0);
     }
 
-    // Print heuristic callback statistics (debug_entered_ is set during install)
-    if (heuristic_calls_ && *heuristic_calls_ > 0) {
-        logger_.log("Heuristic callback: {} calls, {} solutions injected",
-                    *heuristic_calls_, *heuristic_solutions_);
+    // Print heuristic callback statistics for evaluation.
+    const int64_t heuristic_calls =
+        heuristic_calls_ ? *heuristic_calls_ : 0;
+    const int64_t heuristic_solutions =
+        heuristic_solutions_ ? *heuristic_solutions_ : 0;
+    const int64_t heuristic_wu =
+        heuristic_work_units_ ? *heuristic_work_units_ : 0;
+    const double heuristic_time =
+        heuristic_time_seconds_ ? *heuristic_time_seconds_ : 0.0;
+    if (heuristic_callback_ || heuristic_calls > 0
+        || heuristic_solutions > 0 || heuristic_wu > 0) {
+        const double wu_per_call = heuristic_calls > 0
+            ? static_cast<double>(heuristic_wu) / static_cast<double>(heuristic_calls)
+            : 0.0;
+        logger_.log(
+            "Heuristic callback: {} calls, {} solutions injected, {} wu ({:.1f} wu/call), {:.3f}s",
+            heuristic_calls, heuristic_solutions, heuristic_wu, wu_per_call,
+            heuristic_time);
     }
 
     // Attach separator statistics
