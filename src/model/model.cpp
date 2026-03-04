@@ -21,8 +21,6 @@
 
 #include "heuristic/primal_heuristic.h"
 #include "preprocess/edge_elimination.h"
-#include "preprocess/ng_labeling.h"
-#include "preprocess/shared_bounds.h"
 #include "mip/HighsUserSeparator.h"
 #include "mip/HighsMipSolverData.h"
 #include "sep/sec_separator.h"
@@ -37,50 +35,6 @@
 namespace cptp {
 
 namespace {
-
-heuristic::HeuristicResult build_ng_path_start(const Problem& problem,
-                                               std::span<const int32_t> path) {
-    heuristic::HeuristicResult result;
-    result.objective = std::numeric_limits<double>::infinity();
-    if (path.size() < 2) return result;
-
-    const auto& graph = problem.graph();
-    const int32_t m = problem.num_edges();
-    const int32_t n = problem.num_nodes();
-
-    std::vector<double> col_values(static_cast<size_t>(m + n), 0.0);
-
-    for (int32_t node : path) {
-        if (node < 0 || node >= n) return result;
-        col_values[static_cast<size_t>(m + node)] = 1.0;
-    }
-
-    double objective = 0.0;
-    for (size_t k = 0; k + 1 < path.size(); ++k) {
-        const int32_t u = path[k];
-        const int32_t v = path[k + 1];
-        int32_t edge = -1;
-        for (auto e : graph.incident_edges(u)) {
-            if (graph.other_endpoint(e, u) == v) {
-                edge = e;
-                break;
-            }
-        }
-        if (edge < 0) return result;
-        col_values[edge] += 1.0;
-        objective += problem.edge_cost(edge);
-    }
-
-    for (int32_t i = 0; i < n; ++i) {
-        if (col_values[static_cast<size_t>(m + i)] > 0.5) {
-            objective -= problem.profit(i);
-        }
-    }
-
-    result.col_values = std::move(col_values);
-    result.objective = objective;
-    return result;
-}
 
 int32_t count_finite_bounds(std::span<const double> bounds) {
     return static_cast<int32_t>(std::count_if(
@@ -228,13 +182,11 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool edge_elimination_nodes = true;
     double cutoff = std::numeric_limits<double>::infinity();
     bool disable_heuristics = false;
-    std::string preproc_stage1_bounds = "two_cycle";
     int32_t preproc_fast_restarts = 12;
     int32_t hyper_sb_max_depth = 0;
     int32_t hyper_sb_iter_limit = 100;
     int32_t hyper_sb_min_reliable = 4;
     int32_t hyper_sb_max_candidates = 3;
-    preprocess::ng::DssrOptions dssr_options;
     RCFixingSettings rc_settings;
     int32_t max_cuts_sec = -1;
     int32_t max_cuts_rci = -1;
@@ -362,40 +314,13 @@ SolveResult Model::solve(const SolverOptions& options) {
             disable_heuristics = (value == "true" || value == "1");
             continue;
         }
-        if (key == "preproc_stage1_bounds") {
-            std::string mode = value;
-            std::transform(mode.begin(), mode.end(), mode.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (mode == "two_cycle" || mode == "ng_dssr" || mode == "auto") {
-                preproc_stage1_bounds = mode;
-            } else if (mode == "ng1") {
-                preproc_stage1_bounds = "ng_dssr";
-                logger_.log("Warning: preproc_stage1_bounds=ng1 is deprecated; use ng_dssr");
-            } else {
-                logger_.log("Warning: unknown preproc_stage1_bounds='{}' (expected two_cycle|ng_dssr|auto), using two_cycle",
-                            value);
-                preproc_stage1_bounds = "two_cycle";
-            }
+        if (key == "preproc_stage1_bounds" || key == "ng_initial_size" ||
+            key == "ng_max_size" || key == "ng_dssr_iters" || key == "ng_simd") {
+            logger_.log("Warning: ng-DSSR option {}={} ignored (ng-DSSR removed, using 2-cycle bounds)", key, value);
             continue;
         }
         if (key == "preproc_fast_restarts") {
             preproc_fast_restarts = std::stoi(value);
-            continue;
-        }
-        if (key == "ng_initial_size") {
-            dssr_options.initial_ng_size = std::stoi(value);
-            continue;
-        }
-        if (key == "ng_max_size") {
-            dssr_options.max_ng_size = std::stoi(value);
-            continue;
-        }
-        if (key == "ng_dssr_iters") {
-            dssr_options.dssr_iterations = std::stoi(value);
-            continue;
-        }
-        if (key == "ng_simd") {
-            dssr_options.enable_simd = (value == "true" || value == "1");
             continue;
         }
         if (key == "rc_fixing") {
@@ -491,10 +416,6 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
-    dssr_options.initial_ng_size = std::max<int32_t>(0, dssr_options.initial_ng_size);
-    dssr_options.max_ng_size = std::max<int32_t>(dssr_options.initial_ng_size,
-                                                 dssr_options.max_ng_size);
-    dssr_options.dssr_iterations = std::max<int32_t>(1, dssr_options.dssr_iterations);
     preproc_fast_restarts = std::max<int32_t>(1, preproc_fast_restarts);
     heuristic_node_interval = std::max<int64_t>(1, heuristic_node_interval);
     deterministic_work_units = std::max<int64_t>(0, deterministic_work_units);
@@ -586,31 +507,9 @@ SolveResult Model::solve(const SolverOptions& options) {
             "heuristic_deterministic_restarts="
             + std::to_string(heuristic_deterministic_restarts));
     }
-    if (preproc_stage1_bounds != "two_cycle") {
-        nondefault_settings.push_back("preproc_stage1_bounds=" + preproc_stage1_bounds);
-    }
     if (preproc_fast_restarts != 12) {
         nondefault_settings.push_back(
             "preproc_fast_restarts=" + std::to_string(preproc_fast_restarts));
-    }
-    {
-        const preprocess::ng::DssrOptions defaults;
-        if (dssr_options.initial_ng_size != defaults.initial_ng_size) {
-            nondefault_settings.push_back(
-                "ng_initial_size=" + std::to_string(dssr_options.initial_ng_size));
-        }
-        if (dssr_options.max_ng_size != defaults.max_ng_size) {
-            nondefault_settings.push_back(
-                "ng_max_size=" + std::to_string(dssr_options.max_ng_size));
-        }
-        if (dssr_options.dssr_iterations != defaults.dssr_iterations) {
-            nondefault_settings.push_back(
-                "ng_dssr_iters=" + std::to_string(dssr_options.dssr_iterations));
-        }
-        if (dssr_options.enable_simd != defaults.enable_simd) {
-            nondefault_settings.push_back(
-                std::string("ng_simd=") + (dssr_options.enable_simd ? "on" : "off"));
-        }
     }
     if (cutoff < std::numeric_limits<double>::infinity()) {
         nondefault_settings.push_back("cutoff=" + std::to_string(cutoff));
@@ -669,9 +568,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::vector<double> all_pairs;
     heuristic::HeuristicResult warm_start{{}, std::numeric_limits<double>::infinity()};
     double warm_start_ub = std::numeric_limits<double>::infinity();
-    int32_t ng_size_used = 1;
-    double ng_path_ub = std::numeric_limits<double>::infinity();
-    std::vector<int32_t> ng_path_nodes;
     int32_t stage3_elim_edges = 0;
     double stage3_elim_ratio = 0.0;
     int32_t stage5_elim_edges = 0;
@@ -684,76 +580,30 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     {
         Timer preproc_timer;
-        enum class Stage1BoundsBackend {
-            two_cycle,
-            ng_dssr,
-        };
-        Stage1BoundsBackend stage1_backend = Stage1BoundsBackend::two_cycle;
-        if (preproc_stage1_bounds == "ng_dssr") {
-            stage1_backend = Stage1BoundsBackend::ng_dssr;
-        } else if (preproc_stage1_bounds == "auto") {
-            stage1_backend = ((dssr_options.max_ng_size > 1)
-                              || (dssr_options.dssr_iterations > 1))
-                ? Stage1BoundsBackend::ng_dssr
-                : Stage1BoundsBackend::two_cycle;
-        }
-        const char* stage1_backend_name =
-            (stage1_backend == Stage1BoundsBackend::ng_dssr) ? "ng_dssr" : "two_cycle";
         if (workflow_dump) {
             logger_.log("Workflow DAG (startup):");
-            logger_.log("  Stage1 [Bounds] -> backend={}", stage1_backend_name);
+            logger_.log("  Stage1 [Bounds] -> backend=two_cycle");
             logger_.log("  Stage2 [Construction] -> seed 1/2-customer tours/paths");
             logger_.log("  Stage3 [EdgeElim on construction UB]");
             logger_.log("  Stage4 [Parallel local search on reduced graph] -> optional all-pairs bounds");
             logger_.log("  Stage5 [EdgeElim on local-search UB]");
             logger_.log("  Stage6 [HiGHS] -> highs.run()");
         }
-        logger_.log("Startup Stage1 [Bounds]: backend={} (source={}, target={})",
-                    stage1_backend_name, source, target);
+        logger_.log("Startup Stage1 [Bounds]: backend=two_cycle (source={}, target={})",
+                    source, target);
 
         tbb::task_arena preproc_arena(preproc_thread_limit);
         preproc_arena.execute([&] {
             tbb::task_group stage1_tg;
-            int32_t ng_size_source = 1;
-            int32_t ng_size_target = 1;
-            if (stage1_backend == Stage1BoundsBackend::two_cycle) {
+            stage1_tg.run([&] {
+                fwd_bounds = preprocess::labeling_from(problem_, source);
+            });
+            if (source != target) {
                 stage1_tg.run([&] {
-                    fwd_bounds = preprocess::labeling_from(problem_, source);
+                    bwd_bounds = preprocess::labeling_from(problem_, target);
                 });
-                if (source != target) {
-                    stage1_tg.run([&] {
-                        bwd_bounds = preprocess::labeling_from(problem_, target);
-                    });
-                }
-            } else {
-                auto stage1_opts = dssr_options;
-                stage1_opts.initial_ng_size = std::max<int32_t>(0, dssr_options.initial_ng_size);
-                stage1_opts.max_ng_size = std::max<int32_t>(
-                    1, std::max<int32_t>(stage1_opts.initial_ng_size, dssr_options.max_ng_size));
-                stage1_opts.dssr_iterations = std::max<int32_t>(1, dssr_options.dssr_iterations);
-
-                stage1_tg.run([&] {
-                    auto source_bounds = preprocess::ng::compute_bounds(
-                        problem_, source, source, stage1_opts);
-                    fwd_bounds = std::move(source_bounds.fwd);
-                    ng_size_source = source_bounds.ng_size;
-                    if (source_bounds.elementary_path_found) {
-                        ng_path_ub = source_bounds.elementary_path_cost;
-                        ng_path_nodes = std::move(source_bounds.elementary_path);
-                    }
-                });
-                if (source != target) {
-                    stage1_tg.run([&] {
-                        auto target_bounds = preprocess::ng::compute_bounds(
-                            problem_, target, target, stage1_opts);
-                        bwd_bounds = std::move(target_bounds.fwd);
-                        ng_size_target = target_bounds.ng_size;
-                    });
-                }
             }
             stage1_tg.wait();
-            ng_size_used = std::max<int32_t>(
-                ng_size_used, std::max(ng_size_source, ng_size_target));
         });
         if (source == target) {
             bwd_bounds = fwd_bounds;
@@ -888,19 +738,6 @@ SolveResult Model::solve(const SolverOptions& options) {
         } else if (has_feasible_heuristic(warm_start)) {
             warm_start_ub = std::min(warm_start_ub, warm_start.objective);
         }
-        if (ng_path_ub < warm_start_ub) {
-            warm_start_ub = ng_path_ub;
-        }
-        if (!ng_path_nodes.empty()) {
-            auto ng_start = build_ng_path_start(problem_, ng_path_nodes);
-            if (has_feasible_heuristic(ng_start) &&
-                (!has_feasible_heuristic(warm_start) ||
-                 ng_start.objective < warm_start.objective - 1e-9)) {
-                warm_start = std::move(ng_start);
-                warm_start_ub = std::min(warm_start_ub, warm_start.objective);
-            }
-        }
-
         if (edge_elimination
             && std::isfinite(warm_start_ub)
             && !fwd_bounds.empty() && !bwd_bounds.empty()) {
@@ -926,7 +763,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                     preproc_timer.elapsed_seconds(),
                     warm_start_ub,
                     (cutoff < std::numeric_limits<double>::infinity() ? " (cutoff)" : ""),
-                    stage1_backend_name,
+                    "two_cycle",
                     stage3_elim_edges, m, 100.0 * stage3_elim_ratio,
                     stage5_elim_edges, m, 100.0 * stage5_elim_ratio);
     }
@@ -956,15 +793,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (min_violation_rglm >= 0.0) bridge.set_separator_min_violation("RGLM", min_violation_rglm);
     if (min_violation_spi >= 0.0) bridge.set_separator_min_violation("SPI", min_violation_spi);
 
-    auto shared_bounds = std::make_shared<preprocess::SharedBoundsStore>(
-        preprocess::BoundSnapshot{
-            .fwd = fwd_bounds,
-            .bwd = bwd_bounds,
-            .correction = correction,
-            .ng_size = ng_size_used,
-            .version = 0,
-        });
-    bridge.set_shared_bounds_store(shared_bounds);
     if (workflow_dump) {
         logger_.log("Workflow DAG (solve):");
         logger_.log("  build_formulation -> highs.run() with callbacks");

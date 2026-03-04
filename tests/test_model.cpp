@@ -5,7 +5,6 @@
 
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
-#include "model/deterministic_checkpoint.h"
 #include "model/model.h"
 
 using Catch::Matchers::WithinAbs;
@@ -223,9 +222,6 @@ TEST_CASE("Model path: async incumbent proof handoff does not stop without solut
 
     auto opts = quiet;
     opts.push_back({"disable_heuristics", "true"});  // no initial setSolution
-    opts.push_back({"ng_initial_size", "4"});
-    opts.push_back({"ng_max_size", "8"});
-    opts.push_back({"ng_dssr_iters", "4"});
 
     auto result = model.solve(opts);
 
@@ -413,120 +409,6 @@ TEST_CASE("Model: deterministic work-unit settings produce stable repeated solve
         REQUIRE_THAT(r1.objective, WithinAbs(r2.objective, 1e-9));
         REQUIRE(r1.tour == r2.tour);
     }
-}
-
-TEST_CASE("Model: deterministic DSSR epoch commits are replay-equivalent",
-          "[model][options][determinism][dssr]") {
-    cptp::Model model;
-
-    std::vector<cptp::Edge> edges = {
-        {0, 1}, {0, 2}, {0, 3}, {0, 4},
-        {1, 2}, {1, 3}, {1, 4},
-        {2, 3}, {2, 4},
-        {3, 4},
-    };
-    std::vector<double> costs = {
-        6.0, 8.0, 9.0, 10.0,
-        3.0, 4.0, 7.0,
-        5.0, 6.0,
-        4.0,
-    };
-    std::vector<double> profits = {0.0, 11.0, 10.0, 9.0, 8.0};
-    std::vector<double> demands = {0.0, 2.0, 2.0, 3.0, 3.0};
-
-    model.set_graph(5, edges, costs);
-    model.set_depot(0);
-    model.set_profits(profits);
-    model.add_capacity_resource(demands, 8.0);
-
-    auto opts = quiet;
-    opts.push_back({"threads", "1"});
-    opts.push_back({"random_seed", "0"});
-    opts.push_back({"ng_initial_size", "1"});
-    opts.push_back({"ng_max_size", "6"});
-    opts.push_back({"ng_dssr_iters", "1"});
-
-    auto r1 = model.solve(opts);
-    auto r2 = model.solve(opts);
-
-    REQUIRE(r1.status == r2.status);
-    REQUIRE_THAT(r1.bound, WithinAbs(r2.bound, 1e-9));
-    if (r1.has_solution() && r2.has_solution()) {
-        REQUIRE_THAT(r1.objective, WithinAbs(r2.objective, 1e-9));
-        REQUIRE(r1.tour == r2.tour);
-    }
-
-    REQUIRE(r1.dssr_epochs_enqueued == r2.dssr_epochs_enqueued);
-    REQUIRE(r1.dssr_epochs_committed == r2.dssr_epochs_committed);
-    REQUIRE(r1.dssr_epochs_committed == r1.dssr_epochs_enqueued);
-    REQUIRE(r2.dssr_epochs_committed == r2.dssr_epochs_enqueued);
-    REQUIRE(r1.dssr_checkpoint_count == r2.dssr_checkpoint_count);
-    REQUIRE(r1.dssr_commit_signature == r2.dssr_commit_signature);
-}
-
-TEST_CASE("Model: deterministic DSSR max-epoch cap and auto policy are replay-stable",
-          "[model][options][determinism][dssr]") {
-    cptp::Model model;
-
-    std::vector<cptp::Edge> edges = {
-        {0, 1}, {0, 2}, {0, 3}, {0, 4},
-        {1, 2}, {1, 3}, {1, 4},
-        {2, 3}, {2, 4},
-        {3, 4},
-    };
-    std::vector<double> costs = {
-        6.0, 8.0, 9.0, 10.0,
-        3.0, 4.0, 7.0,
-        5.0, 6.0,
-        4.0,
-    };
-    std::vector<double> profits = {0.0, 11.0, 10.0, 9.0, 8.0};
-    std::vector<double> demands = {0.0, 2.0, 2.0, 3.0, 3.0};
-
-    model.set_graph(5, edges, costs);
-    model.set_depot(0);
-    model.set_profits(profits);
-    model.add_capacity_resource(demands, 8.0);
-
-    auto opts = quiet;
-    opts.push_back({"threads", "1"});
-    opts.push_back({"random_seed", "0"});
-    opts.push_back({"ng_initial_size", "1"});
-    opts.push_back({"ng_max_size", "8"});
-    opts.push_back({"ng_dssr_iters", "1"});
-
-    auto r1 = model.solve(opts);
-    auto r2 = model.solve(opts);
-
-    REQUIRE(r1.status == r2.status);
-    REQUIRE_THAT(r1.bound, WithinAbs(r2.bound, 1e-9));
-    if (r1.has_solution() && r2.has_solution()) {
-        REQUIRE_THAT(r1.objective, WithinAbs(r2.objective, 1e-9));
-        REQUIRE(r1.tour == r2.tour);
-    }
-
-    REQUIRE(r1.dssr_epochs_enqueued == r1.dssr_epochs_committed);
-    REQUIRE(r2.dssr_epochs_enqueued == r2.dssr_epochs_committed);
-    REQUIRE(r1.dssr_epochs_enqueued <= 2);
-    REQUIRE(r2.dssr_epochs_enqueued <= 2);
-    REQUIRE(r1.dssr_epochs_enqueued == r2.dssr_epochs_enqueued);
-    REQUIRE(r1.dssr_commit_signature == r2.dssr_commit_signature);
-}
-
-TEST_CASE("Model: DSSR auto-stop tracker stops on deterministic no-progress path",
-          "[model][options][determinism][dssr]") {
-    cptp::model_detail::DssrAutoStopTracker tracker(
-        /*min_epochs_before_stop=*/4,
-        /*no_progress_epoch_limit=*/2);
-
-    // With checkpoint activity present, stopping should come from no-progress
-    // streak, not from the no-checkpoint fast-stop path.
-    REQUIRE_FALSE(tracker.observe_stage(
-        /*improved=*/false, /*checkpoint_active=*/true, /*produced_epochs=*/1));
-    REQUIRE(tracker.observe_stage(
-        /*improved=*/false, /*checkpoint_active=*/true, /*produced_epochs=*/2));
-    REQUIRE(tracker.had_checkpoint_activity());
-    REQUIRE(tracker.no_progress_epochs() == 2);
 }
 
 TEST_CASE("Model: disabling cut families still yields valid tiny solution", "[model][options][cuts]") {
@@ -794,57 +676,10 @@ TEST_CASE("Model: deterministic parallel settings preserve objective",
     auto staged_opts = quiet;
     staged_opts.push_back({"deterministic_work_units", "64"});
     staged_opts.push_back({"heuristic_deterministic_restarts", "8"});
-    staged_opts.push_back({"ng_initial_size", "1"});
-    staged_opts.push_back({"ng_max_size", "4"});
-    staged_opts.push_back({"ng_dssr_iters", "2"});
     staged_opts.push_back({"preproc_fast_restarts", "4"});
     auto staged = staged_model.solve(staged_opts);
     REQUIRE(staged.has_solution());
     REQUIRE_THAT(staged.objective, WithinAbs(base.objective, 1e-6));
-}
-
-TEST_CASE("Model: stage1 bounds backend modes preserve objective",
-          "[model][preproc]") {
-    auto setup_path_model = [](cptp::Model& model) {
-        std::vector<cptp::Edge> edges = {
-            {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
-        };
-        std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
-        model.set_graph(4, edges, costs);
-        model.set_source(0);
-        model.set_target(3);
-        std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
-        std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
-        model.set_profits(profits);
-        model.add_capacity_resource(demands, 7.0);
-    };
-
-    auto solve_mode = [&](const char* mode) {
-        cptp::Model model;
-        setup_path_model(model);
-        auto opts = quiet;
-        opts.push_back({"threads", "1"});
-        opts.push_back({"random_seed", "0"});
-        opts.push_back({"preproc_stage1_bounds", mode});
-        opts.push_back({"ng_initial_size", "1"});
-        opts.push_back({"ng_max_size", "4"});
-        opts.push_back({"ng_dssr_iters", "2"});
-        return model.solve(opts);
-    };
-
-    const auto two_cycle = solve_mode("two_cycle");
-    const auto ng_dssr = solve_mode("ng_dssr");
-    const auto auto_mode = solve_mode("auto");
-    REQUIRE(two_cycle.status != cptp::SolveResult::Status::Error);
-    REQUIRE(ng_dssr.status != cptp::SolveResult::Status::Error);
-    REQUIRE(auto_mode.status != cptp::SolveResult::Status::Error);
-
-    if (two_cycle.has_solution() && ng_dssr.has_solution()) {
-        REQUIRE_THAT(two_cycle.objective, WithinAbs(ng_dssr.objective, 1e-6));
-    }
-    if (two_cycle.has_solution() && auto_mode.has_solution()) {
-        REQUIRE_THAT(two_cycle.objective, WithinAbs(auto_mode.objective, 1e-6));
-    }
 }
 
 TEST_CASE("Model: workflow_dump option is accepted",

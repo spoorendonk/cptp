@@ -1,6 +1,5 @@
 #pragma once
 
-#include <algorithm>
 #include <limits>
 #include <atomic>
 #include <map>
@@ -13,7 +12,6 @@
 #include "Highs.h"
 #include "core/problem.h"
 #include "core/solution.h"
-#include "preprocess/shared_bounds.h"
 #include "sep/separation_context.h"
 #include "sep/separation_oracle.h"
 #include "sep/separator.h"
@@ -91,10 +89,6 @@ class HiGHSBridge {
     /// dist is a flat n×n matrix: d(s,v) = dist[s*n + v].
     void set_all_pairs_bounds(std::vector<double> dist);
 
-    /// Set shared bounds store for asynchronous DSSR updates.
-    void set_shared_bounds_store(std::shared_ptr<preprocess::SharedBoundsStore> store) {
-        shared_bounds_ = std::move(store);
-    }
     void set_interrupt_flag(std::shared_ptr<std::atomic<bool>> flag) {
         interrupt_flag_ = std::move(flag);
     }
@@ -154,7 +148,6 @@ class HiGHSBridge {
 
     // All-pairs labeling bounds for stronger Trigger B propagation
     std::vector<double> all_pairs_;    // flat n×n: d(s,v) = all_pairs_[s*n+v]
-    std::shared_ptr<preprocess::SharedBoundsStore> shared_bounds_;
     std::shared_ptr<std::atomic<bool>> interrupt_flag_;
 
     // RC fixing settings and statistics

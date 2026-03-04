@@ -309,3 +309,4 @@ TEST_CASE("E2E: G-n262-k25-316 (262 nodes)", "[xlarge][spprclib][e2e]") {
 
     REQUIRE(result.has_solution());
 }
+
