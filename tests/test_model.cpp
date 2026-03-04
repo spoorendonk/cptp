@@ -797,11 +797,7 @@ TEST_CASE("Model: deterministic parallel settings preserve objective",
     staged_opts.push_back({"ng_initial_size", "1"});
     staged_opts.push_back({"ng_max_size", "4"});
     staged_opts.push_back({"ng_dssr_iters", "2"});
-    staged_opts.push_back({"preproc_adaptive", "true"});
     staged_opts.push_back({"preproc_fast_restarts", "4"});
-    staged_opts.push_back({"preproc_second_ws_large_n", "4"});
-    staged_opts.push_back({"preproc_second_ws_min_elim", "0.0"});
-    staged_opts.push_back({"preproc_second_ws_min_elim_large", "0.0"});
     auto staged = staged_model.solve(staged_opts);
     REQUIRE(staged.has_solution());
     REQUIRE_THAT(staged.objective, WithinAbs(base.objective, 1e-6));
@@ -833,19 +829,18 @@ TEST_CASE("Model: stage1 bounds backend modes preserve objective",
         opts.push_back({"ng_initial_size", "1"});
         opts.push_back({"ng_max_size", "4"});
         opts.push_back({"ng_dssr_iters", "2"});
-        auto r = model.solve(opts);
-        if (r.status == rcspp::SolveResult::Status::Error) {
-            WARN("mode=" << mode << " returned Error; skipping comparison for this mode");
-        }
-        return r;
+        return model.solve(opts);
     };
 
     const auto two_cycle = solve_mode("two_cycle");
-    const auto ng1 = solve_mode("ng1");
+    const auto ng_dssr = solve_mode("ng_dssr");
     const auto auto_mode = solve_mode("auto");
+    REQUIRE(two_cycle.status != rcspp::SolveResult::Status::Error);
+    REQUIRE(ng_dssr.status != rcspp::SolveResult::Status::Error);
+    REQUIRE(auto_mode.status != rcspp::SolveResult::Status::Error);
 
-    if (two_cycle.has_solution() && ng1.has_solution()) {
-        REQUIRE_THAT(two_cycle.objective, WithinAbs(ng1.objective, 1e-6));
+    if (two_cycle.has_solution() && ng_dssr.has_solution()) {
+        REQUIRE_THAT(two_cycle.objective, WithinAbs(ng_dssr.objective, 1e-6));
     }
     if (two_cycle.has_solution() && auto_mode.has_solution()) {
         REQUIRE_THAT(two_cycle.objective, WithinAbs(auto_mode.objective, 1e-6));

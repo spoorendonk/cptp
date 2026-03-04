@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <iomanip>
@@ -34,7 +36,7 @@ static void print_usage(const char* prog) {
               << "  --min_violation_<family> X  Per-family min violation filter\n"
               << "  --edge_elimination true/false  Enable preprocessing edge elimination (default true)\n"
               << "  --edge_elimination_nodes true/false  Also fix nodes if all incident edges are eliminated\n"
-              << "  --preproc_stage1_bounds <mode>  Stage-1 bounds backend: two_cycle | ng1 | auto\n"
+              << "  --preproc_stage1_bounds <mode>  Stage-1 bounds backend: two_cycle | ng_dssr | auto (default two_cycle)\n"
               << "  --workflow_dump true/false  Print startup/solve DAG wiring (default false)\n"
               << "  --branch_hyper_sb_max_depth/iter_limit/min_reliable/max_candidates <int>\n"
               << "                         Hyperplane strong-branching tuning\n"
@@ -135,16 +137,31 @@ int main(int argc, char* argv[]) {
                   << "  Time: " << result.time_seconds << "s"
                   << "  Nodes: " << result.nodes << "\n";
 
-        if (result.total_cuts > 0) {
+        if (!result.separator_stats.empty()) {
             std::cout << "User cuts: " << result.total_cuts
                       << " (" << result.separation_rounds << " rounds)\n";
             std::cout << std::fixed << std::setprecision(3);
-            for (const auto& [name, stats] : result.separator_stats) {
+            const std::array<std::string, 6> preferred = {
+                "SEC", "RCI", "Multistar", "Comb", "RGLM", "SPI"
+            };
+            auto print_sep_row = [](const std::string& name,
+                                    const rcspp::SeparatorStats& stats) {
                 std::cout << "  " << std::setw(10) << std::left << name
                           << std::right
                           << std::setw(6) << stats.cuts_added << " cuts"
                           << std::setw(6) << stats.rounds_called << " rounds"
                           << std::setw(8) << stats.time_seconds << "s\n";
+            };
+            for (const auto& name : preferred) {
+                auto it = result.separator_stats.find(name);
+                if (it != result.separator_stats.end()) {
+                    print_sep_row(it->first, it->second);
+                }
+            }
+            for (const auto& [name, stats] : result.separator_stats) {
+                if (std::find(preferred.begin(), preferred.end(), name) == preferred.end()) {
+                    print_sep_row(name, stats);
+                }
             }
         }
 

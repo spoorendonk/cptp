@@ -29,6 +29,11 @@ namespace detail {
 
 inline constexpr double kNoSolution = std::numeric_limits<double>::infinity();
 
+struct TourCandidate {
+    std::vector<int32_t> tour;
+    double objective = kNoSolution;
+};
+
 /// Find edge index between u and v, or -1 if not found.
 /// When edge_active is non-empty, inactive edges return -1.
 inline int32_t find_edge(const Graph& g, int32_t u, int32_t v,
@@ -219,6 +224,42 @@ inline void local_search(const Problem& prob,
     }
 }
 
+inline bool seed_uses_active_edges(const Problem& prob,
+                                   std::span<const int32_t> tour,
+                                   const std::vector<bool>& edge_active = {}) {
+    constexpr double kBig = 1e15;
+    for (size_t i = 0; i + 1 < tour.size(); ++i) {
+        if (edge_cost(prob, tour[i], tour[i + 1], edge_active) > kBig) {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline bool init_seed_state(const Problem& prob,
+                            std::span<const int32_t> tour,
+                            std::vector<bool>& in_tour,
+                            double& remaining_cap) {
+    const int32_t n = prob.num_nodes();
+    const int32_t source = prob.source();
+    const int32_t target = prob.target();
+    in_tour.assign(static_cast<size_t>(n), false);
+    for (int32_t v : tour) {
+        if (v < 0 || v >= n) return false;
+        in_tour[v] = true;
+    }
+
+    remaining_cap = prob.capacity() - prob.demand(source);
+    if (!prob.is_tour()) remaining_cap -= prob.demand(target);
+    if (remaining_cap < -1e-9) return false;
+
+    for (size_t i = 1; i + 1 < tour.size(); ++i) {
+        const int32_t v = tour[i];
+        if (v != source && v != target) remaining_cap -= prob.demand(v);
+    }
+    return remaining_cap >= -1e-9;
+}
+
 /// Single restart: construct + local search, return (tour, objective).
 /// When edge_active is non-empty, only active edges are considered.
 inline std::pair<std::vector<int32_t>, double>
@@ -355,40 +396,29 @@ inline std::vector<int32_t> fallback_feasible(const Problem& prob,
     return {};
 }
 
-/// Enumerate all 1-customer / 2-customer seeds, choose the best objective seed,
-/// then run local search from that seed.
-inline std::pair<std::vector<int32_t>, double>
-best_small_seed_with_local_search(const Problem& prob,
-                                  const std::vector<int32_t>& customers,
-                                  const std::vector<bool>& edge_active = {}) {
-    const int32_t n = prob.num_nodes();
+/// Enumerate all 1-customer / 2-customer seeds and return sorted candidates.
+inline std::vector<TourCandidate>
+enumerate_small_seed_candidates(const Problem& prob,
+                                const std::vector<int32_t>& customers,
+                                const std::vector<bool>& edge_active = {}) {
     const int32_t source = prob.source();
     const int32_t target = prob.target();
     const bool is_tour = prob.is_tour();
 
     double base_remaining = prob.capacity() - prob.demand(source);
     if (!is_tour) base_remaining -= prob.demand(target);
-    if (base_remaining < 0.0) return {{}, kNoSolution};
+    if (base_remaining < 0.0) return {};
 
-    constexpr double kBig = 1e15;
-    std::vector<int32_t> best_seed;
-    double best_seed_obj = kNoSolution;
-
-    auto seed_valid_edges = [&](std::span<const int32_t> seq) {
-        for (size_t i = 0; i + 1 < seq.size(); ++i) {
-            if (edge_cost(prob, seq[i], seq[i + 1], edge_active) > kBig) return false;
-        }
-        return true;
-    };
+    std::vector<TourCandidate> candidates;
+    candidates.reserve(static_cast<size_t>(customers.size()) * customers.size());
 
     auto try_seed = [&](std::vector<int32_t> seed, double used_demand) {
         if (used_demand > base_remaining + 1e-9) return;
-        if (!seed_valid_edges(seed)) return;
-        double obj = tour_objective(prob, seed);
-        if (obj < best_seed_obj) {
-            best_seed_obj = obj;
-            best_seed = std::move(seed);
-        }
+        if (!seed_uses_active_edges(prob, seed, edge_active)) return;
+        candidates.push_back(TourCandidate{
+            .tour = std::move(seed),
+            .objective = kNoSolution
+        });
     };
 
     // Path-only zero-customer seed.
@@ -414,6 +444,7 @@ best_small_seed_with_local_search(const Problem& prob,
             const double used = prob.demand(a) + prob.demand(b);
             if (is_tour) {
                 try_seed({source, a, b, source}, used);
+                try_seed({source, b, a, source}, used);
             } else {
                 try_seed({source, a, b, target}, used);
                 try_seed({source, b, a, target}, used);
@@ -421,21 +452,17 @@ best_small_seed_with_local_search(const Problem& prob,
         }
     }
 
-    if (best_seed.empty()) return {{}, kNoSolution};
-
-    std::vector<bool> in_tour(n, false);
-    for (int32_t v : best_seed) {
-        if (v >= 0 && v < n) in_tour[v] = true;
+    for (auto& cand : candidates) {
+        cand.objective = tour_objective(prob, cand.tour);
     }
-
-    double remaining_cap = base_remaining;
-    for (size_t i = 1; i + 1 < best_seed.size(); ++i) {
-        int32_t v = best_seed[i];
-        if (v != source && v != target) remaining_cap -= prob.demand(v);
-    }
-
-    local_search(prob, best_seed, in_tour, remaining_cap, edge_active);
-    return {best_seed, tour_objective(prob, best_seed)};
+    std::stable_sort(candidates.begin(), candidates.end(),
+                     [](const TourCandidate& a, const TourCandidate& b) {
+                         if (std::abs(a.objective - b.objective) > 1e-12) {
+                             return a.objective < b.objective;
+                         }
+                         return a.tour < b.tour;
+                     });
+    return candidates;
 }
 
 /// Convert a tour (node sequence) to a MIP solution vector.
@@ -468,6 +495,11 @@ inline std::vector<double> tour_to_solution(const Problem& prob,
 struct HeuristicResult {
     std::vector<double> col_values;  // size (num_edges + num_nodes)
     double objective;                // minimization objective (cost - profit)
+};
+
+struct ConstructionPool {
+    std::vector<detail::TourCandidate> candidates;  // sorted by objective
+    std::vector<bool> edge_active;                  // optional reduced graph
 };
 
 // ─── Graph reduction strategies ───────────────────────────────────────────
@@ -593,11 +625,163 @@ inline ReducedGraph reduce_neighborhood(const Problem& prob,
 
 // ─── Public heuristic functions ───────────────────────────────────────────
 
-/// Build an initial solution via parallel randomized construction + local search.
-/// Runs on the complete graph. Used before MIP solve.
-/// num_restarts: total number of restarts (including 3 deterministic orderings).
-/// time_budget_ms: deprecated in deterministic-only mode.
-/// Returns solution vector + objective value.
+inline std::vector<bool> build_edge_activity_from_bounds(
+    const Problem& prob,
+    std::span<const double> fwd_bounds,
+    std::span<const double> bwd_bounds,
+    double correction,
+    double upper_bound) {
+    const int32_t n = prob.num_nodes();
+    const int32_t m = prob.num_edges();
+    if (!fwd_bounds.empty() && !bwd_bounds.empty()
+        && fwd_bounds.size() == static_cast<size_t>(n)
+        && bwd_bounds.size() == static_cast<size_t>(n)
+        && std::isfinite(upper_bound)) {
+        std::vector<double> fwd_vec(fwd_bounds.begin(), fwd_bounds.end());
+        std::vector<double> bwd_vec(bwd_bounds.begin(), bwd_bounds.end());
+        auto eliminated = preprocess::edge_elimination(
+            prob, fwd_vec, bwd_vec, upper_bound, correction);
+        std::vector<bool> edge_active(static_cast<size_t>(m), true);
+        int32_t inactive = 0;
+        for (int32_t e = 0; e < m; ++e) {
+            if (eliminated[e]) {
+                edge_active[e] = false;
+                inactive++;
+            }
+        }
+        if (inactive > 0) return edge_active;
+    }
+    return {};
+}
+
+inline ConstructionPool build_construction_pool(
+    const Problem& prob,
+    int max_candidates = 0,
+    std::span<const double> fwd_bounds = {},
+    std::span<const double> bwd_bounds = {},
+    double correction = 0.0,
+    double upper_bound = std::numeric_limits<double>::infinity()) {
+    ConstructionPool pool;
+    pool.edge_active = build_edge_activity_from_bounds(
+        prob, fwd_bounds, bwd_bounds, correction, upper_bound);
+
+    const int32_t n = prob.num_nodes();
+    const int32_t source = prob.source();
+    const int32_t target = prob.target();
+    const double Q = prob.capacity();
+    std::vector<int32_t> customers;
+    for (int32_t i = 0; i < n; ++i) {
+        if (i != source && i != target && prob.demand(i) <= Q) {
+            customers.push_back(i);
+        }
+    }
+
+    pool.candidates = detail::enumerate_small_seed_candidates(
+        prob, customers, pool.edge_active);
+    if (pool.candidates.empty()) {
+        auto fallback = detail::fallback_feasible(prob, pool.edge_active);
+        if (!fallback.empty()) {
+            const double fallback_obj = detail::tour_objective(prob, fallback);
+            pool.candidates.push_back(detail::TourCandidate{
+                .tour = std::move(fallback),
+                .objective = fallback_obj
+            });
+        }
+    }
+    if (max_candidates > 0
+        && static_cast<int32_t>(pool.candidates.size()) > max_candidates) {
+        pool.candidates.resize(static_cast<size_t>(max_candidates));
+    }
+    return pool;
+}
+
+inline HeuristicResult best_construction_solution(const Problem& prob,
+                                                  const ConstructionPool& pool) {
+    if (pool.candidates.empty()) {
+        auto fallback = detail::fallback_feasible(prob, pool.edge_active);
+        if (fallback.empty()) return {{}, detail::kNoSolution};
+        const double obj = detail::tour_objective(prob, fallback);
+        return {detail::tour_to_solution(prob, fallback), obj};
+    }
+
+    const auto& best = pool.candidates.front();
+    return {detail::tour_to_solution(prob, best.tour), best.objective};
+}
+
+inline HeuristicResult run_local_search_from_pool(
+    const Problem& prob,
+    const ConstructionPool& pool,
+    int num_starts,
+    int max_ls_iter = 200,
+    const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr,
+    int32_t max_workers = 0,
+    const std::vector<bool>& edge_active_override = {}) {
+    if (pool.candidates.empty()) {
+        return {{}, detail::kNoSolution};
+    }
+
+    const std::vector<bool>& edge_active =
+        edge_active_override.empty() ? pool.edge_active : edge_active_override;
+    int starts = std::clamp(num_starts, 1, static_cast<int>(pool.candidates.size()));
+    if (work_budget) {
+        starts = static_cast<int>(
+            std::min<int64_t>(starts, work_budget->reserve_up_to(starts)));
+    }
+    if (starts <= 0) {
+        return {{}, detail::kNoSolution};
+    }
+
+    std::vector<detail::TourCandidate> improved(static_cast<size_t>(starts));
+    auto run_ls = [&]() {
+        tbb::parallel_for(0, starts, [&](int i) {
+            const auto& cand = pool.candidates[static_cast<size_t>(i)];
+            std::vector<int32_t> tour = cand.tour;
+            if (!detail::seed_uses_active_edges(prob, tour, edge_active)) {
+                improved[static_cast<size_t>(i)] = detail::TourCandidate{};
+                return;
+            }
+
+            std::vector<bool> in_tour;
+            double remaining_cap = 0.0;
+            if (!detail::init_seed_state(prob, tour, in_tour, remaining_cap)) {
+                improved[static_cast<size_t>(i)] = detail::TourCandidate{};
+                return;
+            }
+
+            detail::local_search(prob, tour, in_tour, remaining_cap,
+                                 edge_active, max_ls_iter);
+            const double obj = detail::tour_objective(prob, tour);
+            improved[static_cast<size_t>(i)] = detail::TourCandidate{
+                .tour = std::move(tour),
+                .objective = obj
+            };
+        });
+    };
+    if (max_workers > 0) {
+        tbb::task_arena arena(max_workers);
+        arena.execute(run_ls);
+    } else {
+        run_ls();
+    }
+
+    detail::TourCandidate best;
+    for (const auto& cand : improved) {
+        if (cand.tour.empty()) continue;
+        if (!std::isfinite(best.objective)
+            || cand.objective + 1e-12 < best.objective
+            || (std::abs(cand.objective - best.objective) <= 1e-12
+                && cand.tour < best.tour)) {
+            best = cand;
+        }
+    }
+    if (best.tour.empty()) {
+        return {{}, detail::kNoSolution};
+    }
+    return {detail::tour_to_solution(prob, best.tour), best.objective};
+}
+
+/// Build an initial solution via deterministic seed construction + parallel local
+/// search over top seeds.
 inline HeuristicResult build_initial_solution(const Problem& prob,
                                               int num_restarts = 50,
                                               double time_budget_ms = 0.0,
@@ -607,154 +791,25 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
                                               double correction = 0.0,
                                               double upper_bound = std::numeric_limits<double>::infinity(),
                                               int32_t max_workers = 0) {
-    const int32_t n = prob.num_nodes();
-    const int32_t m = prob.num_edges();
-    const int32_t source = prob.source();
-    const int32_t target = prob.target();
-    const double Q = prob.capacity();
-
-    std::vector<bool> edge_active;
-    if (!fwd_bounds.empty() && !bwd_bounds.empty()
-        && fwd_bounds.size() == static_cast<size_t>(n)
-        && bwd_bounds.size() == static_cast<size_t>(n)
-        && std::isfinite(upper_bound)) {
-        std::vector<double> fwd_vec(fwd_bounds.begin(), fwd_bounds.end());
-        std::vector<double> bwd_vec(bwd_bounds.begin(), bwd_bounds.end());
-        auto eliminated = preprocess::edge_elimination(
-            prob, fwd_vec, bwd_vec, upper_bound, correction);
-        edge_active.assign(m, true);
-        int32_t inactive = 0;
-        for (int32_t e = 0; e < m; ++e) {
-            if (eliminated[e]) {
-                edge_active[e] = false;
-                inactive++;
-            }
-        }
-        if (inactive == 0) {
-            edge_active.clear();
-        }
-    }
-
-    // Build candidate list (exclude source and target)
-    std::vector<int32_t> customers;
-    for (int32_t i = 0; i < n; ++i) {
-        if (i != source && i != target && prob.demand(i) <= Q)
-            customers.push_back(i);
-    }
-
-    // Pre-build deterministic orderings
-    std::vector<std::vector<int32_t>> fixed_orders;
-
-    // Order 1: profit/demand ratio (descending)
-    {
-        auto order = customers;
-        std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
-            double ra = prob.demand(a) > 0 ? prob.profit(a) / prob.demand(a)
-                                           : prob.profit(a);
-            double rb = prob.demand(b) > 0 ? prob.profit(b) / prob.demand(b)
-                                           : prob.profit(b);
-            return ra > rb;
-        });
-        fixed_orders.push_back(std::move(order));
-    }
-    // Order 2: profit (descending)
-    {
-        auto order = customers;
-        std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
-            return prob.profit(a) > prob.profit(b);
-        });
-        fixed_orders.push_back(std::move(order));
-    }
-    // Order 3: cheapest from source
-    {
-        auto order = customers;
-        std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
-            return detail::edge_cost(prob, source, a, edge_active)
-                 < detail::edge_cost(prob, source, b, edge_active);
-        });
-        fixed_orders.push_back(std::move(order));
-    }
-
-    std::vector<int32_t> best_tour;
-    double best_obj = detail::kNoSolution;
-
-    // Stage 0: enumerate all 1/2-customer seeds and start local search from best seed.
-    // This gives a robust early incumbent before randomized restarts.
-    {
-        auto [seed_tour, seed_obj] =
-            detail::best_small_seed_with_local_search(prob, customers, edge_active);
-        if (!seed_tour.empty() && seed_obj < best_obj) {
-            best_tour = std::move(seed_tour);
-            best_obj = seed_obj;
-        }
-    }
-
     (void)time_budget_ms;  // deterministic-only workflow
 
-    const int num_fixed = static_cast<int>(fixed_orders.size());
-    const int num_random = std::max(0, num_restarts - num_fixed);
-    fixed_orders.reserve(num_fixed + num_random);
-    for (int r = 0; r < num_random; ++r) {
-        std::mt19937 rng(static_cast<uint32_t>(r));
-        auto order = customers;
-        std::shuffle(order.begin(), order.end(), rng);
-        fixed_orders.push_back(std::move(order));
-    }
+    const int32_t candidate_cap = std::max<int32_t>(
+        1, std::max<int32_t>(num_restarts, (max_workers > 0 ? max_workers : 1)));
+    auto pool = build_construction_pool(
+        prob, candidate_cap, fwd_bounds, bwd_bounds, correction, upper_bound);
+    auto construction = best_construction_solution(prob, pool);
 
-    int total_restarts = static_cast<int>(fixed_orders.size());
-    if (work_budget) {
-        total_restarts = static_cast<int>(
-            std::min<int64_t>(total_restarts,
-                work_budget->reserve_up_to(total_restarts)));
-    }
-    if (total_restarts <= 0) {
-        return {{}, detail::kNoSolution};
-    }
+    const int32_t ls_starts = std::min<int32_t>(
+        candidate_cap,
+        std::max<int32_t>(1, max_workers > 0 ? max_workers : num_restarts));
+    auto improved = run_local_search_from_pool(
+        prob, pool, ls_starts, 200, work_budget, max_workers);
 
-    struct RestartResult {
-        std::vector<int32_t> tour;
-        double obj;
-    };
-    std::vector<RestartResult> results(total_restarts);
-
-    auto run_restarts = [&]() {
-        tbb::parallel_for(0, total_restarts, [&](int i) {
-            auto [tour, obj] = detail::single_restart(
-                prob, customers, fixed_orders[i], edge_active);
-            results[i] = {std::move(tour), obj};
-        });
-    };
-    if (max_workers > 0) {
-        tbb::task_arena arena(max_workers);
-        arena.execute(run_restarts);
-    } else {
-        run_restarts();
+    if (improved.col_values.empty()
+        || improved.objective > construction.objective + 1e-12) {
+        return construction;
     }
-
-    for (int i = 0; i < total_restarts; ++i) {
-        if (results[i].obj < best_obj) {
-            best_obj = results[i].obj;
-            best_tour = std::move(results[i].tour);
-        }
-    }
-
-    if (best_tour.empty()) {
-        best_tour = detail::fallback_feasible(prob, edge_active);
-    }
-    const bool valid_obj =
-        std::isfinite(best_obj) &&
-        best_obj < std::numeric_limits<double>::max() / 2.0;
-    if (!valid_obj) {
-        best_tour = detail::fallback_feasible(prob, edge_active);
-    }
-    if (best_tour.empty()) {
-        return {{}, detail::kNoSolution};
-    }
-    best_obj = detail::tour_objective(prob, best_tour);
-
-    // Convert best tour to MIP solution vector
-    auto sol = detail::tour_to_solution(prob, best_tour);
-    return {std::move(sol), best_obj};
+    return improved;
 }
 
 /// Compatibility wrapper: build_warm_start delegates to build_initial_solution.

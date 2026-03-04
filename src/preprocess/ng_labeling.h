@@ -18,9 +18,9 @@
 namespace rcspp::preprocess::ng {
 
 struct DssrOptions {
-    int32_t initial_ng_size = 4;
-    int32_t max_ng_size = 6;
-    int32_t dssr_iterations = 6;
+    int32_t initial_ng_size = 0;
+    int32_t max_ng_size = 3;
+    int32_t dssr_iterations = 4;
     bool enable_simd = true;
 };
 
@@ -195,7 +195,7 @@ inline void initialize_ng_masks(std::vector<uint64_t>& masks,
                                 int32_t ng_size,
                                 const std::vector<std::vector<int32_t>>& nearest) {
     masks.assign(static_cast<size_t>(n) * words, 0);
-    const int32_t k = std::max<int32_t>(1, ng_size);
+    const int32_t k = std::max<int32_t>(0, ng_size);
     for (int32_t i = 0; i < n; ++i) {
         uint64_t* row = masks.data() + static_cast<size_t>(i) * words;
         set_bit(row, i);
@@ -219,15 +219,48 @@ inline int32_t max_ng_cardinality(const std::vector<uint64_t>& masks, int32_t n,
     return best;
 }
 
+inline std::vector<std::vector<int32_t>> ng_neighbors_from_masks(
+    const std::vector<uint64_t>& ng_masks,
+    int32_t n,
+    int32_t words) {
+    std::vector<std::vector<int32_t>> ng_neighbors(static_cast<size_t>(n));
+    for (int32_t u = 0; u < n; ++u) {
+        const uint64_t* row = ng_masks.data() + static_cast<size_t>(u) * words;
+        auto& out = ng_neighbors[static_cast<size_t>(u)];
+        out.reserve(static_cast<size_t>(std::max<int32_t>(1, row_bitcount(ng_masks, u, words))));
+        for (int32_t w = 0; w < words; ++w) {
+            uint64_t bits = row[w];
+            while (bits) {
+                const int32_t b = static_cast<int32_t>(__builtin_ctzll(bits));
+                const int32_t node = (w << 6) + b;
+                if (node < n) out.push_back(node);
+                bits &= (bits - 1);
+            }
+        }
+    }
+    return ng_neighbors;
+}
+
+inline int32_t find_local_ng_index(const std::vector<int32_t>& ng_list, int32_t node) {
+    for (int32_t i = 0; i < static_cast<int32_t>(ng_list.size()); ++i) {
+        if (ng_list[static_cast<size_t>(i)] == node) return i;
+    }
+    return -1;
+}
+
 inline LabelingRun run_labeling(const Problem& prob,
                                 int32_t root,
                                 std::span<const double> edge_costs,
                                 std::span<const double> profits,
-                                const std::vector<uint64_t>& ng_masks,
+                                const std::vector<std::vector<int32_t>>& ng_neighbors,
                                 bool enable_simd) {
     const int32_t n = prob.num_nodes();
     const double Q = prob.capacity();
-    const int32_t words = bitmap_words(n);
+    int32_t max_ng_card = 1;
+    for (const auto& row : ng_neighbors) {
+        max_ng_card = std::max<int32_t>(max_ng_card, static_cast<int32_t>(row.size()));
+    }
+    const int32_t words = std::max<int32_t>(1, bitmap_words(max_ng_card));
     const auto& graph = prob.graph();
 
     LabelingRun run;
@@ -244,7 +277,6 @@ inline LabelingRun run_labeling(const Problem& prob,
     root_store.prev_slot.push_back(-1);
     root_store.active.push_back(1);
     root_store.visited.assign(words, 0);
-    set_bit(root_store.visited.data(), root);
     root_store.active_count = 1;
     run.best_cost[root] = root_store.cost[0];
     run.best_slot[root] = 0;
@@ -275,12 +307,23 @@ inline LabelingRun run_labeling(const Problem& prob,
             if (v == prev_u) continue;
             const double new_demand = base_dem + prob.demand(v);
             if (new_demand > Q) continue;
-            if (test_bit(vis_u, v)) continue;
+            const auto& ng_u = ng_neighbors[static_cast<size_t>(u)];
+            const auto& ng_v = ng_neighbors[static_cast<size_t>(v)];
+            const int32_t v_in_u = find_local_ng_index(ng_u, v);
+            if (v_in_u >= 0 && test_bit(vis_u, v_in_u)) continue;
 
             const double new_cost = base_cost + edge_costs[e] - profits[v];
-            const uint64_t* ng_row = ng_masks.data() + static_cast<size_t>(v) * words;
-            for (int32_t w = 0; w < words; ++w) temp_vis[w] = vis_u[w] & ng_row[w];
-            set_bit(temp_vis.data(), v);
+            std::fill(temp_vis.begin(), temp_vis.end(), 0);
+            // Remap used bits from ng(u) to ng(v): keep only shared nodes.
+            for (int32_t bit_u = 0; bit_u < static_cast<int32_t>(ng_u.size()); ++bit_u) {
+                if (!test_bit(vis_u, bit_u)) continue;
+                const int32_t node = ng_u[static_cast<size_t>(bit_u)];
+                const int32_t bit_v = find_local_ng_index(ng_v, node);
+                if (bit_v >= 0) set_bit(temp_vis.data(), bit_v);
+            }
+            // Flowty-style update: mark predecessor (u) in ng(v).
+            const int32_t pred_in_v = find_local_ng_index(ng_v, u);
+            if (pred_in_v >= 0) set_bit(temp_vis.data(), pred_in_v);
 
             auto& dst_store = run.nodes[v];
             bool dominated = false;
@@ -426,8 +469,8 @@ inline DssrBoundsResult compute_bounds(const Problem& prob,
     const int32_t words = detail::bitmap_words(n);
     const auto nearest = detail::nearest_neighbors(prob);
 
-    const int32_t init_ng = std::max<int32_t>(1, std::min(opts.initial_ng_size, opts.max_ng_size));
-    const int32_t max_ng = std::max<int32_t>(init_ng, opts.max_ng_size);
+    const int32_t max_ng = std::max<int32_t>(1, opts.max_ng_size);
+    const int32_t init_ng = std::max<int32_t>(0, std::min(opts.initial_ng_size, max_ng));
     const int32_t max_iter = std::max<int32_t>(1, opts.dssr_iterations);
 
     std::vector<uint64_t> ng_masks;
@@ -439,15 +482,16 @@ inline DssrBoundsResult compute_bounds(const Problem& prob,
     std::vector<std::vector<int32_t>> cycles;
 
     for (int32_t it = 0; it < max_iter; ++it) {
+        const auto ng_neighbors = detail::ng_neighbors_from_masks(ng_masks, n, words);
         auto fwd_run = detail::run_labeling(
-            prob, source, edge_costs, profits, ng_masks, opts.enable_simd);
+            prob, source, edge_costs, profits, ng_neighbors, opts.enable_simd);
         result.fwd = fwd_run.best_cost;
 
         if (source == target) {
             result.bwd = result.fwd;
         } else {
             auto bwd_run = detail::run_labeling(
-                prob, target, edge_costs, profits, ng_masks, opts.enable_simd);
+                prob, target, edge_costs, profits, ng_neighbors, opts.enable_simd);
             result.bwd = bwd_run.best_cost;
             if (fwd_run.best_slot[target] >= 0) {
                 auto path = detail::reconstruct_best_path(fwd_run, target);
@@ -484,16 +528,18 @@ inline DssrBoundsResult compute_bounds(const Problem& prob,
     }
 
     if (result.fwd.empty()) {
+        const auto ng_neighbors = detail::ng_neighbors_from_masks(ng_masks, n, words);
         auto fwd_run = detail::run_labeling(
-            prob, source, edge_costs, profits, ng_masks, opts.enable_simd);
+            prob, source, edge_costs, profits, ng_neighbors, opts.enable_simd);
         result.fwd = std::move(fwd_run.best_cost);
     }
     if (result.bwd.empty()) {
         if (source == target) {
             result.bwd = result.fwd;
         } else {
+            const auto ng_neighbors = detail::ng_neighbors_from_masks(ng_masks, n, words);
             auto bwd_run = detail::run_labeling(
-                prob, target, edge_costs, profits, ng_masks, opts.enable_simd);
+                prob, target, edge_costs, profits, ng_neighbors, opts.enable_simd);
             result.bwd = std::move(bwd_run.best_cost);
         }
     }

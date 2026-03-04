@@ -5,8 +5,15 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <map>
 #include <memory>
+#include <sstream>
+#include <string_view>
 #include <thread>
+
+#ifdef __linux__
+#include <unistd.h>
+#endif
 
 #include <tbb/task_group.h>
 #include <tbb/parallel_for.h>
@@ -85,6 +92,26 @@ bool has_feasible_heuristic(const heuristic::HeuristicResult& r) {
     return !r.col_values.empty() &&
            std::isfinite(r.objective) &&
            r.objective < std::numeric_limits<double>::max() / 2.0;
+}
+
+unsigned detect_physical_cores() {
+#ifdef __linux__
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    if (n > 0) return static_cast<unsigned>(n);
+#endif
+    unsigned logical = std::thread::hardware_concurrency();
+    return (logical > 0) ? logical : 1u;
+}
+
+std::string join_tokens(const std::vector<std::string>& tokens,
+                        std::string_view delim = " ") {
+    if (tokens.empty()) return {};
+    std::ostringstream oss;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        if (i) oss << delim;
+        oss << tokens[i];
+    }
+    return oss.str();
 }
 
 }  // namespace
@@ -201,12 +228,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool edge_elimination_nodes = true;
     double cutoff = std::numeric_limits<double>::infinity();
     bool disable_heuristics = false;
-    bool preproc_adaptive = true;
-    std::string preproc_stage1_bounds = "auto";
+    std::string preproc_stage1_bounds = "two_cycle";
     int32_t preproc_fast_restarts = 12;
-    int32_t preproc_second_ws_large_n = 60;
-    double preproc_second_ws_min_elim = 0.05;
-    double preproc_second_ws_min_elim_large = 0.02;
     int32_t hyper_sb_max_depth = 0;
     int32_t hyper_sb_iter_limit = 100;
     int32_t hyper_sb_min_reliable = 4;
@@ -225,6 +248,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     double min_violation_comb = -1.0;
     double min_violation_rglm = -1.0;
     double min_violation_spi = -1.0;
+    std::map<std::string, std::string> accepted_highs_options;
+    bool threads_option_explicit = false;
     for (const auto& [key, value] : options) {
         if (key == "presolve") {
             // Our callback/cut plumbing assumes original column space and
@@ -337,37 +362,24 @@ SolveResult Model::solve(const SolverOptions& options) {
             disable_heuristics = (value == "true" || value == "1");
             continue;
         }
-        if (key == "preproc_adaptive") {
-            preproc_adaptive = (value == "true" || value == "1");
-            continue;
-        }
         if (key == "preproc_stage1_bounds") {
             std::string mode = value;
             std::transform(mode.begin(), mode.end(), mode.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (mode == "two_cycle" || mode == "ng1" || mode == "auto") {
+            if (mode == "two_cycle" || mode == "ng_dssr" || mode == "auto") {
                 preproc_stage1_bounds = mode;
+            } else if (mode == "ng1") {
+                preproc_stage1_bounds = "ng_dssr";
+                logger_.log("Warning: preproc_stage1_bounds=ng1 is deprecated; use ng_dssr");
             } else {
-                logger_.log("Warning: unknown preproc_stage1_bounds='{}' (expected two_cycle|ng1|auto), using auto",
+                logger_.log("Warning: unknown preproc_stage1_bounds='{}' (expected two_cycle|ng_dssr|auto), using two_cycle",
                             value);
-                preproc_stage1_bounds = "auto";
+                preproc_stage1_bounds = "two_cycle";
             }
             continue;
         }
         if (key == "preproc_fast_restarts") {
             preproc_fast_restarts = std::stoi(value);
-            continue;
-        }
-        if (key == "preproc_second_ws_large_n") {
-            preproc_second_ws_large_n = std::stoi(value);
-            continue;
-        }
-        if (key == "preproc_second_ws_min_elim") {
-            preproc_second_ws_min_elim = std::stod(value);
-            continue;
-        }
-        if (key == "preproc_second_ws_min_elim_large") {
-            preproc_second_ws_min_elim_large = std::stod(value);
             continue;
         }
         if (key == "ng_initial_size") {
@@ -473,17 +485,17 @@ SolveResult Model::solve(const SolverOptions& options) {
         auto status = highs.setOptionValue(key, value);
         if (status != HighsStatus::kOk) {
             logger_.log("Warning: HiGHS rejected option {} = {}", key, value);
+        } else {
+            accepted_highs_options[key] = value;
+            if (key == "threads") threads_option_explicit = true;
         }
     }
 
-    dssr_options.initial_ng_size = std::max<int32_t>(1, dssr_options.initial_ng_size);
+    dssr_options.initial_ng_size = std::max<int32_t>(0, dssr_options.initial_ng_size);
     dssr_options.max_ng_size = std::max<int32_t>(dssr_options.initial_ng_size,
                                                  dssr_options.max_ng_size);
     dssr_options.dssr_iterations = std::max<int32_t>(1, dssr_options.dssr_iterations);
     preproc_fast_restarts = std::max<int32_t>(1, preproc_fast_restarts);
-    preproc_second_ws_large_n = std::max<int32_t>(1, preproc_second_ws_large_n);
-    preproc_second_ws_min_elim = std::clamp(preproc_second_ws_min_elim, 0.0, 1.0);
-    preproc_second_ws_min_elim_large = std::clamp(preproc_second_ws_min_elim_large, 0.0, 1.0);
     heuristic_node_interval = std::max<int64_t>(1, heuristic_node_interval);
     deterministic_work_units = std::max<int64_t>(0, deterministic_work_units);
     heuristic_deterministic_restarts =
@@ -499,13 +511,9 @@ SolveResult Model::solve(const SolverOptions& options) {
         highs_threads_option = 0;
     }
     auto resolve_highs_auto_threads = []() -> int32_t {
-#ifdef HIGHS_NO_DEFAULT_THREADS
-        return 1;
-#else
         const unsigned hw = std::thread::hardware_concurrency();
         const unsigned resolved = (std::max(1u, hw) + 1u) / 2u;
         return static_cast<int32_t>(resolved);
-#endif
     };
     int32_t preproc_thread_limit = 1;
     if (highs_threads_option > 0) {
@@ -517,12 +525,114 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     } else {
         preproc_thread_limit = resolve_highs_auto_threads();
+        // Keep HiGHS and preprocessing on the same default thread value.
+        highs.setOptionValue("threads", preproc_thread_limit);
+        highs_threads_option = static_cast<HighsInt>(preproc_thread_limit);
+        if (threads_option_explicit) {
+            // User provided a non-positive value (e.g. --threads 0): report the
+            // resolved runtime value so settings output matches execution.
+            accepted_highs_options["threads"] = std::to_string(preproc_thread_limit);
+        } else {
+            accepted_highs_options.erase("threads");
+        }
     }
     preproc_thread_limit = std::max<int32_t>(1, preproc_thread_limit);
+    if (threads_option_explicit) {
+        accepted_highs_options["threads"] = std::to_string(preproc_thread_limit);
+    }
+    const unsigned logical_threads =
+        std::max(1u, std::thread::hardware_concurrency());
+    const unsigned physical_cores = detect_physical_cores();
+    const char* tbb_str = ", TBB";
+    const char* simd_str = "";
+#ifdef __AVX512F__
+    simd_str = ", AVX-512";
+#elif defined(__AVX2__)
+    simd_str = ", AVX2";
+#elif defined(__AVX__)
+    simd_str = ", AVX";
+#elif defined(__SSE4_2__)
+    simd_str = ", SSE4.2";
+#endif
+    logger_.log("Thread count: {} physical cores, {} logical processors, using up to {} threads{}{}",
+                physical_cores, logical_threads, preproc_thread_limit, tbb_str, simd_str);
+
+    std::vector<std::string> nondefault_settings;
+    nondefault_settings.push_back("presolve=off");
+    nondefault_settings.push_back("mip_pscost_minreliable=0");
+    if (separation_interval != 1) {
+        nondefault_settings.push_back(
+            "separation_interval=" + std::to_string(separation_interval));
+    }
+    if (max_cuts_per_sep != 3) {
+        nondefault_settings.push_back(
+            "max_cuts_per_separator=" + std::to_string(max_cuts_per_sep));
+    }
+    if (all_pairs_propagation) nondefault_settings.push_back("all_pairs_propagation=on");
+    if (disable_heuristics) nondefault_settings.push_back("disable_heuristics=on");
+    if (!edge_elimination) nondefault_settings.push_back("edge_elimination=off");
+    if (!edge_elimination_nodes) nondefault_settings.push_back("edge_elimination_nodes=off");
+    if (branch_hyper != "off") nondefault_settings.push_back("branch_hyper=" + branch_hyper);
+    if (deterministic_work_units > 0) {
+        nondefault_settings.push_back(
+            "deterministic_work_units=" + std::to_string(deterministic_work_units));
+    }
+    if (heuristic_node_interval != 200) {
+        nondefault_settings.push_back(
+            "heuristic_node_interval=" + std::to_string(heuristic_node_interval));
+    }
+    if (heuristic_deterministic_restarts != 32) {
+        nondefault_settings.push_back(
+            "heuristic_deterministic_restarts="
+            + std::to_string(heuristic_deterministic_restarts));
+    }
+    if (preproc_stage1_bounds != "two_cycle") {
+        nondefault_settings.push_back("preproc_stage1_bounds=" + preproc_stage1_bounds);
+    }
+    if (preproc_fast_restarts != 12) {
+        nondefault_settings.push_back(
+            "preproc_fast_restarts=" + std::to_string(preproc_fast_restarts));
+    }
+    {
+        const preprocess::ng::DssrOptions defaults;
+        if (dssr_options.initial_ng_size != defaults.initial_ng_size) {
+            nondefault_settings.push_back(
+                "ng_initial_size=" + std::to_string(dssr_options.initial_ng_size));
+        }
+        if (dssr_options.max_ng_size != defaults.max_ng_size) {
+            nondefault_settings.push_back(
+                "ng_max_size=" + std::to_string(dssr_options.max_ng_size));
+        }
+        if (dssr_options.dssr_iterations != defaults.dssr_iterations) {
+            nondefault_settings.push_back(
+                "ng_dssr_iters=" + std::to_string(dssr_options.dssr_iterations));
+        }
+        if (dssr_options.enable_simd != defaults.enable_simd) {
+            nondefault_settings.push_back(
+                std::string("ng_simd=") + (dssr_options.enable_simd ? "on" : "off"));
+        }
+    }
+    if (cutoff < std::numeric_limits<double>::infinity()) {
+        nondefault_settings.push_back("cutoff=" + std::to_string(cutoff));
+    }
+    for (const auto& [k, v] : accepted_highs_options) {
+        nondefault_settings.push_back(k + "=" + v);
+    }
+    const std::string settings_summary = join_tokens(nondefault_settings);
 
     const int32_t source = problem_.source();
     const int32_t target = problem_.target();
     const int32_t n = problem_.num_nodes();
+    const int32_t m = problem_.num_edges();
+    const std::string solve_label =
+        problem_.name.empty() ? std::string("instance") : problem_.name;
+    logger_.log("Solving {} with:", solve_label);
+    if (problem_.is_tour()) {
+        logger_.log("  {} nodes, {} edges, tour through node {}", n, m, source);
+    } else {
+        logger_.log("  {} nodes, {} edges, path from node {} to node {}", n, m, source, target);
+    }
+    logger_.log("  Settings  : {}", settings_summary);
 
     auto non_highs_work_budget =
         std::make_shared<WorkUnitBudget>(deterministic_work_units);
@@ -545,13 +655,15 @@ SolveResult Model::solve(const SolverOptions& options) {
     // Honor user output preference for HiGHS logging (single-source output).
     highs.setOptionValue("output_flag", output_flag);
 
-    // Staged preprocessing:
-    // Stage 1: parallel source/target 2-cycle bounds + fast warm-start
-    // Stage 2: adaptive second warm-start + optional all-pairs + deeper s-t ng/DSSR
+    // Deterministic staged preprocessing:
+    // 1) Stage-1 bounds (parallel forward/backward)
+    // 2) Construction seeds (1/2-customer)
+    // 3) Local search on top seeds (parallel)
+    // 3.5) Edge elimination from construction UB
+    // 4) Reduced local search + deeper ng/DSSR (parallel)
+    // 5) Start HiGHS
     // correction = profit(source) when s == t (tour: depot profit double-subtracted)
     double correction = problem_.is_tour() ? problem_.profit(source) : 0.0;
-
-    const int32_t m = problem_.num_edges();
 
     std::vector<double> fwd_bounds, bwd_bounds;
     std::vector<double> all_pairs;
@@ -560,8 +672,10 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t ng_size_used = 1;
     double ng_path_ub = std::numeric_limits<double>::infinity();
     std::vector<int32_t> ng_path_nodes;
-    int32_t stage1_elim_edges = 0;
-    double stage1_elim_ratio = 0.0;
+    int32_t stage3_elim_edges = 0;
+    double stage3_elim_ratio = 0.0;
+    int32_t stage5_elim_edges = 0;
+    double stage5_elim_ratio = 0.0;
 
     // Use cutoff as UB when provided (known optimal for prove-only mode)
     if (cutoff < std::numeric_limits<double>::infinity()) {
@@ -570,37 +684,38 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     {
         Timer preproc_timer;
-
-        // Stage 1: fast startup bounds + first incumbent
-        heuristic::HeuristicResult fast_start{{}, std::numeric_limits<double>::infinity()};
         enum class Stage1BoundsBackend {
             two_cycle,
-            ng1,
+            ng_dssr,
         };
         Stage1BoundsBackend stage1_backend = Stage1BoundsBackend::two_cycle;
-        if (preproc_stage1_bounds == "ng1") {
-            stage1_backend = Stage1BoundsBackend::ng1;
+        if (preproc_stage1_bounds == "ng_dssr") {
+            stage1_backend = Stage1BoundsBackend::ng_dssr;
         } else if (preproc_stage1_bounds == "auto") {
-            // Favor the lightweight 2-cycle kernel on medium/large instances.
-            stage1_backend = (n <= 40) ? Stage1BoundsBackend::ng1
-                                       : Stage1BoundsBackend::two_cycle;
+            stage1_backend = ((dssr_options.max_ng_size > 1)
+                              || (dssr_options.dssr_iterations > 1))
+                ? Stage1BoundsBackend::ng_dssr
+                : Stage1BoundsBackend::two_cycle;
         }
         const char* stage1_backend_name =
-            (stage1_backend == Stage1BoundsBackend::ng1) ? "ng1" : "two_cycle";
+            (stage1_backend == Stage1BoundsBackend::ng_dssr) ? "ng_dssr" : "two_cycle";
         if (workflow_dump) {
             logger_.log("Workflow DAG (startup):");
-            logger_.log("  stage1_bounds({}) + fast_warm_start -> ub0", stage1_backend_name);
-            logger_.log("  ub0 + stage1_bounds -> stage1_edge_elim_ratio -> second_warm_start(adaptive)");
-            logger_.log("  stage2 parallel: second_warm_start | ng_refinement | all_pairs(optional)");
+            logger_.log("  Stage1 [Bounds] -> backend={}", stage1_backend_name);
+            logger_.log("  Stage2 [Construction] -> seed 1/2-customer tours/paths");
+            logger_.log("  Stage3 [EdgeElim on construction UB]");
+            logger_.log("  Stage4 [Parallel local search on reduced graph] -> optional all-pairs bounds");
+            logger_.log("  Stage5 [EdgeElim on local-search UB]");
+            logger_.log("  Stage6 [HiGHS] -> highs.run()");
         }
-        logger_.log(
-            "Startup Stage1: bounds backend={} (source={}, target={}), fast warm-start={}",
-            stage1_backend_name, source, target,
-            disable_heuristics ? "disabled" : "enabled");
+        logger_.log("Startup Stage1 [Bounds]: backend={} (source={}, target={})",
+                    stage1_backend_name, source, target);
 
         tbb::task_arena preproc_arena(preproc_thread_limit);
         preproc_arena.execute([&] {
             tbb::task_group stage1_tg;
+            int32_t ng_size_source = 1;
+            int32_t ng_size_target = 1;
             if (stage1_backend == Stage1BoundsBackend::two_cycle) {
                 stage1_tg.run([&] {
                     fwd_bounds = preprocess::labeling_from(problem_, source);
@@ -610,62 +725,71 @@ SolveResult Model::solve(const SolverOptions& options) {
                         bwd_bounds = preprocess::labeling_from(problem_, target);
                     });
                 }
-                ng_size_used = 1;
             } else {
-                auto fast_stage_opts = dssr_options;
-                fast_stage_opts.initial_ng_size = 1;
-                fast_stage_opts.max_ng_size = 1;
-                fast_stage_opts.dssr_iterations = 1;
+                auto stage1_opts = dssr_options;
+                stage1_opts.initial_ng_size = std::max<int32_t>(0, dssr_options.initial_ng_size);
+                stage1_opts.max_ng_size = std::max<int32_t>(
+                    1, std::max<int32_t>(stage1_opts.initial_ng_size, dssr_options.max_ng_size));
+                stage1_opts.dssr_iterations = std::max<int32_t>(1, dssr_options.dssr_iterations);
+
                 stage1_tg.run([&] {
-                    auto fast_bounds = preprocess::ng::compute_bounds(
-                        problem_, source, target, fast_stage_opts);
-                    fwd_bounds = std::move(fast_bounds.fwd);
-                    bwd_bounds = std::move(fast_bounds.bwd);
-                    ng_size_used = fast_bounds.ng_size;
-                    if (fast_bounds.elementary_path_found) {
-                        ng_path_ub = fast_bounds.elementary_path_cost;
-                        ng_path_nodes = std::move(fast_bounds.elementary_path);
+                    auto source_bounds = preprocess::ng::compute_bounds(
+                        problem_, source, source, stage1_opts);
+                    fwd_bounds = std::move(source_bounds.fwd);
+                    ng_size_source = source_bounds.ng_size;
+                    if (source_bounds.elementary_path_found) {
+                        ng_path_ub = source_bounds.elementary_path_cost;
+                        ng_path_nodes = std::move(source_bounds.elementary_path);
                     }
                 });
-            }
-            if (!disable_heuristics) {
-                const int fast_restarts = std::max<int32_t>(3, preproc_fast_restarts);
-                const double fast_budget_ms = 0.0;
-                stage1_tg.run([&] {
-                    fast_start = heuristic::build_initial_solution(
-                        problem_, fast_restarts, fast_budget_ms, non_highs_work_budget,
-                        std::span<const double>{}, std::span<const double>{},
-                        0.0, std::numeric_limits<double>::infinity(),
-                        preproc_thread_limit);
-                });
+                if (source != target) {
+                    stage1_tg.run([&] {
+                        auto target_bounds = preprocess::ng::compute_bounds(
+                            problem_, target, target, stage1_opts);
+                        bwd_bounds = std::move(target_bounds.fwd);
+                        ng_size_target = target_bounds.ng_size;
+                    });
+                }
             }
             stage1_tg.wait();
+            ng_size_used = std::max<int32_t>(
+                ng_size_used, std::max(ng_size_source, ng_size_target));
         });
-        if (stage1_backend == Stage1BoundsBackend::two_cycle && source == target) {
+        if (source == target) {
             bwd_bounds = fwd_bounds;
         }
         logger_.log(
-            "Startup Stage1 bounds done: fwd_finite={}/{}, bwd_finite={}/{}, fwd[target]={}",
+            "Startup Stage1 [Bounds] done: fwd_finite={}/{}, bwd_finite={}/{}, fwd[target]={}",
             count_finite_bounds(fwd_bounds), n,
             count_finite_bounds(bwd_bounds), n,
             (target >= 0 && target < n && target < static_cast<int32_t>(fwd_bounds.size()))
                 ? fwd_bounds[static_cast<size_t>(target)]
                 : std::numeric_limits<double>::infinity());
+        heuristic::ConstructionPool construction_pool;
+        heuristic::HeuristicResult construction_start{{}, std::numeric_limits<double>::infinity()};
+        heuristic::HeuristicResult ls_stage4{{}, std::numeric_limits<double>::infinity()};
+        double construction_ub = std::numeric_limits<double>::infinity();
+        std::vector<bool> stage3_edge_active;
+
         if (!disable_heuristics) {
-            warm_start = std::move(fast_start);
-            if (has_feasible_heuristic(warm_start)) {
-                logger_.log(
-                    "Startup Stage1 fast warm-start done: UB0={}, cols={}",
-                    warm_start.objective,
-                    static_cast<int32_t>(warm_start.col_values.size()));
+            const int32_t candidate_cap = std::max<int32_t>(
+                preproc_fast_restarts, preproc_thread_limit);
+            construction_pool = heuristic::build_construction_pool(
+                problem_, candidate_cap);
+            construction_start = heuristic::best_construction_solution(problem_, construction_pool);
+            if (has_feasible_heuristic(construction_start)) {
+                construction_ub = construction_start.objective;
+                warm_start = construction_start;
+                logger_.log("Startup Stage2 [Construction] done: UB0={}, candidates={}",
+                            construction_ub,
+                            static_cast<int32_t>(construction_pool.candidates.size()));
             } else {
-                logger_.log("Startup Stage1 fast warm-start done: no feasible incumbent");
+                logger_.log("Startup Stage2 [Construction] done: no feasible incumbent");
             }
         } else {
-            logger_.log("Startup Stage1 fast warm-start skipped: disable_heuristics=true");
+            logger_.log("Startup Stage2 [Construction] skipped: disable_heuristics=true");
         }
 
-        // Initial UB from cutoff and/or fast warm-start
         if (cutoff >= std::numeric_limits<double>::infinity()) {
             warm_start_ub = has_feasible_heuristic(warm_start)
                 ? warm_start.objective
@@ -674,71 +798,52 @@ SolveResult Model::solve(const SolverOptions& options) {
             warm_start_ub = std::min(warm_start_ub, warm_start.objective);
         }
 
-        // First elimination estimate drives adaptive stage-2 warm-start policy
         if (edge_elimination
-            && std::isfinite(warm_start_ub)
+            && std::isfinite(construction_ub)
             && !fwd_bounds.empty() && !bwd_bounds.empty()) {
-            auto stage1_eliminated = preprocess::edge_elimination(
-                problem_, fwd_bounds, bwd_bounds, warm_start_ub, correction);
-            stage1_elim_edges = static_cast<int32_t>(
-                std::count(stage1_eliminated.begin(), stage1_eliminated.end(), true));
-            stage1_elim_ratio = (m > 0)
-                ? static_cast<double>(stage1_elim_edges) / static_cast<double>(m)
+            auto eliminated = preprocess::edge_elimination(
+                problem_, fwd_bounds, bwd_bounds, construction_ub, correction);
+            stage3_elim_edges = static_cast<int32_t>(
+                std::count(eliminated.begin(), eliminated.end(), true));
+            stage3_elim_ratio = (m > 0)
+                ? static_cast<double>(stage3_elim_edges) / static_cast<double>(m)
                 : 0.0;
+            stage3_edge_active.assign(static_cast<size_t>(m), true);
+            for (int32_t e = 0; e < m; ++e) {
+                if (eliminated[static_cast<size_t>(e)]) {
+                    stage3_edge_active[static_cast<size_t>(e)] = false;
+                }
+            }
             logger_.log(
-                "Startup Stage1 edge-elim estimate: eliminated={}/{} ({:.1f}%), ub0={}",
-                stage1_elim_edges, m, 100.0 * stage1_elim_ratio, warm_start_ub);
+                "Startup Stage3 [EdgeElim on construction UB]: eliminated={}/{} ({:.1f}%), ub0={}",
+                stage3_elim_edges, m, 100.0 * stage3_elim_ratio, construction_ub);
         } else {
             logger_.log(
-                "Startup Stage1 edge-elim estimate skipped: edge_elimination={}, finite_ub={}, have_bounds={}",
+                "Startup Stage3 [EdgeElim on construction UB] skipped: edge_elimination={}, finite_ub0={}, have_bounds={}",
                 edge_elimination ? "true" : "false",
-                std::isfinite(warm_start_ub) ? "true" : "false",
+                std::isfinite(construction_ub) ? "true" : "false",
                 (!fwd_bounds.empty() && !bwd_bounds.empty()) ? "true" : "false");
         }
 
-        bool run_second_ws = !disable_heuristics;
-        if (run_second_ws && preproc_adaptive) {
-            const double min_elim = (n >= preproc_second_ws_large_n)
-                ? preproc_second_ws_min_elim_large
-                : preproc_second_ws_min_elim;
-            run_second_ws = stage1_elim_ratio >= min_elim;
-        }
-
-        heuristic::HeuristicResult second_start{{}, std::numeric_limits<double>::infinity()};
-        std::vector<double> refined_fwd;
-        std::vector<double> refined_bwd;
-        int32_t refined_ng_size = ng_size_used;
-        bool refined_path_found = false;
-        double refined_path_ub = std::numeric_limits<double>::infinity();
-        std::vector<int32_t> refined_path_nodes;
-        bool refined_bounds_ready = false;
-
-        const bool run_ng_refinement =
-            (dssr_options.dssr_iterations > 1
-             || dssr_options.max_ng_size > 1
-             || dssr_options.initial_ng_size > 1);
-
         preproc_arena.execute([&] {
-            tbb::task_group stage2_tg;
-            if (run_second_ws) {
-                int second_restarts = std::max(preproc_fast_restarts, std::clamp(n, 20, 200));
-                double second_budget_ms = 0.0;
+            tbb::task_group stage4_tg;
+            if (!disable_heuristics && !construction_pool.candidates.empty()) {
                 logger_.log(
-                    "Startup Stage2: second warm-start running (restarts={}, budget_ms={})",
-                    second_restarts, second_budget_ms);
-                stage2_tg.run([&] {
-                    second_start = heuristic::build_initial_solution(
-                        problem_, second_restarts, second_budget_ms, non_highs_work_budget,
-                        fwd_bounds, bwd_bounds, correction, warm_start_ub,
-                        preproc_thread_limit);
+                    "Startup Stage4 [Parallel local search on reduced graph]: starts={}, max_iter=200",
+                    preproc_thread_limit);
+                stage4_tg.run([&] {
+                    ls_stage4 = heuristic::run_local_search_from_pool(
+                        problem_, construction_pool, preproc_thread_limit, 200,
+                        non_highs_work_budget, preproc_thread_limit,
+                        stage3_edge_active);
                 });
             } else {
-                logger_.log("Startup Stage2: second warm-start skipped");
+                logger_.log("Startup Stage4 [Parallel local search on reduced graph] skipped");
             }
 
             if (all_pairs_propagation) {
-                logger_.log("Startup Stage2: all-pairs 2-cycle bounds running");
-                stage2_tg.run([&] {
+                logger_.log("Startup Stage4 [Parallel local search on reduced graph]: all-pairs 2-cycle bounds running");
+                stage4_tg.run([&] {
                     constexpr double inf = std::numeric_limits<double>::infinity();
                     all_pairs.assign(static_cast<size_t>(n) * n, inf);
                     tbb::parallel_for(0, n, [&](int32_t s) {
@@ -746,67 +851,24 @@ SolveResult Model::solve(const SolverOptions& options) {
                         std::copy(row.begin(), row.end(),
                                   all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
                     });
-                    logger_.log("Startup Stage2: all-pairs 2-cycle bounds done");
+                    logger_.log("Startup Stage4 [Parallel local search on reduced graph]: all-pairs 2-cycle bounds done");
                 });
             }
-
-            if (run_ng_refinement) {
-                logger_.log(
-                    "Startup Stage2: NG-DSSR refinement running (ng_initial={}, ng_max={}, iters={})",
-                    dssr_options.initial_ng_size,
-                    dssr_options.max_ng_size,
-                    dssr_options.dssr_iterations);
-                stage2_tg.run([&] {
-                    auto refined = preprocess::ng::compute_bounds(
-                        problem_, source, target, dssr_options);
-                    refined_fwd = std::move(refined.fwd);
-                    refined_bwd = std::move(refined.bwd);
-                    refined_ng_size = refined.ng_size;
-                    refined_bounds_ready = true;
-                    refined_path_found = refined.elementary_path_found;
-                    refined_path_ub = refined.elementary_path_cost;
-                    refined_path_nodes = std::move(refined.elementary_path);
-                    logger_.log(
-                        "Startup Stage2: NG-DSSR refinement done (ng_size={}, fwd_finite={}/{}, bwd_finite={}/{}, elem_path_found={}, elem_path_ub={})",
-                        refined_ng_size,
-                        count_finite_bounds(refined_fwd), n,
-                        count_finite_bounds(refined_bwd), n,
-                        refined_path_found ? "true" : "false",
-                        refined_path_ub);
-                });
-            } else {
-                logger_.log("Startup Stage2: NG-DSSR refinement skipped");
-            }
-            stage2_tg.wait();
+            stage4_tg.wait();
         });
 
-        if (has_feasible_heuristic(second_start) &&
+        if (has_feasible_heuristic(ls_stage4) &&
             (!has_feasible_heuristic(warm_start) ||
-             second_start.objective + 1e-9 < warm_start.objective)) {
-            logger_.log(
-                "Startup Stage2 second warm-start improved UB: {} -> {}",
-                warm_start.objective, second_start.objective);
-            warm_start = std::move(second_start);
-        } else if (has_feasible_heuristic(second_start)) {
-            logger_.log(
-                "Startup Stage2 second warm-start done: objective={} (no UB improvement)",
-                second_start.objective);
+             ls_stage4.objective + 1e-9 < warm_start.objective)) {
+            logger_.log("Startup Stage4 [Parallel local search on reduced graph] improved UB: {} -> {}",
+                        warm_start.objective, ls_stage4.objective);
+            warm_start = std::move(ls_stage4);
+        } else if (has_feasible_heuristic(ls_stage4)) {
+            logger_.log("Startup Stage4 [Parallel local search on reduced graph] done: objective={} (no UB improvement)",
+                        ls_stage4.objective);
         }
 
-        if (refined_bounds_ready
-            && refined_fwd.size() == static_cast<size_t>(n)
-            && refined_bwd.size() == static_cast<size_t>(n)) {
-            for (int32_t i = 0; i < n; ++i) {
-                fwd_bounds[i] = std::max(fwd_bounds[i], refined_fwd[i]);
-                bwd_bounds[i] = std::max(bwd_bounds[i], refined_bwd[i]);
-            }
-            ng_size_used = std::max(ng_size_used, refined_ng_size);
-            if (refined_path_found && refined_path_ub + 1e-9 < ng_path_ub) {
-                ng_path_ub = refined_path_ub;
-                ng_path_nodes = std::move(refined_path_nodes);
-            }
-        } else if (all_pairs_propagation && !all_pairs.empty()) {
-            // If ng refinement is disabled, use source/target all-pairs rows.
+        if (all_pairs_propagation && !all_pairs.empty()) {
             fwd_bounds.assign(
                 all_pairs.begin() + static_cast<ptrdiff_t>(source) * n,
                 all_pairs.begin() + static_cast<ptrdiff_t>(source) * n + n);
@@ -819,7 +881,6 @@ SolveResult Model::solve(const SolverOptions& options) {
             }
         }
 
-        // Heuristic UB only used when no cutoff was provided
         if (cutoff >= std::numeric_limits<double>::infinity()) {
             warm_start_ub = has_feasible_heuristic(warm_start)
                 ? warm_start.objective
@@ -839,12 +900,35 @@ SolveResult Model::solve(const SolverOptions& options) {
                 warm_start_ub = std::min(warm_start_ub, warm_start.objective);
             }
         }
-        logger_.log("Preprocessing: {}s, UB={}{} [stage1={}, edge-elim estimate: {}/{} ({:.1f}%)]",
+
+        if (edge_elimination
+            && std::isfinite(warm_start_ub)
+            && !fwd_bounds.empty() && !bwd_bounds.empty()) {
+            auto eliminated = preprocess::edge_elimination(
+                problem_, fwd_bounds, bwd_bounds, warm_start_ub, correction);
+            stage5_elim_edges = static_cast<int32_t>(
+                std::count(eliminated.begin(), eliminated.end(), true));
+            stage5_elim_ratio = (m > 0)
+                ? static_cast<double>(stage5_elim_edges) / static_cast<double>(m)
+                : 0.0;
+            logger_.log(
+                "Startup Stage5 [EdgeElim on local-search UB]: eliminated={}/{} ({:.1f}%), ub={}",
+                stage5_elim_edges, m, 100.0 * stage5_elim_ratio, warm_start_ub);
+        } else {
+            logger_.log(
+                "Startup Stage5 [EdgeElim on local-search UB] skipped: edge_elimination={}, finite_ub={}, have_bounds={}",
+                edge_elimination ? "true" : "false",
+                std::isfinite(warm_start_ub) ? "true" : "false",
+                (!fwd_bounds.empty() && !bwd_bounds.empty()) ? "true" : "false");
+        }
+
+        logger_.log("Preprocessing: {}s, UB={}{} [Stage1 [Bounds]={}, Stage3 [EdgeElim on construction UB]: {}/{} ({:.1f}%), Stage5 [EdgeElim on local-search UB]: {}/{} ({:.1f}%)]",
                     preproc_timer.elapsed_seconds(),
                     warm_start_ub,
                     (cutoff < std::numeric_limits<double>::infinity() ? " (cutoff)" : ""),
                     stage1_backend_name,
-                    stage1_elim_edges, m, 100.0 * stage1_elim_ratio);
+                    stage3_elim_edges, m, 100.0 * stage3_elim_ratio,
+                    stage5_elim_edges, m, 100.0 * stage5_elim_ratio);
     }
     std::vector<int8_t> fixed_y(static_cast<size_t>(n), static_cast<int8_t>(-1));
     HiGHSBridge bridge(problem_, highs, logger_, separation_tol);
@@ -906,6 +990,40 @@ SolveResult Model::solve(const SolverOptions& options) {
         bridge.add_separator(std::make_unique<sep::SPISeparator>());
 
     bridge.build_formulation();
+    {
+        const auto& lp = highs.getLp();
+        constexpr double tol = 1e-9;
+        int64_t n_binary = 0;
+        int64_t n_integer = 0;
+        int64_t n_continuous = 0;
+        for (HighsInt j = 0; j < lp.num_col_; ++j) {
+            HighsVarType vtype = HighsVarType::kContinuous;
+            if (j >= 0 && j < static_cast<HighsInt>(lp.integrality_.size())) {
+                vtype = lp.integrality_[j];
+            }
+            const bool integral = (vtype == HighsVarType::kInteger
+                                   || vtype == HighsVarType::kSemiInteger);
+            if (!integral) {
+                n_continuous++;
+                continue;
+            }
+            const double lb = lp.col_lower_[j];
+            const double ub = lp.col_upper_[j];
+            const bool is_binary = lb >= -tol && lb <= 1.0 + tol
+                && ub >= -tol && ub <= 1.0 + tol;
+            if (is_binary) n_binary++;
+            else n_integer++;
+        }
+        std::vector<std::string> type_tokens;
+        if (n_binary > 0) type_tokens.push_back(std::to_string(n_binary) + " binary");
+        if (n_integer > 0) type_tokens.push_back(std::to_string(n_integer) + " integer");
+        if (n_continuous > 0) type_tokens.push_back(std::to_string(n_continuous) + " continuous");
+        const std::string type_summary =
+            type_tokens.empty() ? "" : (" (" + join_tokens(type_tokens, ", ") + ")");
+        logger_.log("Built MIP model:");
+        logger_.log("  {} rows, {} cols{}, {} nonzeros",
+                    lp.num_row_, lp.num_col_, type_summary, lp.a_matrix_.numNz());
+    }
 
     // Hyperplane branching: dynamic constraint branching
     static constexpr std::string_view valid_modes[] = {
@@ -1109,6 +1227,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         highs.setSolution(start);
     }
 
+    logger_.log("Startup Stage6 [HiGHS]: launching highs.run()");
     highs.run();
 
     // Clear static callbacks/state to avoid leaking between solves

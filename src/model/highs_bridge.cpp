@@ -50,6 +50,7 @@ HiGHSBridge::~HiGHSBridge() {
 }
 
 void HiGHSBridge::add_separator(std::unique_ptr<sep::Separator> sep) {
+    if (sep) separator_stats_.try_emplace(sep->name(), SeparatorStats{});
     separators_.push_back(std::move(sep));
 }
 
@@ -333,8 +334,9 @@ void HiGHSBridge::install_separators() {
                         return a.violation > b.violation;
                     });
                 int32_t added = 0;
+                if (max_cuts == 0) return;
                 for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
-                    if (max_cuts > 0 && added >= max_cuts) break;
+                    if (max_cuts >= 0 && added >= max_cuts) break;
                     auto& cut = cuts[j];
                     if (cut.violation < min_viol) continue;
                     // Translate cut indices from original to reduced space
@@ -398,13 +400,14 @@ void HiGHSBridge::install_separators() {
                         : max_cuts_per_sep_;
 
                     auto& cuts = results[i];
+                    if (max_cuts == 0) continue;
                     std::stable_sort(cuts.begin(), cuts.end(),
                         [](const sep::Cut& a, const sep::Cut& b) {
                             return a.violation > b.violation;
                         });
                     int32_t added = 0;
                     for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
-                        if (max_cuts > 0 && added >= max_cuts) break;
+                        if (max_cuts >= 0 && added >= max_cuts) break;
                         auto& cut = cuts[j];
                         if (cut.violation < min_viol) continue;
                         std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
@@ -1079,15 +1082,24 @@ SolveResult HiGHSBridge::extract_result() const {
 
     auto model_status = highs_.getModelStatus();
     switch (model_status) {
+        case HighsModelStatus::kNotset:
+            // In some callback-heavy runs HiGHS can return kNotset at exit;
+            // treat this as an interrupted run and recover incumbent/bounds.
+            result.status = SolveResult::Status::TimeLimit;
+            break;
         case HighsModelStatus::kOptimal:
             result.status = SolveResult::Status::Optimal;
             break;
         case HighsModelStatus::kInfeasible:
+        case HighsModelStatus::kUnboundedOrInfeasible:
             result.status = SolveResult::Status::Infeasible;
             return result;
         case HighsModelStatus::kUnbounded:
             result.status = SolveResult::Status::Unbounded;
             return result;
+        case HighsModelStatus::kModelEmpty:
+            result.status = SolveResult::Status::Optimal;
+            break;
         case HighsModelStatus::kObjectiveBound:
         case HighsModelStatus::kObjectiveTarget:
             result.status = SolveResult::Status::Feasible;
@@ -1099,6 +1111,8 @@ SolveResult HiGHSBridge::extract_result() const {
         case HighsModelStatus::kTimeLimit:
         case HighsModelStatus::kIterationLimit:
         case HighsModelStatus::kSolutionLimit:
+        case HighsModelStatus::kMemoryLimit:
+        case HighsModelStatus::kUnknown:
             result.status = SolveResult::Status::TimeLimit;
             break;
         default:
@@ -1108,8 +1122,15 @@ SolveResult HiGHSBridge::extract_result() const {
 
     highs_.getInfoValue("objective_function_value", result.objective);
 
-    highs_.getInfoValue("mip_node_count", result.nodes);
-    highs_.getInfoValue("simplex_iteration_count", result.simplex_iterations);
+    int64_t mip_nodes = 0;
+    if (highs_.getInfoValue("mip_node_count", mip_nodes) == HighsStatus::kOk) {
+        result.nodes = mip_nodes;
+    }
+    HighsInt simplex_iters = -1;
+    if (highs_.getInfoValue("simplex_iteration_count", simplex_iters)
+        == HighsStatus::kOk) {
+        result.simplex_iterations = static_cast<int64_t>(simplex_iters);
+    }
     highs_.getInfoValue("mip_dual_bound", result.bound);
     double mip_gap = 0.0;
     highs_.getInfoValue("mip_gap", mip_gap);
