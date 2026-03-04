@@ -8,7 +8,7 @@
 
 #include "core/problem.h"
 
-namespace rcspp::preprocess {
+namespace cptp::preprocess {
 
 /// Label for the forward/backward ESPPRC-style labeling.
 /// Tracks net cost (edge costs - collected profits) and accumulated demand.
@@ -235,4 +235,4 @@ inline std::vector<bool> edge_elimination(const Problem& prob, double upper_boun
     return eliminated;
 }
 
-}  // namespace rcspp::preprocess
+}  // namespace cptp::preprocess

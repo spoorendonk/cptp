@@ -16,8 +16,8 @@ using Catch::Matchers::WithinAbs;
 
 TEST_CASE("forward_labeling from depot gives finite bounds for reachable nodes",
           "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
-    auto bounds = rcspp::preprocess::forward_labeling(prob, prob.depot());
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
+    auto bounds = cptp::preprocess::forward_labeling(prob, prob.depot());
 
     REQUIRE(bounds.size() == static_cast<size_t>(prob.num_nodes()));
 
@@ -34,9 +34,9 @@ TEST_CASE("forward_labeling from depot gives finite bounds for reachable nodes",
 
 TEST_CASE("forward_labeling is symmetric with backward_labeling for undirected",
           "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
-    auto fwd = rcspp::preprocess::forward_labeling(prob, prob.depot());
-    auto bwd = rcspp::preprocess::backward_labeling(prob, prob.depot());
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
+    auto fwd = cptp::preprocess::forward_labeling(prob, prob.depot());
+    auto bwd = cptp::preprocess::backward_labeling(prob, prob.depot());
 
     REQUIRE(fwd.size() == bwd.size());
     for (size_t i = 0; i < fwd.size(); ++i) {
@@ -45,9 +45,9 @@ TEST_CASE("forward_labeling is symmetric with backward_labeling for undirected",
 }
 
 TEST_CASE("forward_labeling from non-depot source", "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
     int32_t source = (prob.depot() == 0) ? 1 : 0;
-    auto bounds = rcspp::preprocess::forward_labeling(prob, source);
+    auto bounds = cptp::preprocess::forward_labeling(prob, source);
 
     REQUIRE(bounds.size() == static_cast<size_t>(prob.num_nodes()));
     REQUIRE(bounds[source] <= -prob.profit(source) + 1e-6);
@@ -56,12 +56,12 @@ TEST_CASE("forward_labeling from non-depot source", "[labeling]") {
 // ─── Edge elimination tests ───
 
 TEST_CASE("edge_elimination with infinite UB eliminates nothing", "[elimination]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
-    auto fwd = rcspp::preprocess::forward_labeling(prob, prob.depot());
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
+    auto fwd = cptp::preprocess::forward_labeling(prob, prob.depot());
     auto bwd = fwd;
     double correction = prob.profit(prob.depot());
 
-    auto eliminated = rcspp::preprocess::edge_elimination(
+    auto eliminated = cptp::preprocess::edge_elimination(
         prob, fwd, bwd, std::numeric_limits<double>::infinity(), correction);
 
     for (int32_t e = 0; e < prob.num_edges(); ++e) {
@@ -70,15 +70,15 @@ TEST_CASE("edge_elimination with infinite UB eliminates nothing", "[elimination]
 }
 
 TEST_CASE("edge_elimination with very tight UB eliminates edges", "[elimination]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
-    auto fwd = rcspp::preprocess::forward_labeling(prob, prob.depot());
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
+    auto fwd = cptp::preprocess::forward_labeling(prob, prob.depot());
     auto bwd = fwd;
     double correction = prob.profit(prob.depot());
 
     // Use a very tight upper bound — should eliminate some edges
     // The optimal objective for tiny4 is -11
     double tight_ub = -11.0;
-    auto eliminated = rcspp::preprocess::edge_elimination(
+    auto eliminated = cptp::preprocess::edge_elimination(
         prob, fwd, bwd, tight_ub, correction);
 
     // At least some edges should be eliminated with a tight bound
@@ -94,18 +94,18 @@ TEST_CASE("edge_elimination with very tight UB eliminates edges", "[elimination]
 TEST_CASE("edge_elimination preserves optimal tour edges", "[elimination]") {
     // Solve first to get optimal, then verify elimination doesn't remove
     // edges in the optimal tour
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
 
-    rcspp::Model model;
+    cptp::Model model;
     model.set_problem(prob);  // copy
     auto result = model.solve({{"output_flag", "false"}, {"time_limit", "30"}});
     REQUIRE(result.is_optimal());
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, prob.depot());
+    auto fwd = cptp::preprocess::forward_labeling(prob, prob.depot());
     auto bwd = fwd;
     double correction = prob.profit(prob.depot());
 
-    auto eliminated = rcspp::preprocess::edge_elimination(
+    auto eliminated = cptp::preprocess::edge_elimination(
         prob, fwd, bwd, result.objective, correction);
 
     // No edge in the optimal tour should be eliminated
@@ -117,9 +117,9 @@ TEST_CASE("edge_elimination preserves optimal tour edges", "[elimination]") {
 // ─── Custom-cost labeling tests ───
 
 TEST_CASE("labeling_from with problem costs matches default overload", "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
-    auto default_bounds = rcspp::preprocess::labeling_from(prob, prob.depot());
-    auto custom_bounds = rcspp::preprocess::labeling_from(
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
+    auto default_bounds = cptp::preprocess::labeling_from(prob, prob.depot());
+    auto custom_bounds = cptp::preprocess::labeling_from(
         prob, prob.depot(), prob.edge_costs(), prob.profits());
 
     REQUIRE(default_bounds.size() == custom_bounds.size());
@@ -129,13 +129,13 @@ TEST_CASE("labeling_from with problem costs matches default overload", "[labelin
 }
 
 TEST_CASE("labeling_from with zero costs gives non-positive bounds", "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
     const int32_t m = prob.num_edges();
     const int32_t n = prob.num_nodes();
 
     // Zero edge costs, original profits → labeling collects only profits
     std::vector<double> zero_costs(m, 0.0);
-    auto bounds = rcspp::preprocess::labeling_from(
+    auto bounds = cptp::preprocess::labeling_from(
         prob, prob.depot(), zero_costs, prob.profits());
 
     // With zero edge costs, all reachable nodes should have non-positive bounds
@@ -147,11 +147,11 @@ TEST_CASE("labeling_from with zero costs gives non-positive bounds", "[labeling]
 
 TEST_CASE("labeling_from with zero profits matches edge-cost-only labeling",
           "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
     const int32_t n = prob.num_nodes();
 
     std::vector<double> zero_profits(n, 0.0);
-    auto bounds = rcspp::preprocess::labeling_from(
+    auto bounds = cptp::preprocess::labeling_from(
         prob, prob.depot(), prob.edge_costs(), zero_profits);
 
     // Root should have cost 0 (since profit(root) = 0)
@@ -164,7 +164,7 @@ TEST_CASE("labeling_from with zero profits matches edge-cost-only labeling",
 }
 
 TEST_CASE("labeling_from with scaled costs gives scaled bounds", "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
     const int32_t m = prob.num_edges();
     const int32_t n = prob.num_nodes();
 
@@ -176,9 +176,9 @@ TEST_CASE("labeling_from with scaled costs gives scaled bounds", "[labeling]") {
     for (int32_t i = 0; i < n; ++i)
         scaled_profits[i] = prob.profit(i) * 2.0;
 
-    auto original = rcspp::preprocess::labeling_from(
+    auto original = cptp::preprocess::labeling_from(
         prob, prob.depot(), prob.edge_costs(), prob.profits());
-    auto scaled = rcspp::preprocess::labeling_from(
+    auto scaled = cptp::preprocess::labeling_from(
         prob, prob.depot(), scaled_costs, scaled_profits);
 
     for (int32_t i = 0; i < n; ++i) {
@@ -187,17 +187,17 @@ TEST_CASE("labeling_from with scaled costs gives scaled bounds", "[labeling]") {
 }
 
 TEST_CASE("labeling_from with forbidden node gives higher bound", "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
     const int32_t n = prob.num_nodes();
 
-    auto normal = rcspp::preprocess::labeling_from(prob, prob.depot());
+    auto normal = cptp::preprocess::labeling_from(prob, prob.depot());
 
     // Forbid a non-depot node by setting its profit to -1e30
     int32_t forbidden = (prob.depot() == 0) ? 1 : 0;
     std::vector<double> mod_profits(prob.profits().begin(), prob.profits().end());
     mod_profits[forbidden] = -1e30;
 
-    auto bounds = rcspp::preprocess::labeling_from(
+    auto bounds = cptp::preprocess::labeling_from(
         prob, prob.depot(), prob.edge_costs(), mod_profits);
 
     // The forbidden node should have a very high cost (effectively unreachable)
@@ -212,13 +212,13 @@ TEST_CASE("labeling_from with forbidden node gives higher bound", "[labeling]") 
 }
 
 TEST_CASE("labeling_from with custom costs on path instance", "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
+    auto prob = cptp::io::load("tests/data/tiny4_path.txt");
     const int32_t m = prob.num_edges();
     const int32_t n = prob.num_nodes();
 
     // Default overload matches custom overload on path instance too
-    auto default_bounds = rcspp::preprocess::labeling_from(prob, prob.source());
-    auto custom_bounds = rcspp::preprocess::labeling_from(
+    auto default_bounds = cptp::preprocess::labeling_from(prob, prob.source());
+    auto custom_bounds = cptp::preprocess::labeling_from(
         prob, prob.source(), prob.edge_costs(), prob.profits());
 
     REQUIRE(default_bounds.size() == custom_bounds.size());
@@ -227,8 +227,8 @@ TEST_CASE("labeling_from with custom costs on path instance", "[labeling]") {
     }
 
     // Backward labeling from target with custom costs
-    auto bwd_default = rcspp::preprocess::labeling_from(prob, prob.target());
-    auto bwd_custom = rcspp::preprocess::labeling_from(
+    auto bwd_default = cptp::preprocess::labeling_from(prob, prob.target());
+    auto bwd_custom = cptp::preprocess::labeling_from(
         prob, prob.target(), prob.edge_costs(), prob.profits());
 
     for (size_t i = 0; i < bwd_default.size(); ++i) {
@@ -237,17 +237,17 @@ TEST_CASE("labeling_from with custom costs on path instance", "[labeling]") {
 }
 
 TEST_CASE("labeling_from with negative costs finds shorter paths", "[labeling]") {
-    auto prob = rcspp::io::load("tests/data/tiny4.txt");
+    auto prob = cptp::io::load("tests/data/tiny4.txt");
     const int32_t m = prob.num_edges();
 
-    auto normal = rcspp::preprocess::labeling_from(prob, prob.depot());
+    auto normal = cptp::preprocess::labeling_from(prob, prob.depot());
 
     // Halve all edge costs — bounds should decrease (cheaper paths)
     std::vector<double> cheap_costs(m);
     for (int32_t e = 0; e < m; ++e)
         cheap_costs[e] = prob.edge_cost(e) * 0.5;
 
-    auto cheaper = rcspp::preprocess::labeling_from(
+    auto cheaper = cptp::preprocess::labeling_from(
         prob, prob.depot(), cheap_costs, prob.profits());
 
     for (int32_t i = 0; i < prob.num_nodes(); ++i) {
@@ -257,15 +257,15 @@ TEST_CASE("labeling_from with negative costs finds shorter paths", "[labeling]")
 
 // ─── Propagator integration tests ───
 
-static const rcspp::SolverOptions quiet = {
+static const cptp::SolverOptions quiet = {
     {"time_limit", "30"},
     {"output_flag", "false"},
 };
 
-static rcspp::SolveResult solve_instance(const char* path,
-                                        const rcspp::SolverOptions& extra = {}) {
-    auto prob = rcspp::io::load(path);
-    rcspp::Model model;
+static cptp::SolveResult solve_instance(const char* path,
+                                        const cptp::SolverOptions& extra = {}) {
+    auto prob = cptp::io::load(path);
+    cptp::Model model;
     model.set_problem(std::move(prob));
     auto opts = quiet;
     for (const auto& kv : extra) opts.push_back(kv);

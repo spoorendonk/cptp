@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace rcspp::model {
+namespace cptp::model {
 
 struct AsyncIncumbentSnapshot {
     std::vector<double> col_values;
@@ -36,4 +36,4 @@ class AsyncIncumbentStore {
     AsyncIncumbentSnapshot snapshot_;
 };
 
-}  // namespace rcspp::model
+}  // namespace cptp::model

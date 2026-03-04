@@ -6,7 +6,7 @@
 
 #include "core/problem.h"
 
-namespace rcspp::sep {
+namespace cptp::sep {
 
 namespace {
 
@@ -410,4 +410,4 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
     return cuts;
 }
 
-}  // namespace rcspp::sep
+}  // namespace cptp::sep

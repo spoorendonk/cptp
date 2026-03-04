@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-namespace rcspp {
+namespace cptp {
 
 class Timer {
  public:
@@ -19,4 +19,4 @@ class Timer {
     std::chrono::steady_clock::time_point start_;
 };
 
-}  // namespace rcspp
+}  // namespace cptp

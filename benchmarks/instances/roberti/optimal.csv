@@ -1,4 +1,4 @@
-# Optimal values computed by rcspp-bac (up to 5min time limit)
+# Optimal values computed by cptp-bac (up to 5min time limit)
 # Instances from Roberti (Set 3, Jepsen et al. 2014) via dparo-cptp
 # Only proven optima (gap=0%) are listed.
 instance,optimal

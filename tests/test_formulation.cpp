@@ -15,7 +15,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    auto prob = rcspp::io::load(argv[1]);
+    auto prob = cptp::io::load(argv[1]);
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
     const int32_t m = prob.num_edges();

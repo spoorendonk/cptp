@@ -17,7 +17,7 @@
 #include "preprocess/edge_elimination.h"
 #include "util/work_unit_budget.h"
 
-namespace rcspp::heuristic {
+namespace cptp::heuristic {
 
 /// Subset of the original problem's edges/nodes, built from LP relaxation values.
 struct ReducedGraph {
@@ -941,4 +941,4 @@ inline HeuristicResult lp_guided_heuristic(
     return {std::move(sol), best_obj};
 }
 
-}  // namespace rcspp::heuristic
+}  // namespace cptp::heuristic

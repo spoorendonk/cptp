@@ -7,7 +7,7 @@
 #include <mutex>
 #include <vector>
 
-namespace rcspp::preprocess {
+namespace cptp::preprocess {
 
 struct BoundSnapshot {
     std::vector<double> fwd;
@@ -74,4 +74,4 @@ class SharedBoundsStore {
     BoundSnapshot snapshot_;
 };
 
-}  // namespace rcspp::preprocess
+}  // namespace cptp::preprocess

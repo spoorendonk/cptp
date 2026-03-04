@@ -7,7 +7,7 @@
 #include <span>
 #include <vector>
 
-namespace rcspp {
+namespace cptp {
 
 /// Simple undirected graph with CSR storage.
 class static_graph {
@@ -91,4 +91,4 @@ class static_graph {
     std::vector<int32_t> incidence_;        // edge indices
 };
 
-}  // namespace rcspp
+}  // namespace cptp

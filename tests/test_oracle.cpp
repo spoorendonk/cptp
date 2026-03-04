@@ -11,9 +11,9 @@
 namespace {
 
 /// Build a small 4-node tour problem: depot=0, customers=1,2,3.
-rcspp::Problem make_small_problem() {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges;
+cptp::Problem make_small_problem() {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges;
     std::vector<double> costs;
     for (int i = 0; i < 4; ++i) {
         for (int j = i + 1; j < 4; ++j) {
@@ -28,9 +28,9 @@ rcspp::Problem make_small_problem() {
 }
 
 /// Build a small 4-node s-t path problem: source=0, target=3.
-rcspp::Problem make_small_path_problem() {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges;
+cptp::Problem make_small_path_problem() {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges;
     std::vector<double> costs;
     for (int i = 0; i < 4; ++i) {
         for (int j = i + 1; j < 4; ++j) {
@@ -55,7 +55,7 @@ TEST_CASE("SeparationOracle: finds cuts on violated solution", "[oracle]") {
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     oracle.add_default_separators();
 
     // Fractional solution with disconnected subtour
@@ -89,7 +89,7 @@ TEST_CASE("SeparationOracle: no cuts on feasible solution", "[oracle]") {
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     oracle.add_default_separators();
 
     // Feasible tour: 0 - 1 - 2 - 0
@@ -116,7 +116,7 @@ TEST_CASE("SeparationOracle: is_feasible works correctly", "[oracle]") {
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
 
     // Feasible tour: 0 - 1 - 2 - 0
     std::vector<double> x_values(m, 0.0);
@@ -153,7 +153,7 @@ TEST_CASE("SeparationOracle: max_cuts_per_separator limits output", "[oracle]") 
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     oracle.add_default_separators();
     oracle.set_max_cuts_per_separator(1);
 
@@ -183,7 +183,7 @@ TEST_CASE("SeparationOracle: path mode works", "[oracle][path]") {
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     oracle.add_default_separators();
     REQUIRE(oracle.separators().size() == 4);
 
@@ -213,18 +213,18 @@ TEST_CASE("SeparationOracle: path mode works", "[oracle][path]") {
 
 TEST_CASE("BoundPropagator: sweep fixes expensive edges", "[propagator]") {
     // 3 nodes, tour. Edges: {0,1}=1, {0,2}=1, {1,2}=100.
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 100};
     std::vector<double> profits = {0, 0, 0};
     std::vector<double> demands = {0, 0, 0};
     prob.build(3, edges, costs, profits, demands, 1e18, 0, 0);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
     auto bwd = fwd;  // tour: same
     double correction = prob.profit(0);
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, bwd, correction);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, bwd, correction);
 
     // col_upper for edges (all unfixed)
     std::vector<double> col_upper = {1.0, 1.0, 1.0};
@@ -251,16 +251,16 @@ TEST_CASE("BoundPropagator: sweep fixes expensive edges", "[propagator]") {
 }
 
 TEST_CASE("BoundPropagator: sweep_nodes fixes isolated nodes", "[propagator]") {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 100};
     std::vector<double> profits = {0, 0, 0};
     std::vector<double> demands = {0, 0, 0};
     prob.build(3, edges, costs, profits, demands, 1e18, 0, 0);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
 
     // Simulate: edge 0 and edge 2 are fixed to 0, edge 1 is still open.
     // Node 1 is incident to edges 0 ({0,1}) and 2 ({1,2}).
@@ -282,8 +282,8 @@ TEST_CASE("BoundPropagator: sweep_nodes fixes isolated nodes", "[propagator]") {
 
 TEST_CASE("BoundPropagator: propagate_fixed_edge (neighbor-only)", "[propagator]") {
     // 4 nodes, tour. Known expensive path through certain edges.
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {1, 1, 1, 100, 1, 1};
@@ -291,9 +291,9 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge (neighbor-only)", "[propagator]
     std::vector<double> demands = {0, 0, 0, 0};
     prob.build(4, edges, costs, profits, demands, 1e18, 0, 0);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
 
     // All edges unfixed
     int32_t m = prob.num_edges();
@@ -317,8 +317,8 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge (all-pairs)", "[propagator]") {
     // The all-pairs path scans ALL edges (not just neighbors), so it should
     // also eliminate the expensive edge {1,2} even though it's not adjacent
     // to the fixed edge {0,3}.
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     // Make {1,2} very expensive — any tour through it costs >= 100
@@ -330,18 +330,18 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge (all-pairs)", "[propagator]") {
     const int32_t n = prob.num_nodes();
     const int32_t m = prob.num_edges();
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
 
     // Build all-pairs bounds: run forward labeling from each node
     std::vector<double> all_pairs(n * n, std::numeric_limits<double>::max());
     for (int32_t s = 0; s < n; ++s) {
-        auto bounds = rcspp::preprocess::forward_labeling(prob, s);
+        auto bounds = cptp::preprocess::forward_labeling(prob, s);
         for (int32_t v = 0; v < n; ++v) {
             all_pairs[s * n + v] = bounds[v];
         }
     }
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
     prop.set_all_pairs_bounds(all_pairs);
     REQUIRE(prop.has_all_pairs_bounds());
 
@@ -367,7 +367,7 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge (all-pairs)", "[propagator]") {
 TEST_CASE("SeparationOracle: add_default_separators is cumulative", "[oracle]") {
     auto prob = make_small_problem();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     REQUIRE(oracle.separators().size() == 0);
 
     oracle.add_default_separators();
@@ -381,8 +381,8 @@ TEST_CASE("SeparationOracle: add_default_separators is cumulative", "[oracle]") 
 TEST_CASE("SeparationOracle: individual separator addition", "[oracle]") {
     auto prob = make_small_problem();
 
-    rcspp::sep::SeparationOracle oracle(prob);
-    oracle.add_separator(std::make_unique<rcspp::sep::SECSeparator>());
+    cptp::sep::SeparationOracle oracle(prob);
+    oracle.add_separator(std::make_unique<cptp::sep::SECSeparator>());
     REQUIRE(oracle.separators().size() == 1);
 
     int32_t m = prob.num_edges();
@@ -417,7 +417,7 @@ TEST_CASE("SeparationOracle: no separators returns no cuts", "[oracle]") {
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     // Do NOT add any separators
 
     std::vector<double> x_values(m, 0.0);
@@ -442,7 +442,7 @@ TEST_CASE("SeparationOracle: cut struct has valid fields", "[oracle]") {
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     oracle.add_default_separators();
 
     std::vector<double> x_values(m, 0.0);
@@ -484,7 +484,7 @@ TEST_CASE("SeparationOracle: is_feasible works in path mode", "[oracle][path]") 
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
 
     // Feasible path: 0 -> 1 -> 3
     std::vector<double> x_values(m, 0.0);
@@ -521,7 +521,7 @@ TEST_CASE("SeparationOracle: separate with non-zero x_offset", "[oracle]") {
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     oracle.add_default_separators();
 
     // Fractional solution with disconnected subtour
@@ -559,7 +559,7 @@ TEST_CASE("SeparationOracle: max_cuts_per_separator 0 means unlimited", "[oracle
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     oracle.add_default_separators();
     oracle.set_max_cuts_per_separator(0);
     REQUIRE(oracle.max_cuts_per_separator() == 0);
@@ -582,7 +582,7 @@ TEST_CASE("SeparationOracle: max_cuts_per_separator 0 means unlimited", "[oracle
     // Should not crash, and may return more cuts than with limit=1
     auto cuts_unlimited = oracle.separate(x_values, y_values, 0, m);
 
-    rcspp::sep::SeparationOracle oracle2(prob);
+    cptp::sep::SeparationOracle oracle2(prob);
     oracle2.add_default_separators();
     oracle2.set_max_cuts_per_separator(1);
     auto cuts_limited = oracle2.separate(x_values, y_values, 0, m);
@@ -595,7 +595,7 @@ TEST_CASE("SeparationOracle: all-zero solution produces no cuts", "[oracle]") {
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
 
-    rcspp::sep::SeparationOracle oracle(prob);
+    cptp::sep::SeparationOracle oracle(prob);
     oracle.add_default_separators();
 
     // All zeros — nothing selected, nothing to violate
@@ -611,30 +611,30 @@ TEST_CASE("SeparationOracle: all-zero solution produces no cuts", "[oracle]") {
 // =====================================================================
 
 TEST_CASE("BoundPropagator: has_all_pairs_bounds initially false", "[propagator]") {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 1};
     std::vector<double> profits = {0, 0, 0};
     std::vector<double> demands = {0, 0, 0};
     prob.build(3, edges, costs, profits, demands, 1e18, 0, 0);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
     REQUIRE_FALSE(prop.has_all_pairs_bounds());
 }
 
 TEST_CASE("BoundPropagator: sweep with loose UB fixes nothing", "[propagator]") {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 100};
     std::vector<double> profits = {0, 0, 0};
     std::vector<double> demands = {0, 0, 0};
     prob.build(3, edges, costs, profits, demands, 1e18, 0, 0);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
 
     std::vector<double> col_upper = {1.0, 1.0, 1.0};
     // Very loose UB — nothing should be fixed
@@ -645,16 +645,16 @@ TEST_CASE("BoundPropagator: sweep with loose UB fixes nothing", "[propagator]") 
 }
 
 TEST_CASE("BoundPropagator: sweep skips already-fixed edges", "[propagator]") {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 100};
     std::vector<double> profits = {0, 0, 0};
     std::vector<double> demands = {0, 0, 0};
     prob.build(3, edges, costs, profits, demands, 1e18, 0, 0);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
 
     // Edge 2 is already fixed to 0
     std::vector<double> col_upper = {1.0, 1.0, 0.0};
@@ -668,16 +668,16 @@ TEST_CASE("BoundPropagator: sweep skips already-fixed edges", "[propagator]") {
 }
 
 TEST_CASE("BoundPropagator: sweep_nodes no fixings when edges are open", "[propagator]") {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 1};
     std::vector<double> profits = {0, 0, 0};
     std::vector<double> demands = {0, 0, 0};
     prob.build(3, edges, costs, profits, demands, 1e18, 0, 0);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
 
     int32_t m = prob.num_edges();
     int32_t n = prob.num_nodes();
@@ -690,8 +690,8 @@ TEST_CASE("BoundPropagator: sweep_nodes no fixings when edges are open", "[propa
 }
 
 TEST_CASE("BoundPropagator: propagate_fixed_edge does nothing with loose UB", "[propagator]") {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {1, 1, 1, 100, 1, 1};
@@ -699,9 +699,9 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge does nothing with loose UB", "[
     std::vector<double> demands = {0, 0, 0, 0};
     prob.build(4, edges, costs, profits, demands, 1e18, 0, 0);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, fwd, 0.0);
 
     int32_t m = prob.num_edges();
     std::vector<double> col_upper(m, 1.0);
@@ -713,18 +713,18 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge does nothing with loose UB", "[
 }
 
 TEST_CASE("BoundPropagator: accessors return correct values", "[propagator]") {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
     std::vector<double> costs = {1, 1, 1};
     std::vector<double> profits = {0, 5, 3};
     std::vector<double> demands = {0, 2, 1};
     prob.build(3, edges, costs, profits, demands, 10.0, 0, 0);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
-    auto bwd = rcspp::preprocess::backward_labeling(prob, 0);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
+    auto bwd = cptp::preprocess::backward_labeling(prob, 0);
     double correction = 42.0;
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, bwd, correction);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, bwd, correction);
 
     REQUIRE(prop.fwd_bounds().size() == 3);
     REQUIRE(prop.bwd_bounds().size() == 3);
@@ -734,8 +734,8 @@ TEST_CASE("BoundPropagator: accessors return correct values", "[propagator]") {
 
 TEST_CASE("BoundPropagator: sweep on s-t path problem", "[propagator][path]") {
     // 4-node path, source=0, target=3. Edge {1,2} cost=100.
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {1, 1, 1, 100, 1, 1};
@@ -743,10 +743,10 @@ TEST_CASE("BoundPropagator: sweep on s-t path problem", "[propagator][path]") {
     std::vector<double> demands = {0, 0, 0, 0};
     prob.build(4, edges, costs, profits, demands, 1e18, 0, 3);
 
-    auto fwd = rcspp::preprocess::forward_labeling(prob, 0);
-    auto bwd = rcspp::preprocess::backward_labeling(prob, 3);
+    auto fwd = cptp::preprocess::forward_labeling(prob, 0);
+    auto bwd = cptp::preprocess::backward_labeling(prob, 3);
 
-    rcspp::preprocess::BoundPropagator prop(prob, fwd, bwd, 0.0);
+    cptp::preprocess::BoundPropagator prop(prob, fwd, bwd, 0.0);
 
     int32_t m = prob.num_edges();
     std::vector<double> col_upper(m, 1.0);

@@ -4,7 +4,7 @@
 #include <atomic>
 #include <cstdint>
 
-namespace rcspp {
+namespace cptp {
 
 /// Thread-safe work-unit budget.
 /// limit <= 0 means "count only, no cap".
@@ -76,4 +76,4 @@ class WorkUnitBudget {
     std::atomic<int64_t> used_{0};
 };
 
-}  // namespace rcspp
+}  // namespace cptp

@@ -15,7 +15,7 @@
 
 #include "core/problem.h"
 
-namespace rcspp::preprocess::ng {
+namespace cptp::preprocess::ng {
 
 struct DssrOptions {
     int32_t initial_ng_size = 0;
@@ -553,4 +553,4 @@ inline DssrBoundsResult compute_bounds(const Problem& prob,
     return compute_bounds(prob, source, target, prob.edge_costs(), prob.profits(), opts);
 }
 
-}  // namespace rcspp::preprocess::ng
+}  // namespace cptp::preprocess::ng

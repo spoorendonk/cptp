@@ -13,7 +13,7 @@
 #include "sep/rci_separator.h"
 #include "sep/sec_separator.h"
 
-namespace rcspp::sep {
+namespace cptp::sep {
 
 SeparationOracle::SeparationOracle(const Problem& prob) : prob_(prob) {}
 
@@ -138,4 +138,4 @@ bool SeparationOracle::is_feasible(
     return cuts.empty();
 }
 
-}  // namespace rcspp::sep
+}  // namespace cptp::sep

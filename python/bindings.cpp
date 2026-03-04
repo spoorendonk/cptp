@@ -26,62 +26,62 @@ NB_MODULE(_cptp, m) {
     m.doc() = "CPTP Branch-and-Cut Solver";
 
     // --- Status enum ---
-    nb::enum_<rcspp::SolveResult::Status>(m, "Status")
-        .value("Optimal", rcspp::SolveResult::Status::Optimal)
-        .value("Feasible", rcspp::SolveResult::Status::Feasible)
-        .value("Infeasible", rcspp::SolveResult::Status::Infeasible)
-        .value("Unbounded", rcspp::SolveResult::Status::Unbounded)
-        .value("TimeLimit", rcspp::SolveResult::Status::TimeLimit)
-        .value("Error", rcspp::SolveResult::Status::Error);
+    nb::enum_<cptp::SolveResult::Status>(m, "Status")
+        .value("Optimal", cptp::SolveResult::Status::Optimal)
+        .value("Feasible", cptp::SolveResult::Status::Feasible)
+        .value("Infeasible", cptp::SolveResult::Status::Infeasible)
+        .value("Unbounded", cptp::SolveResult::Status::Unbounded)
+        .value("TimeLimit", cptp::SolveResult::Status::TimeLimit)
+        .value("Error", cptp::SolveResult::Status::Error);
 
     // --- SeparatorStats ---
-    nb::class_<rcspp::SeparatorStats>(m, "SeparatorStats")
-        .def_ro("cuts_added", &rcspp::SeparatorStats::cuts_added)
-        .def_ro("rounds_called", &rcspp::SeparatorStats::rounds_called)
-        .def_ro("time_seconds", &rcspp::SeparatorStats::time_seconds);
+    nb::class_<cptp::SeparatorStats>(m, "SeparatorStats")
+        .def_ro("cuts_added", &cptp::SeparatorStats::cuts_added)
+        .def_ro("rounds_called", &cptp::SeparatorStats::rounds_called)
+        .def_ro("time_seconds", &cptp::SeparatorStats::time_seconds);
 
     // --- SolveResult ---
     // tour and tour_arcs are returned as numpy arrays (zero-copy move from C++ vector).
-    nb::class_<rcspp::SolveResult>(m, "SolveResult")
-        .def_ro("status", &rcspp::SolveResult::status)
-        .def_ro("objective", &rcspp::SolveResult::objective)
-        .def_ro("bound", &rcspp::SolveResult::bound)
-        .def_ro("gap", &rcspp::SolveResult::gap)
-        .def_ro("time_seconds", &rcspp::SolveResult::time_seconds)
-        .def_ro("nodes", &rcspp::SolveResult::nodes)
-        .def_prop_ro("tour", [](rcspp::SolveResult& self) {
+    nb::class_<cptp::SolveResult>(m, "SolveResult")
+        .def_ro("status", &cptp::SolveResult::status)
+        .def_ro("objective", &cptp::SolveResult::objective)
+        .def_ro("bound", &cptp::SolveResult::bound)
+        .def_ro("gap", &cptp::SolveResult::gap)
+        .def_ro("time_seconds", &cptp::SolveResult::time_seconds)
+        .def_ro("nodes", &cptp::SolveResult::nodes)
+        .def_prop_ro("tour", [](cptp::SolveResult& self) {
             return vec_view_numpy<int32_t>(self.tour, nb::find(self));
         })
-        .def_prop_ro("tour_arcs", [](rcspp::SolveResult& self) {
+        .def_prop_ro("tour_arcs", [](cptp::SolveResult& self) {
             return vec_view_numpy<int32_t>(self.tour_arcs, nb::find(self));
         })
-        .def_ro("total_cuts", &rcspp::SolveResult::total_cuts)
-        .def_ro("separation_rounds", &rcspp::SolveResult::separation_rounds)
-        .def_ro("separator_stats", &rcspp::SolveResult::separator_stats)
-        .def("is_optimal", &rcspp::SolveResult::is_optimal)
-        .def("has_solution", &rcspp::SolveResult::has_solution);
+        .def_ro("total_cuts", &cptp::SolveResult::total_cuts)
+        .def_ro("separation_rounds", &cptp::SolveResult::separation_rounds)
+        .def_ro("separator_stats", &cptp::SolveResult::separator_stats)
+        .def("is_optimal", &cptp::SolveResult::is_optimal)
+        .def("has_solution", &cptp::SolveResult::has_solution);
 
     // --- Problem ---
     // Vector accessors return numpy views (zero-copy, backed by the Problem object).
-    nb::class_<rcspp::Problem>(m, "Problem")
+    nb::class_<cptp::Problem>(m, "Problem")
         .def(nb::init<>())
-        .def_rw("name", &rcspp::Problem::name)
-        .def_prop_ro("num_nodes", &rcspp::Problem::num_nodes)
-        .def_prop_ro("num_edges", &rcspp::Problem::num_edges)
-        .def_prop_ro("source", &rcspp::Problem::source)
-        .def_prop_ro("target", &rcspp::Problem::target)
-        .def_prop_ro("capacity", &rcspp::Problem::capacity)
-        .def_prop_ro("is_tour", &rcspp::Problem::is_tour)
-        .def_prop_ro("edge_costs", [](rcspp::Problem& self) {
+        .def_rw("name", &cptp::Problem::name)
+        .def_prop_ro("num_nodes", &cptp::Problem::num_nodes)
+        .def_prop_ro("num_edges", &cptp::Problem::num_edges)
+        .def_prop_ro("source", &cptp::Problem::source)
+        .def_prop_ro("target", &cptp::Problem::target)
+        .def_prop_ro("capacity", &cptp::Problem::capacity)
+        .def_prop_ro("is_tour", &cptp::Problem::is_tour)
+        .def_prop_ro("edge_costs", [](cptp::Problem& self) {
             return vec_view_numpy<double>(self.edge_costs(), nb::find(self));
         })
-        .def_prop_ro("profits", [](rcspp::Problem& self) {
+        .def_prop_ro("profits", [](cptp::Problem& self) {
             return vec_view_numpy<double>(self.profits(), nb::find(self));
         })
-        .def_prop_ro("demands", [](rcspp::Problem& self) {
+        .def_prop_ro("demands", [](cptp::Problem& self) {
             return vec_view_numpy<double>(self.demands(), nb::find(self));
         })
-        .def("graph_edges", [](const rcspp::Problem& self) {
+        .def("graph_edges", [](const cptp::Problem& self) {
             const auto& g = self.graph();
             size_t m = static_cast<size_t>(self.num_edges());
             auto* data = new std::vector<int32_t>(m * 2);
@@ -96,7 +96,7 @@ NB_MODULE(_cptp, m) {
             return nb::ndarray<nb::numpy, int32_t, nb::shape<-1, 2>>(
                 data->data(), {m, 2}, std::move(owner));
         }, "Return (m, 2) numpy array of (tail, head) pairs")
-        .def("__init__", [](rcspp::Problem* self,
+        .def("__init__", [](cptp::Problem* self,
                             int32_t num_nodes,
                             nb::ndarray<int32_t, nb::shape<-1, 2>> edges,
                             nb::ndarray<double, nb::shape<-1>> edge_costs,
@@ -106,10 +106,10 @@ NB_MODULE(_cptp, m) {
                             int32_t source,
                             int32_t target,
                             const std::string& name) {
-            new (self) rcspp::Problem();
+            new (self) cptp::Problem();
             auto e_view = edges.view();
             int32_t m = static_cast<int32_t>(edges.shape(0));
-            std::vector<rcspp::Edge> edge_vec(m);
+            std::vector<cptp::Edge> edge_vec(m);
             for (int32_t i = 0; i < m; ++i)
                 edge_vec[i] = {e_view(i, 0), e_view(i, 1)};
             auto ec_view = edge_costs.view();
@@ -127,18 +127,18 @@ NB_MODULE(_cptp, m) {
 
     // --- Model ---
     // Input arrays are read directly from numpy (zero-copy read via span).
-    nb::class_<rcspp::Model>(m, "Model")
+    nb::class_<cptp::Model>(m, "Model")
         .def(nb::init<>())
-        .def("set_problem", &rcspp::Model::set_problem, "problem"_a)
-        .def("problem", &rcspp::Model::problem, nb::rv_policy::reference_internal)
-        .def("set_graph", [](rcspp::Model& self, int32_t n,
+        .def("set_problem", &cptp::Model::set_problem, "problem"_a)
+        .def("problem", &cptp::Model::problem, nb::rv_policy::reference_internal)
+        .def("set_graph", [](cptp::Model& self, int32_t n,
                               nb::ndarray<int32_t, nb::shape<-1, 2>> edges,
                               nb::ndarray<double, nb::shape<-1>> costs) {
             auto e_view = edges.view();
             auto c_view = costs.view();
             int32_t num_edges = static_cast<int32_t>(edges.shape(0));
 
-            std::vector<rcspp::Edge> edge_vec(num_edges);
+            std::vector<cptp::Edge> edge_vec(num_edges);
             for (int32_t i = 0; i < num_edges; ++i) {
                 edge_vec[i] = {e_view(i, 0), e_view(i, 1)};
             }
@@ -146,30 +146,30 @@ NB_MODULE(_cptp, m) {
             self.set_graph(n, edge_vec,
                            {c_view.data(), static_cast<size_t>(num_edges)});
         }, "num_nodes"_a, "edges"_a, "edge_costs"_a)
-        .def("set_source", &rcspp::Model::set_source)
-        .def("set_target", &rcspp::Model::set_target)
-        .def("set_depot", &rcspp::Model::set_depot)
-        .def("set_profits", [](rcspp::Model& self,
+        .def("set_source", &cptp::Model::set_source)
+        .def("set_target", &cptp::Model::set_target)
+        .def("set_depot", &cptp::Model::set_depot)
+        .def("set_profits", [](cptp::Model& self,
                                 nb::ndarray<double, nb::shape<-1>> profits) {
             auto view = profits.view();
             self.set_profits({view.data(), static_cast<size_t>(profits.shape(0))});
         }, "profits"_a)
-        .def("add_capacity_resource", [](rcspp::Model& self,
+        .def("add_capacity_resource", [](cptp::Model& self,
                                           nb::ndarray<double, nb::shape<-1>> demands,
                                           double limit) {
             auto view = demands.view();
             self.add_capacity_resource(
                 {view.data(), static_cast<size_t>(demands.shape(0))}, limit);
         }, "demands"_a, "limit"_a)
-        .def("solve", [](rcspp::Model& self,
-                          const rcspp::SolverOptions& options) {
+        .def("solve", [](cptp::Model& self,
+                          const cptp::SolverOptions& options) {
             return self.solve(options);
-        }, "options"_a = rcspp::SolverOptions{});
+        }, "options"_a = cptp::SolverOptions{});
 
     m.attr("has_highs") = true;
 
     // IO functions (always available)
     m.def("load", [](const std::string& path) {
-        return rcspp::io::load(path);
-    }, "path"_a, "Load an RCSPP instance from file (auto-detect format)");
+        return cptp::io::load(path);
+    }, "path"_a, "Load an CPTP instance from file (auto-detect format)");
 }

@@ -34,7 +34,7 @@
 
 #include "util/timer.h"
 
-namespace rcspp {
+namespace cptp {
 
 namespace {
 
@@ -255,7 +255,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             // Our callback/cut plumbing assumes original column space and
             // stable row/col mappings; keep presolve disabled for now.
             if (value != "off" && value != "false" && value != "0") {
-                logger_.log("Warning: option presolve={} requested, but rcspp-bac currently forces presolve=off", value);
+                logger_.log("Warning: option presolve={} requested, but cptp-bac currently forces presolve=off", value);
             }
             continue;
         }
@@ -1249,4 +1249,4 @@ SolveResult Model::solve(const SolverOptions& options) {
     return result;
 }
 
-}  // namespace rcspp
+}  // namespace cptp

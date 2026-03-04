@@ -7,7 +7,7 @@
 
 #include "core/problem.h"
 
-namespace rcspp::preprocess {
+namespace cptp::preprocess {
 
 /// Solver-independent domain propagation based on labeling bounds.
 ///
@@ -73,4 +73,4 @@ class BoundPropagator {
     std::vector<std::vector<AdjEntry>> adjacency_;
 };
 
-}  // namespace rcspp::preprocess
+}  // namespace cptp::preprocess

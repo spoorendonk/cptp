@@ -262,7 +262,7 @@ TEST_CASE("Propagator: clearCallback on one thread does not affect another",
 
 // ─── Integration: concurrent Model::solve ───
 
-static const rcspp::SolverOptions quiet = {
+static const cptp::SolverOptions quiet = {
     {"time_limit", "30"},
     {"output_flag", "false"},
 };
@@ -294,8 +294,8 @@ TEST_CASE("Concurrent Model::solve on different threads",
     std::atomic<bool> ok_b{false};
 
     auto solve_tiny4 = [&](std::atomic<bool>& ok) {
-        auto prob = rcspp::io::load("tests/data/tiny4.txt");
-        rcspp::Model model;
+        auto prob = cptp::io::load("tests/data/tiny4.txt");
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto result = model.solve(quiet);
         ok = result.has_solution() && result.is_optimal();
@@ -320,8 +320,8 @@ TEST_CASE("Concurrent Model::solve with different instances",
     std::atomic<double> obj_path{0.0};
 
     std::thread t_tour([&] {
-        auto prob = rcspp::io::load("tests/data/tiny4.txt");
-        rcspp::Model model;
+        auto prob = cptp::io::load("tests/data/tiny4.txt");
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto result = model.solve(quiet);
         if (result.is_optimal()) {
@@ -331,8 +331,8 @@ TEST_CASE("Concurrent Model::solve with different instances",
     });
 
     std::thread t_path([&] {
-        auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
-        rcspp::Model model;
+        auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto result = model.solve(quiet);
         if (result.is_optimal()) {
@@ -356,8 +356,8 @@ TEST_CASE("Concurrent Model::solve respects max_concurrent_solves=1",
     std::atomic<bool> ok_b{false};
 
     auto solve_with_gate = [&](const char* path, std::atomic<bool>& ok) {
-        auto prob = rcspp::io::load(path);
-        rcspp::Model model;
+        auto prob = cptp::io::load(path);
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto opts = quiet;
         opts.push_back({"max_concurrent_solves", "1"});
@@ -377,7 +377,7 @@ TEST_CASE("Concurrent Model::solve respects max_concurrent_solves=1",
 
 TEST_CASE("Pending strict solve cap blocks later loose arrivals",
           "[thread_local][integration][slow][options]") {
-    using Guard = rcspp::model_detail::SolveConcurrencyGuard;
+    using Guard = cptp::model_detail::SolveConcurrencyGuard;
 
     std::atomic<bool> a_started{false};
     std::atomic<bool> b_started{false};
@@ -389,8 +389,8 @@ TEST_CASE("Pending strict solve cap blocks later loose arrivals",
 
     // A: long-ish solve with loose cap=2 (keeps one slot busy for ~2s).
     std::thread t_a([&] {
-        auto prob = rcspp::io::load("benchmarks/instances/spprclib/B-n50-k8-40.sppcc");
-        rcspp::Model model;
+        auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n50-k8-40.sppcc");
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto opts = quiet;
         opts.push_back({"time_limit", "2"});
@@ -407,8 +407,8 @@ TEST_CASE("Pending strict solve cap blocks later loose arrivals",
 
     // B: strict cap=1 (should wait while A is active).
     std::thread t_b([&] {
-        auto prob = rcspp::io::load("tests/data/tiny4.txt");
-        rcspp::Model model;
+        auto prob = cptp::io::load("tests/data/tiny4.txt");
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto opts = quiet;
         opts.push_back({"max_concurrent_solves", "1"});
@@ -425,8 +425,8 @@ TEST_CASE("Pending strict solve cap blocks later loose arrivals",
 
     // C: loose cap=2. Must not bypass pending strict B.
     std::thread t_c([&] {
-        auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
-        rcspp::Model model;
+        auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto opts = quiet;
         opts.push_back({"max_concurrent_solves", "2"});
@@ -449,7 +449,7 @@ TEST_CASE("Pending strict solve cap blocks later loose arrivals",
 
 TEST_CASE("Pending strict solve cap also blocks later uncapped arrivals",
           "[thread_local][integration][slow][options]") {
-    using Guard = rcspp::model_detail::SolveConcurrencyGuard;
+    using Guard = cptp::model_detail::SolveConcurrencyGuard;
 
     std::atomic<bool> a_started{false};
     std::atomic<bool> b_started{false};
@@ -461,8 +461,8 @@ TEST_CASE("Pending strict solve cap also blocks later uncapped arrivals",
 
     // A: long-ish solve with loose cap=2 (keeps one slot busy for ~2s).
     std::thread t_a([&] {
-        auto prob = rcspp::io::load("benchmarks/instances/spprclib/B-n50-k8-40.sppcc");
-        rcspp::Model model;
+        auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n50-k8-40.sppcc");
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto opts = quiet;
         opts.push_back({"time_limit", "2"});
@@ -479,8 +479,8 @@ TEST_CASE("Pending strict solve cap also blocks later uncapped arrivals",
 
     // B: strict cap=1 (should wait while A is active).
     std::thread t_b([&] {
-        auto prob = rcspp::io::load("tests/data/tiny4.txt");
-        rcspp::Model model;
+        auto prob = cptp::io::load("tests/data/tiny4.txt");
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto opts = quiet;
         opts.push_back({"max_concurrent_solves", "1"});
@@ -497,8 +497,8 @@ TEST_CASE("Pending strict solve cap also blocks later uncapped arrivals",
 
     // C: uncapped caller (0). Must not bypass pending strict B.
     std::thread t_c([&] {
-        auto prob = rcspp::io::load("tests/data/tiny4_path.txt");
-        rcspp::Model model;
+        auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+        cptp::Model model;
         model.set_problem(std::move(prob));
         auto opts = quiet;
         opts.push_back({"max_concurrent_solves", "0"});

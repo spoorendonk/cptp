@@ -14,7 +14,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-RCSPP_BIN = Path(__file__).parent.parent / "build" / "rcspp-solve"
+CPTP_BIN = Path(__file__).parent.parent / "build" / "cptp-solve"
 SPPRCLIB_DIR = Path(__file__).parent / "instances" / "spprclib"
 PROGRESS_CSV = Path(__file__).parent / "progress.csv"
 
@@ -34,8 +34,8 @@ def load_known_optimals() -> dict[str, float]:
 def run_solver(instance_path: Path, time_limit: int,
                cutoff: float | None = None,
                disable_heuristics: bool = False) -> dict:
-    """Run rcspp-solve and parse output."""
-    args = [str(RCSPP_BIN), str(instance_path),
+    """Run cptp-solve and parse output."""
+    args = [str(CPTP_BIN), str(instance_path),
             "--time_limit", str(time_limit),
             "--output_flag", "false"]
     if cutoff is not None:
@@ -89,8 +89,8 @@ def main():
             pattern = sys.argv[i]
             i += 1
 
-    if not RCSPP_BIN.exists():
-        print(f"Error: solver binary not found at {RCSPP_BIN}")
+    if not CPTP_BIN.exists():
+        print(f"Error: solver binary not found at {CPTP_BIN}")
         print("Build first: cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)")
         sys.exit(1)
 

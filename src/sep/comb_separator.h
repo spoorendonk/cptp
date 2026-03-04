@@ -2,7 +2,7 @@
 
 #include "sep/separator.h"
 
-namespace rcspp::sep {
+namespace cptp::sep {
 
 /// Comb inequality separator.
 class CombSeparator : public Separator {
@@ -11,4 +11,4 @@ class CombSeparator : public Separator {
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 };
 
-}  // namespace rcspp::sep
+}  // namespace cptp::sep

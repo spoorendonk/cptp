@@ -20,7 +20,7 @@
 #include "util/logger.h"
 #include "util/work_unit_budget.h"
 
-namespace rcspp {
+namespace cptp {
 
 /// HiGHS options as string key-value pairs, forwarded directly.
 using SolverOptions = std::vector<std::pair<std::string, std::string>>;
@@ -196,4 +196,4 @@ class HiGHSBridge {
     std::shared_ptr<int64_t> heuristic_solutions_;
 };
 
-}  // namespace rcspp
+}  // namespace cptp

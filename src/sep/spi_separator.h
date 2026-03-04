@@ -2,7 +2,7 @@
 
 #include "sep/separator.h"
 
-namespace rcspp::sep {
+namespace cptp::sep {
 
 /// Shortest Path Inequality (SPI) separator.
 ///
@@ -25,4 +25,4 @@ class SPISeparator : public Separator {
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 };
 
-}  // namespace rcspp::sep
+}  // namespace cptp::sep

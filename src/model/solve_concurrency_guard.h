@@ -6,7 +6,7 @@
 #include <mutex>
 #include <set>
 
-namespace rcspp::model_detail {
+namespace cptp::model_detail {
 
 // In-process solve admission guard. Finite limits are registered before waiting
 // so stricter pending requests constrain later arrivals.
@@ -71,5 +71,5 @@ class SolveConcurrencyGuard {
     inline static std::multiset<int32_t> active_limits_;
 };
 
-}  // namespace rcspp::model_detail
+}  // namespace cptp::model_detail
 

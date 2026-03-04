@@ -7,7 +7,7 @@
 
 #include "core/static_graph.h"
 
-namespace rcspp {
+namespace cptp {
 
 using Graph = static_graph;
 
@@ -16,7 +16,7 @@ struct Edge {
     int32_t head;
 };
 
-/// RCSPP instance: undirected graph with profits, costs, demands, capacity.
+/// CPTP instance: undirected graph with profits, costs, demands, capacity.
 class Problem {
  public:
     Problem() = default;
@@ -73,4 +73,4 @@ class Problem {
     std::vector<double> demands_;
 };
 
-}  // namespace rcspp
+}  // namespace cptp

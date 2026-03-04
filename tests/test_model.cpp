@@ -10,16 +10,16 @@
 
 using Catch::Matchers::WithinAbs;
 
-static const rcspp::SolverOptions quiet = {
+static const cptp::SolverOptions quiet = {
     {"time_limit", "30"},
     {"output_flag", "false"},
 };
 
 TEST_CASE("Model solves trivial 3-node instance", "[model]") {
-    rcspp::Model model;
+    cptp::Model model;
 
     // Undirected edges: {0,1}, {0,2}, {1,2}
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {1, 2}
     };
     std::vector<double> costs = {5.0, 3.0, 4.0};
@@ -41,10 +41,10 @@ TEST_CASE("Model solves trivial 3-node instance", "[model]") {
 }
 
 TEST_CASE("Model solves instance with negative edge costs", "[model]") {
-    rcspp::Model model;
+    cptp::Model model;
 
     // Undirected edges
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {1, 2}
     };
     std::vector<double> costs = {-2.0, 3.0, -1.0};
@@ -67,9 +67,9 @@ TEST_CASE("Model solves instance with negative edge costs", "[model]") {
 
 TEST_CASE("Model tour allows single-customer cycle with depot-edge multiplicity",
           "[model][tour][depot_x2]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {{0, 1}};
+    std::vector<cptp::Edge> edges = {{0, 1}};
     std::vector<double> costs = {7.0};
     std::vector<double> profits = {2.0, 13.0};
     std::vector<double> demands = {0.0, 1.0};
@@ -99,14 +99,14 @@ TEST_CASE("Model tour allows single-customer cycle with depot-edge multiplicity"
 
 TEST_CASE("Initial heuristic allows single-customer tour with x=2 on depot edge",
           "[model][heuristic][depot_x2]") {
-    rcspp::Problem prob;
-    std::vector<rcspp::Edge> edges = {{0, 1}};
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}};
     std::vector<double> costs = {7.0};
     std::vector<double> profits = {2.0, 13.0};
     std::vector<double> demands = {0.0, 1.0};
     prob.build(2, edges, costs, profits, demands, 10.0, 0, 0);
 
-    auto start = rcspp::heuristic::build_initial_solution(prob, 8);
+    auto start = cptp::heuristic::build_initial_solution(prob, 8);
     const int32_t m = prob.num_edges();
 
     REQUIRE(start.objective < std::numeric_limits<double>::max());
@@ -122,10 +122,10 @@ TEST_CASE("Initial heuristic allows single-customer tour with x=2 on depot edge"
 }
 
 TEST_CASE("Model handles high-cost low-profit instance", "[model]") {
-    rcspp::Model model;
+    cptp::Model model;
 
     // Undirected edges
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {1, 2}
     };
     std::vector<double> costs = {100.0, 100.0, 100.0};
@@ -147,10 +147,10 @@ TEST_CASE("Model handles high-cost low-profit instance", "[model]") {
 }
 
 TEST_CASE("Model solves s-t path instance", "[model][path]") {
-    rcspp::Model model;
+    cptp::Model model;
 
     // 4-node complete graph
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -177,9 +177,9 @@ TEST_CASE("Model solves s-t path instance", "[model][path]") {
 
 TEST_CASE("Model path: disable_heuristics still keeps optimal objective",
           "[model][path][regression]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -206,9 +206,9 @@ TEST_CASE("Model path: disable_heuristics still keeps optimal objective",
 
 TEST_CASE("Model path: async incumbent proof handoff does not stop without solution",
           "[model][path][regression][async_interrupt]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -231,13 +231,13 @@ TEST_CASE("Model path: async incumbent proof handoff does not stop without solut
 
     REQUIRE(result.has_solution());
     REQUIRE_THAT(result.objective, WithinAbs(-13.0, 1e-6));
-    REQUIRE(result.status == rcspp::SolveResult::Status::Optimal);
+    REQUIRE(result.status == cptp::SolveResult::Status::Optimal);
 }
 
 TEST_CASE("Model solves path with non-zero source", "[model][path]") {
     // source=1, target=3 (neither is node 0)
-    rcspp::Model model;
-    std::vector<rcspp::Edge> edges = {
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -262,21 +262,21 @@ TEST_CASE("Model solves path with non-zero source", "[model][path]") {
 
 TEST_CASE("Model: source==target gives same result as set_depot", "[model][path]") {
     // Build two identical models, one using set_depot, one using set_source/set_target
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {1, 2}
     };
     std::vector<double> costs = {5.0, 3.0, 4.0};
     std::vector<double> profits = {0.0, 10.0, 8.0};
     std::vector<double> demands = {0.0, 2.0, 3.0};
 
-    rcspp::Model model_depot;
+    cptp::Model model_depot;
     model_depot.set_graph(3, edges, costs);
     model_depot.set_depot(0);
     model_depot.set_profits(profits);
     model_depot.add_capacity_resource(demands, 5.0);
     auto result_depot = model_depot.solve(quiet);
 
-    rcspp::Model model_st;
+    cptp::Model model_st;
     model_st.set_graph(3, edges, costs);
     model_st.set_source(0);
     model_st.set_target(0);
@@ -290,9 +290,9 @@ TEST_CASE("Model: source==target gives same result as set_depot", "[model][path]
 }
 
 TEST_CASE("Model: submip_separation=false produces valid result", "[model]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -315,9 +315,9 @@ TEST_CASE("Model: submip_separation=false produces valid result", "[model]") {
 }
 
 TEST_CASE("Model: submip_separation=true produces valid result", "[model]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -340,9 +340,9 @@ TEST_CASE("Model: submip_separation=true produces valid result", "[model]") {
 }
 
 TEST_CASE("Model: extended tuning options parse and preserve correctness", "[model][options]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -385,9 +385,9 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
 
 TEST_CASE("Model: deterministic work-unit settings produce stable repeated solves",
           "[model][options][determinism]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -417,9 +417,9 @@ TEST_CASE("Model: deterministic work-unit settings produce stable repeated solve
 
 TEST_CASE("Model: deterministic DSSR epoch commits are replay-equivalent",
           "[model][options][determinism][dssr]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {0, 4},
         {1, 2}, {1, 3}, {1, 4},
         {2, 3}, {2, 4},
@@ -466,9 +466,9 @@ TEST_CASE("Model: deterministic DSSR epoch commits are replay-equivalent",
 
 TEST_CASE("Model: deterministic DSSR max-epoch cap and auto policy are replay-stable",
           "[model][options][determinism][dssr]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {0, 4},
         {1, 2}, {1, 3}, {1, 4},
         {2, 3}, {2, 4},
@@ -515,7 +515,7 @@ TEST_CASE("Model: deterministic DSSR max-epoch cap and auto policy are replay-st
 
 TEST_CASE("Model: DSSR auto-stop tracker stops on deterministic no-progress path",
           "[model][options][determinism][dssr]") {
-    rcspp::model_detail::DssrAutoStopTracker tracker(
+    cptp::model_detail::DssrAutoStopTracker tracker(
         /*min_epochs_before_stop=*/4,
         /*no_progress_epoch_limit=*/2);
 
@@ -530,9 +530,9 @@ TEST_CASE("Model: DSSR auto-stop tracker stops on deterministic no-progress path
 }
 
 TEST_CASE("Model: disabling cut families still yields valid tiny solution", "[model][options][cuts]") {
-    rcspp::Model model;
+    cptp::Model model;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -563,7 +563,7 @@ TEST_CASE("Model: connectivity still enforced when SEC cut generation is disable
     // profitable cluster. Without incumbent SEC feasibility checks, disabling
     // SEC cut generation can accept disconnected subtours with much lower
     // objective. With feasibility checks active, both runs must agree.
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {1, 2}, {2, 0},  // depot-side cluster
         {3, 4}, {4, 5}, {5, 3},  // profitable disconnected cluster
         {0, 3},                  // expensive bridge
@@ -576,8 +576,8 @@ TEST_CASE("Model: connectivity still enforced when SEC cut generation is disable
     std::vector<double> profits = {0.0, 0.0, 0.0, 60.0, 60.0, 60.0};
     std::vector<double> demands = {0.0, 1.0, 1.0, 1.0, 1.0, 1.0};
 
-    rcspp::Model model_sec_on;
-    rcspp::Model model_sec_off;
+    cptp::Model model_sec_on;
+    cptp::Model model_sec_off;
     for (auto* m : {&model_sec_on, &model_sec_off}) {
         m->set_graph(6, edges, costs);
         m->set_depot(0);
@@ -610,7 +610,7 @@ TEST_CASE("Model: connectivity check still enforced with SEC off and submip sepa
     // Same disconnected-cluster construction as above, but with sub-MIP
     // separation explicitly disabled to ensure incumbent feasibility checks
     // remain the connectivity safeguard.
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {1, 2}, {2, 0},
         {3, 4}, {4, 5}, {5, 3},
         {0, 3},
@@ -619,7 +619,7 @@ TEST_CASE("Model: connectivity check still enforced with SEC off and submip sepa
     std::vector<double> profits = {0.0, 0.0, 0.0, 60.0, 60.0, 60.0};
     std::vector<double> demands = {0.0, 1.0, 1.0, 1.0, 1.0, 1.0};
 
-    rcspp::Model model;
+    cptp::Model model;
     model.set_graph(6, edges, costs);
     model.set_depot(0);
     model.set_profits(profits);
@@ -640,10 +640,10 @@ TEST_CASE("Model: connectivity check still enforced with SEC off and submip sepa
 }
 
 TEST_CASE("Model: edge elimination toggles preserve tiny optimum", "[model][options][presolve]") {
-    rcspp::Model model_on;
-    rcspp::Model model_off;
+    cptp::Model model_on;
+    cptp::Model model_off;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -679,10 +679,10 @@ TEST_CASE("Model: edge elimination toggles preserve tiny optimum", "[model][opti
 }
 
 TEST_CASE("Model: presolve option is captured and forced off", "[model][options][presolve]") {
-    rcspp::Model model_a;
-    rcspp::Model model_b;
+    cptp::Model model_a;
+    cptp::Model model_b;
 
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -713,7 +713,7 @@ TEST_CASE("Model: presolve option is captured and forced off", "[model][options]
 }
 
 TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][branching]") {
-    std::vector<rcspp::Edge> edges = {
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
     };
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -723,7 +723,7 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
     // Get reference solution with branching off
     double ref_obj;
     {
-        rcspp::Model model;
+        cptp::Model model;
         model.set_graph(4, edges, costs);
         model.set_depot(0);
         model.set_profits(profits);
@@ -732,7 +732,7 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
         ref_opts.push_back({"threads", "1"});
         ref_opts.push_back({"random_seed", "0"});
         auto result = model.solve(ref_opts);
-        if (result.status == rcspp::SolveResult::Status::Error) {
+        if (result.status == cptp::SolveResult::Status::Error) {
             WARN("Reference run returned Error; skipping hyperplane mode assertions");
             return;
         }
@@ -746,7 +746,7 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
     for (const char* mode : {"pairs", "clusters", "demand", "cardinality", "all"}) {
         SECTION(std::string("mode=") + mode) {
             INFO("branch_hyper mode=" << mode);
-            rcspp::Model model;
+            cptp::Model model;
             model.set_graph(4, edges, costs);
             model.set_depot(0);
             model.set_profits(profits);
@@ -756,7 +756,7 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
             opts.push_back({"random_seed", "0"});
             opts.push_back({"branch_hyper", mode});
             auto result = model.solve(opts);
-            if (result.status == rcspp::SolveResult::Status::Error) {
+            if (result.status == cptp::SolveResult::Status::Error) {
                 WARN("mode=" << mode << " returned Error; skipping objective check");
                 continue;
             }
@@ -769,8 +769,8 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
 
 TEST_CASE("Model: deterministic parallel settings preserve objective",
           "[model][parallel]") {
-    auto setup_path_model = [](rcspp::Model& model) {
-        std::vector<rcspp::Edge> edges = {
+    auto setup_path_model = [](cptp::Model& model) {
+        std::vector<cptp::Edge> edges = {
             {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
         };
         std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -783,13 +783,13 @@ TEST_CASE("Model: deterministic parallel settings preserve objective",
         model.add_capacity_resource(demands, 7.0);
     };
 
-    rcspp::Model base_model;
+    cptp::Model base_model;
     setup_path_model(base_model);
     auto base_opts = quiet;
     auto base = base_model.solve(base_opts);
     REQUIRE(base.has_solution());
 
-    rcspp::Model staged_model;
+    cptp::Model staged_model;
     setup_path_model(staged_model);
     auto staged_opts = quiet;
     staged_opts.push_back({"deterministic_work_units", "64"});
@@ -805,8 +805,8 @@ TEST_CASE("Model: deterministic parallel settings preserve objective",
 
 TEST_CASE("Model: stage1 bounds backend modes preserve objective",
           "[model][preproc]") {
-    auto setup_path_model = [](rcspp::Model& model) {
-        std::vector<rcspp::Edge> edges = {
+    auto setup_path_model = [](cptp::Model& model) {
+        std::vector<cptp::Edge> edges = {
             {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
         };
         std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -820,7 +820,7 @@ TEST_CASE("Model: stage1 bounds backend modes preserve objective",
     };
 
     auto solve_mode = [&](const char* mode) {
-        rcspp::Model model;
+        cptp::Model model;
         setup_path_model(model);
         auto opts = quiet;
         opts.push_back({"threads", "1"});
@@ -835,9 +835,9 @@ TEST_CASE("Model: stage1 bounds backend modes preserve objective",
     const auto two_cycle = solve_mode("two_cycle");
     const auto ng_dssr = solve_mode("ng_dssr");
     const auto auto_mode = solve_mode("auto");
-    REQUIRE(two_cycle.status != rcspp::SolveResult::Status::Error);
-    REQUIRE(ng_dssr.status != rcspp::SolveResult::Status::Error);
-    REQUIRE(auto_mode.status != rcspp::SolveResult::Status::Error);
+    REQUIRE(two_cycle.status != cptp::SolveResult::Status::Error);
+    REQUIRE(ng_dssr.status != cptp::SolveResult::Status::Error);
+    REQUIRE(auto_mode.status != cptp::SolveResult::Status::Error);
 
     if (two_cycle.has_solution() && ng_dssr.has_solution()) {
         REQUIRE_THAT(two_cycle.objective, WithinAbs(ng_dssr.objective, 1e-6));
@@ -849,8 +849,8 @@ TEST_CASE("Model: stage1 bounds backend modes preserve objective",
 
 TEST_CASE("Model: workflow_dump option is accepted",
           "[model][workflow]") {
-    rcspp::Model model;
-    std::vector<rcspp::Edge> edges = {
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {1, 2}, {0, 2}
     };
     std::vector<double> costs = {4.0, 3.0, 10.0};
@@ -868,7 +868,7 @@ TEST_CASE("Model: workflow_dump option is accepted",
     opts.push_back({"workflow_dump", "true"});
 
     auto r = model.solve(opts);
-    if (r.status == rcspp::SolveResult::Status::Error) {
+    if (r.status == cptp::SolveResult::Status::Error) {
         WARN("workflow_dump run returned Error; skipping strict assertion");
         return;
     }
@@ -876,8 +876,8 @@ TEST_CASE("Model: workflow_dump option is accepted",
 
 TEST_CASE("Model: mip_max_nodes limit is surfaced as non-error status",
           "[model][limits]") {
-    rcspp::Model model;
-    std::vector<rcspp::Edge> edges = {
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {
         {0, 1}, {1, 2}, {0, 2}, {2, 3}, {1, 3}
     };
     std::vector<double> costs = {4.0, 3.0, 10.0, 1.0, 2.0};
@@ -895,7 +895,7 @@ TEST_CASE("Model: mip_max_nodes limit is surfaced as non-error status",
     opts.push_back({"mip_max_nodes", "1"});
 
     auto r = model.solve(opts);
-    if (r.status == rcspp::SolveResult::Status::Error) {
+    if (r.status == cptp::SolveResult::Status::Error) {
         WARN("mip_max_nodes run returned Error in this ordering; skipping strict assertion");
         return;
     }
