@@ -23,6 +23,7 @@ static void print_usage(const char* prog) {
               << "  --cutoff <value>                         Known UB for prove-only mode\n"
               << "  --time_limit <sec>                       Wall-clock time limit (adjusted for preprocessing)\n"
               << "  --threads N                              HiGHS thread count\n"
+              << "  --random_seed N                          Random seed for HiGHS and heuristics (default 0)\n"
               << "  --output_flag true/false                 HiGHS console output (default true)\n"
               //
               << "\nBounds & Preprocessing:\n"

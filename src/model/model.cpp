@@ -146,6 +146,7 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     Timer timer;
 
+    int32_t random_seed = 0;
     bool output_flag = true;
     for (const auto& [key, value] : options) {
         if (key == "output_flag") {
@@ -338,6 +339,13 @@ SolveResult Model::solve(const SolverOptions& options) {
             logger_.log("Warning: ng-DSSR option {}={} ignored (ng-DSSR removed, using 2-cycle bounds)", key, value);
             continue;
         }
+        if (key == "random_seed") {
+            random_seed = std::stoi(value);
+            // Forward to HiGHS but don't duplicate in accepted_highs_options
+            // (we log it ourselves in nondefault_settings).
+            highs.setOptionValue(key, value);
+            continue;
+        }
         if (key == "time_limit") {
             user_time_limit = std::stod(value);
             // Don't set on HiGHS yet; we adjust for preprocessing time later.
@@ -428,6 +436,9 @@ SolveResult Model::solve(const SolverOptions& options) {
                 physical_cores, logical_threads, preproc_thread_limit, tbb_str, simd_str);
 
     std::vector<std::string> nondefault_settings;
+    if (random_seed != 0) {
+        nondefault_settings.push_back("random_seed=" + std::to_string(random_seed));
+    }
     nondefault_settings.push_back("presolve=off");
     if (!two_cycle_elim_bounds) nondefault_settings.push_back("two_cycle_elim_bounds=off");
     if (all_pairs_bounds) nondefault_settings.push_back("all_pairs_bounds=on");
@@ -596,7 +607,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             if (has_feasible_heuristic(construction_start)) {
                 construction_ub = construction_start.objective;
                 warm_start = construction_start;
-                logger_.log("  UB0={}  candidates={}  time={:.3f}s",
+                logger_.log("  ub={}  candidates={}  time={:.3f}s",
                             construction_ub,
                             static_cast<int32_t>(construction_pool.candidates.size()),
                             stage2_timer.elapsed_seconds());
@@ -635,8 +646,8 @@ SolveResult Model::solve(const SolverOptions& options) {
                 }
             }
             logger_.log(
-                "  eliminated={}/{} ({:.1f}%)  ub={}  time={:.3f}s",
-                stage3_elim_edges, m, 100.0 * stage3_elim_ratio, construction_ub,
+                "  eliminated={}/{} ({:.1f}%)  time={:.3f}s",
+                stage3_elim_edges, m, 100.0 * stage3_elim_ratio,
                 stage3_timer.elapsed_seconds());
         } else {
             logger_.log(
@@ -693,15 +704,14 @@ SolveResult Model::solve(const SolverOptions& options) {
                     preproc_fast_restarts, starts_from_threads);
                 logger_.log("  starts={}  max_iter_per_start={}",
                     requested_starts, heu_ws_ls_max_iter);
-                logger_.log("  starts     wu iter_accum           ub impr     time");
+                logger_.log("  starts iter_accum           ub impr     time");
                 stage4_tg.run([&, requested_starts] {
                     heuristic::WarmStartProgressOptions progress_opts;
-                    progress_opts.report_every_work_units = 8;
+                    progress_opts.report_every_work_units = 32;
                     progress_opts.report_on_ub_improvement = true;
                     auto progress_cb = [&](const heuristic::WarmStartProgressSnapshot& snap) {
-                        logger_.log("  {:>6} {:>6} {:>8} {:>12.6g} {:>4} {:>7.3f}s",
+                        logger_.log("  {:>6} {:>10} {:>12.6g} {:>4} {:>8.3f}s",
                                     snap.starts_done,
-                                    snap.work_units_used,
                                     snap.ls_iterations_total,
                                     snap.best_objective,
                                     snap.ub_improvements,
@@ -746,8 +756,8 @@ SolveResult Model::solve(const SolverOptions& options) {
                 ? static_cast<double>(stage5_elim_edges) / static_cast<double>(m)
                 : 0.0;
             logger_.log(
-                "  eliminated={}/{} ({:.1f}%)  ub={}  time={:.3f}s",
-                stage5_elim_edges, m, 100.0 * stage5_elim_ratio, warm_start_ub,
+                "  eliminated={}/{} ({:.1f}%)  time={:.3f}s",
+                stage5_elim_edges, m, 100.0 * stage5_elim_ratio,
                 stage5_timer.elapsed_seconds());
         } else {
             logger_.log(
