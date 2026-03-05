@@ -987,6 +987,15 @@ inline HeuristicResult run_local_search_from_pool(
     int starts = reuse_candidates_for_starts
         ? std::max(1, num_starts)
         : std::clamp(num_starts, 1, static_cast<int>(pool.candidates.size()));
+    if (work_budget && work_budget->capped()) {
+        // Cap starts before allocation/scheduling to avoid O(num_starts) overhead
+        // when a deterministic work-unit limit is much smaller.
+        const int64_t remaining = work_budget->remaining();
+        if (remaining <= 0) {
+            return {{}, detail::kNoSolution};
+        }
+        starts = static_cast<int>(std::min<int64_t>(starts, remaining));
+    }
     if (starts <= 0) {
         return {{}, detail::kNoSolution};
     }

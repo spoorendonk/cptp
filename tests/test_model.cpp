@@ -297,8 +297,8 @@ TEST_CASE("Heuristic warm-start progress reports capped live work-unit usage",
     REQUIRE(final.work_units_limit == 3);
     REQUIRE(final.work_units_used == 3);
     REQUIRE(final.starts_done == 3);
-    REQUIRE(final.starts_total == static_cast<int32_t>(pool.candidates.size()));
-    REQUIRE(final.starts_done < final.starts_total);
+    REQUIRE(final.starts_total == 3);
+    REQUIRE(final.starts_done == final.starts_total);
     REQUIRE(budget->used() == 3);
 }
 
