@@ -46,7 +46,7 @@ static void print_usage(const char* prog) {
               << "\nHeuristics:\n"
               << "  Warm-start (construction + local search):\n"
               << "  --heu_ws true/false                      Enable warm-start heuristic (default true)\n"
-              << "  --heu_ws_ls_max_iter N                   Local search iteration limit (default 200)\n"
+              << "  --heu_ws_ls_max_iter N                   Local search iteration limit (default 1000)\n"
               << "\n"
               << "  LP-guided (B&C callback):\n"
               << "  --heu_lpg true/false                     Enable LP-guided heuristic (default true)\n"

@@ -158,9 +158,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     Highs highs;
     // Our defaults (user options can override)
     highs.setOptionValue("presolve", "off");
-    // Disable strong branching: trust pseudocosts immediately.
-    // Benchmarks show pscost=0 or 2 outperforms default=8 on hard instances.
-    highs.setOptionValue("mip_pscost_minreliable", 0);
 
     // Intercept our custom options, forward the rest to HiGHS
     // --- Bounds & Preprocessing ---
@@ -177,7 +174,7 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     // --- Heuristics: warm-start ---
     bool heu_ws = true;
-    int32_t heu_ws_ls_max_iter = 200;
+    int32_t heu_ws_ls_max_iter = 1000;
 
     // --- Heuristics: LP-guided ---
     bool heu_lpg = true;
@@ -432,7 +429,6 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     std::vector<std::string> nondefault_settings;
     nondefault_settings.push_back("presolve=off");
-    nondefault_settings.push_back("mip_pscost_minreliable=0");
     if (!two_cycle_elim_bounds) nondefault_settings.push_back("two_cycle_elim_bounds=off");
     if (all_pairs_bounds) nondefault_settings.push_back("all_pairs_bounds=on");
     if (!edge_elimination) nondefault_settings.push_back("edge_elimination=off");
@@ -447,7 +443,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             "max_cuts_per_round=" + std::to_string(max_cuts_per_round));
     }
     if (!heu_ws) nondefault_settings.push_back("heu_ws=off");
-    if (heu_ws_ls_max_iter != 200) {
+    if (heu_ws_ls_max_iter != 1000) {
         nondefault_settings.push_back(
             "heu_ws_ls_max_iter=" + std::to_string(heu_ws_ls_max_iter));
     }
@@ -552,11 +548,11 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     {
-        Timer preproc_timer;
+        Timer stage1_timer;
         tbb::task_arena preproc_arena(preproc_thread_limit);
         if (two_cycle_elim_bounds) {
-            logger_.log("Startup Stage1 [Bounds]: backend=two_cycle (source={}, target={})",
-                        source, target);
+            logger_.log("Lower bounds calculation:");
+            logger_.log("  two-cycle labeling (source={}, target={})", source, target);
             preproc_arena.execute([&] {
                 tbb::task_group stage1_tg;
                 stage1_tg.run([&] {
@@ -573,14 +569,15 @@ SolveResult Model::solve(const SolverOptions& options) {
                 bwd_bounds = fwd_bounds;
             }
             logger_.log(
-                "Startup Stage1 [Bounds] done: fwd_finite={}/{}, bwd_finite={}/{}, fwd[target]={}",
+                "  fwd_reachable={}/{}  bwd_reachable={}/{}  fwd[target]={}  time={:.3f}s",
                 count_finite_bounds(fwd_bounds), n,
                 count_finite_bounds(bwd_bounds), n,
                 (target >= 0 && target < n && target < static_cast<int32_t>(fwd_bounds.size()))
                     ? fwd_bounds[static_cast<size_t>(target)]
-                    : std::numeric_limits<double>::infinity());
+                    : std::numeric_limits<double>::infinity(),
+                stage1_timer.elapsed_seconds());
         } else {
-            logger_.log("Startup Stage1 [Bounds] skipped: two_cycle_elim_bounds=false");
+            // No log when bounds skipped (matches PR #49 style)
         }
         heuristic::ConstructionPool construction_pool;
         heuristic::HeuristicResult construction_start{{}, std::numeric_limits<double>::infinity()};
@@ -608,7 +605,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                             stage2_timer.elapsed_seconds());
             }
         } else {
-            logger_.log("Startup Stage2 [Construction] skipped: heu_ws=false");
+            logger_.log("  skipped (heu_ws=false)  time={:.3f}s", stage2_timer.elapsed_seconds());
         }
 
         if (cutoff >= std::numeric_limits<double>::infinity()) {
@@ -694,8 +691,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                     scaled_starts, 1, std::numeric_limits<int32_t>::max()));
                 const int32_t requested_starts = std::max<int32_t>(
                     preproc_fast_restarts, starts_from_threads);
-                logger_.log(
-                    "Startup Stage4 [Parallel local search on reduced graph]: starts={}, max_iter={}",
+                logger_.log("  starts={}  max_iter_per_start={}",
                     requested_starts, heu_ws_ls_max_iter);
                 logger_.log("  starts     wu iter_accum           ub impr     time");
                 stage4_tg.run([&, requested_starts] {
@@ -717,22 +713,10 @@ SolveResult Model::solve(const SolverOptions& options) {
                         stage3_edge_active, &progress_opts, progress_cb, true);
                 });
             } else {
-                logger_.log("Startup Stage4 [Parallel local search on reduced graph] skipped");
+                logger_.log("  skipped (heu_ws=false or candidates=0)  time={:.3f}s",
+                    stage4_timer.elapsed_seconds());
             }
 
-            if (all_pairs_bounds) {
-                logger_.log("Startup Stage4: all-pairs 2-cycle bounds running");
-                stage4_tg.run([&] {
-                    constexpr double inf = std::numeric_limits<double>::infinity();
-                    all_pairs.assign(static_cast<size_t>(n) * n, inf);
-                    tbb::parallel_for(0, n, [&](int32_t s) {
-                        auto row = preprocess::forward_labeling(problem_, s);
-                        std::copy(row.begin(), row.end(),
-                                  all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
-                    });
-                    logger_.log("Startup Stage4: all-pairs 2-cycle bounds done");
-                });
-            }
             stage4_tg.wait();
         });
 
@@ -740,22 +724,6 @@ SolveResult Model::solve(const SolverOptions& options) {
             (!has_feasible_heuristic(warm_start) ||
              ls_stage4.objective + 1e-9 < warm_start.objective)) {
             warm_start = std::move(ls_stage4);
-        } else if (has_feasible_heuristic(ls_stage4)) {
-            logger_.log("Startup Stage4 done: objective={} (no UB improvement)",
-                        ls_stage4.objective);
-        }
-
-        if (all_pairs_bounds && !all_pairs.empty()) {
-            fwd_bounds.assign(
-                all_pairs.begin() + static_cast<ptrdiff_t>(source) * n,
-                all_pairs.begin() + static_cast<ptrdiff_t>(source) * n + n);
-            if (source == target) {
-                bwd_bounds = fwd_bounds;
-            } else {
-                bwd_bounds.assign(
-                    all_pairs.begin() + static_cast<ptrdiff_t>(target) * n,
-                    all_pairs.begin() + static_cast<ptrdiff_t>(target) * n + n);
-            }
         }
 
         if (cutoff >= std::numeric_limits<double>::infinity()) {
@@ -1053,10 +1021,6 @@ SolveResult Model::solve(const SolverOptions& options) {
         double remaining = user_time_limit - timer.elapsed_seconds();
         if (remaining < 0.1) remaining = 0.1;  // give HiGHS at least 0.1s
         highs.setOptionValue("time_limit", remaining);
-        logger_.log("Startup Stage6 [HiGHS]: launching highs.run() (time_limit {:.2f}s, {:.2f}s used by preprocessing)",
-                    remaining, user_time_limit - remaining);
-    } else {
-        logger_.log("Startup Stage6 [HiGHS]: launching highs.run()");
     }
     highs.run();
 
