@@ -728,7 +728,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                 logger_.log("  starts iter_accum           ub impr     time");
                 stage4_tg.run([&, requested_starts] {
                     heuristic::WarmStartProgressOptions progress_opts;
-                    progress_opts.report_every_work_units = 32;
+                    progress_opts.report_every_starts = 32;
                     progress_opts.report_on_ub_improvement = true;
                     auto progress_cb = [&](const heuristic::WarmStartProgressSnapshot& snap) {
                         logger_.log("  {:>6} {:>10} {:>12.6g} {:>4} {:>8.3f}s",

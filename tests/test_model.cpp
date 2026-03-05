@@ -226,7 +226,7 @@ TEST_CASE("Heuristic warm-start progress snapshots are monotonic",
     REQUIRE_FALSE(pool.candidates.empty());
 
     cptp::heuristic::WarmStartProgressOptions progress_opts;
-    progress_opts.report_every_work_units = 1;
+    progress_opts.report_every_starts = 1;
     progress_opts.report_on_ub_improvement = true;
 
     std::vector<cptp::heuristic::WarmStartProgressSnapshot> snapshots;
@@ -271,7 +271,7 @@ TEST_CASE("Heuristic warm-start reuses seeds to honor requested starts",
     const int requested_starts =
         static_cast<int>(pool.candidates.size()) + 5;
     cptp::heuristic::WarmStartProgressOptions progress_opts;
-    progress_opts.report_every_work_units = 1;
+    progress_opts.report_every_starts = 1;
     progress_opts.report_on_ub_improvement = true;
 
     std::vector<cptp::heuristic::WarmStartProgressSnapshot> snapshots;
