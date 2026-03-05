@@ -484,6 +484,7 @@ void HiGHSBridge::install_propagator() {
     sweep_fixings_ = std::make_shared<int64_t>(0);
     chain_fixings_ = std::make_shared<int64_t>(0);
     sweep_node_fixings_ = std::make_shared<int64_t>(0);
+    chain_node_fixings_ = std::make_shared<int64_t>(0);
     ub_improvements_ = std::make_shared<int64_t>(0);
     propagator_calls_ = std::make_shared<int64_t>(0);
     propagator_time_seconds_ = std::make_shared<double>(0.0);
@@ -496,6 +497,7 @@ void HiGHSBridge::install_propagator() {
     auto sweep_fixings = sweep_fixings_;
     auto chain_fixings = chain_fixings_;
     auto sweep_node_fixings = sweep_node_fixings_;
+    auto chain_node_fixings = chain_node_fixings_;
     auto ub_improvements = ub_improvements_;
     auto propagator_calls = propagator_calls_;
     auto propagator_time = propagator_time_seconds_;
@@ -617,6 +619,7 @@ void HiGHSBridge::install_propagator() {
             const auto& apd = *ap;
             const bool have_all_pairs = !apd.empty();
             const int32_t depot = prob.depot();
+            const int64_t chain_before = *chain_fixings;
 
             for (int32_t e = 0; e < m; ++e) {
                 if (proc[e]) continue;
@@ -697,6 +700,27 @@ void HiGHSBridge::install_propagator() {
                             (*chain_fixings)++;
                         }
                     }
+                }
+            }
+
+            // Fix nodes where all incident edges are now fixed to 0
+            if (*chain_fixings > chain_before)
+            for (int32_t i = 0; i < n; ++i) {
+                if (domain.col_upper_[m + i] < 0.5) continue;
+                if (i == prob.source() || i == prob.target()) continue;
+                bool all_fixed = true;
+                for (const auto& [e, nb] : adjacency[i]) {
+                    if (domain.col_upper_[e] > 0.5) {
+                        all_fixed = false;
+                        break;
+                    }
+                }
+                if (all_fixed) {
+                    domain.changeBound(
+                        HighsBoundType::kUpper, m + i, 0.0,
+                        HighsDomain::Reason::unspecified());
+                    fixings++;
+                    (*chain_node_fixings)++;
                 }
             }
             }  // if (bounds_prop)
@@ -1192,12 +1216,13 @@ SolveResult HiGHSBridge::extract_result() const {
     if (propagator_calls_) {
         const int64_t sweep_nodes = sweep_node_fixings_ ? *sweep_node_fixings_ : 0;
         const int64_t sweep_total = *sweep_fixings_ + sweep_nodes;
-        const int64_t propagator_fixings =
-            sweep_total + (chain_fixings_ ? *chain_fixings_ : 0);
-        logger_.log("Propagator: calls={}  fixings={} (sweep={} [edges={} nodes={}] chain={})  time={:.3f}s",
+        const int64_t chain_nodes = chain_node_fixings_ ? *chain_node_fixings_ : 0;
+        const int64_t chain_total = (chain_fixings_ ? *chain_fixings_ : 0) + chain_nodes;
+        const int64_t propagator_fixings = sweep_total + chain_total;
+        logger_.log("Propagator: calls={}  fixings={} (sweep={} [edges={} nodes={}] chain={} [edges={} nodes={}])  time={:.3f}s",
                     *propagator_calls_, propagator_fixings,
                     sweep_total, *sweep_fixings_, sweep_nodes,
-                    *chain_fixings_,
+                    chain_total, *chain_fixings_, chain_nodes,
                     propagator_time_seconds_ ? *propagator_time_seconds_ : 0.0);
     }
     if (rc_fix0_count_ && (*rc_fix0_count_ > 0 || *rc_fix1_count_ > 0)) {
