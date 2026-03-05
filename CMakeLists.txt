@@ -83,4 +83,10 @@ if(CPTP_BUILD_TESTS)
 
     add_executable(test_formulation tests/test_formulation.cpp)
     target_link_libraries(test_formulation PRIVATE cptp)
+
+    # Heuristic-stage UB regression gate over benchmark corpora.
+    # Intentionally not auto-discovered in ctest due long runtime.
+    add_executable(test_heuristic_stage_ub tests/test_heuristic_stage_ub.cpp)
+    target_link_libraries(test_heuristic_stage_ub PRIVATE cptp Catch2::Catch2WithMain)
+    cptp_set_compiler_flags(test_heuristic_stage_ub)
 endif()
