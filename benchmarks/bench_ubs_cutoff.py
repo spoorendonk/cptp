@@ -5,7 +5,7 @@ Reads known optimal values from progress.csv, runs each instance in both modes,
 and reports the time comparison.
 
 Usage:
-    python bench/bench_ubs_cutoff.py [--time-limit 60] [--max-nodes 100] [pattern]
+    python benchmarks/bench_ubs_cutoff.py [--time-limit 60] [--max-nodes 100] [pattern]
 """
 
 import csv
