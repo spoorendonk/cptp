@@ -61,11 +61,23 @@ class HiGHSBridge {
     void set_max_cuts_per_separator(int32_t max_cuts) { max_cuts_per_sep_ = max_cuts; }
     /// Global cut cap: pool all cuts, sort by violation, add top N (0=unlimited).
     void set_max_cuts_per_round(int32_t max_cuts) { max_cuts_per_round_ = max_cuts; }
+    /// Whether a separator should run in main-MIP callback at this node.
+    static bool should_run_separator(const std::string& sep_name,
+                                     bool is_root_node,
+                                     double tree_violation_factor);
+    /// Effective separation tolerance at this node for a cut family.
+    /// In tree nodes, non-SEC families use tol*factor when factor>0.
+    /// SEC always uses the base separation tolerance.
+    static double effective_separator_tolerance(const std::string& sep_name,
+                                                bool is_root_node,
+                                                double base_separation_tol,
+                                                double tree_violation_factor);
+    /// Tree-vs-root tolerance scaling for non-SEC families:
+    /// effective_tree_tol = separation_tol * factor.
+    /// factor = 0 keeps only SEC active in the tree.
+    void set_tree_violation_factor(double factor) { tree_violation_factor_ = factor; }
     void set_separator_max_cuts(const std::string& name, int32_t max_cuts) {
         per_separator_max_cuts_[name] = max_cuts;
-    }
-    void set_separator_min_violation(const std::string& name, double min_violation) {
-        per_separator_min_violation_[name] = min_violation;
     }
 
     /// Enable SEC separation inside HiGHS sub-MIPs (RENS/RINS).
@@ -140,8 +152,8 @@ class HiGHSBridge {
     int32_t separation_interval_ = 1;  // 1 = every round (no skipping)
     int32_t max_cuts_per_sep_ = 3;     // max cuts per separator per round (0 = unlimited)
     int32_t max_cuts_per_round_ = 0;   // global cut cap per round (0 = unlimited)
+    double tree_violation_factor_ = 4.0;  // tree tolerance multiplier vs root
     std::unordered_map<std::string, int32_t> per_separator_max_cuts_;
-    std::unordered_map<std::string, double> per_separator_min_violation_;
     bool submip_separation_ = true;    // SEC separation at sub-MIP root node
     double upper_bound_ = std::numeric_limits<double>::infinity();
     bool edge_elimination_enabled_ = true;

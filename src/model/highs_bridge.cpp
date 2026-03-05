@@ -55,6 +55,24 @@ void HiGHSBridge::add_separator(std::unique_ptr<sep::Separator> sep) {
     separators_.push_back(std::move(sep));
 }
 
+bool HiGHSBridge::should_run_separator(const std::string& sep_name,
+                                       bool is_root_node,
+                                       double tree_violation_factor) {
+    // factor=0: keep SEC active in tree, disable other families.
+    if (!is_root_node && tree_violation_factor <= 0.0 && sep_name != "SEC")
+        return false;
+    return true;
+}
+
+double HiGHSBridge::effective_separator_tolerance(const std::string& sep_name,
+                                                  bool is_root_node,
+                                                  double base_separation_tol,
+                                                  double tree_violation_factor) {
+    if (is_root_node || sep_name == "SEC") return base_separation_tol;
+    if (tree_violation_factor > 0.0) return base_separation_tol * tree_violation_factor;
+    return base_separation_tol;
+}
+
 void HiGHSBridge::build_formulation() {
     const auto& graph = prob_.graph();
     const int32_t n = num_nodes_;
@@ -310,10 +328,6 @@ void HiGHSBridge::install_separators() {
                 // but aren't needed for feasibility in short-lived sub-MIPs.
                 sep::SECSeparator sec;
                 auto cuts = sec.separate(ctx);
-                const auto it_min = per_separator_min_violation_.find(sec.name());
-                const double min_viol = (it_min != per_separator_min_violation_.end())
-                    ? it_min->second
-                    : 0.0;
                 const auto it_cap = per_separator_max_cuts_.find(sec.name());
                 const int32_t max_cuts = (it_cap != per_separator_max_cuts_.end())
                     ? it_cap->second
@@ -328,7 +342,6 @@ void HiGHSBridge::install_separators() {
                 for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
                     if (max_cuts >= 0 && added >= max_cuts) break;
                     auto& cut = cuts[j];
-                    if (cut.violation < min_viol) continue;
                     // Translate cut indices from original to reduced space
                     std::vector<HighsInt> red_idx;
                     std::vector<double> red_val;
@@ -363,18 +376,27 @@ void HiGHSBridge::install_separators() {
                 using clock = std::chrono::steady_clock;
                 std::vector<std::vector<sep::Cut>> results(separators_.size());
                 std::vector<double> elapsed(separators_.size(), 0.0);
+                const bool is_root_node = (mipsolver.mipdata_->num_nodes == 0);
                 tbb::task_group tg;
                 for (size_t i = 0; i < separators_.size(); ++i) {
+                    const std::string& sep_name = separators_[i]->name();
+                    if (!should_run_separator(sep_name,
+                                              is_root_node,
+                                              tree_violation_factor_)) continue;
                     tg.run([&, i] {
+                        const std::string& task_sep_name = separators_[i]->name();
+                        sep::SeparationContext sep_ctx = ctx;
+                        sep_ctx.tol = effective_separator_tolerance(
+                            task_sep_name, is_root_node, frac_tol_, tree_violation_factor_);
                         auto t0 = clock::now();
-                        results[i] = separators_[i]->separate(ctx);
+                        results[i] = separators_[i]->separate(sep_ctx);
                         elapsed[i] = std::chrono::duration<double>(
                             clock::now() - t0).count();
                     });
                 }
                 tg.wait();
 
-                // Pool all cuts from all separators, pre-filtered by min_violation
+                // Pool all cuts from all separators.
                 struct PooledCut {
                     size_t sep_idx;
                     size_t cut_idx;
@@ -383,13 +405,12 @@ void HiGHSBridge::install_separators() {
                 std::vector<PooledCut> pool;
                 for (size_t i = 0; i < separators_.size(); ++i) {
                     const std::string sep_name = separators_[i]->name();
+                    if (!should_run_separator(sep_name,
+                                              is_root_node,
+                                              tree_violation_factor_)) continue;
                     auto& stats = separator_stats_[sep_name];
                     stats.time_seconds += elapsed[i];
                     if (!results[i].empty()) stats.rounds_called++;
-                    const auto it_min = per_separator_min_violation_.find(sep_name);
-                    const double min_viol = (it_min != per_separator_min_violation_.end())
-                        ? it_min->second
-                        : 0.0;
                     // Per-separator cap (optional pre-filter)
                     const auto it_cap = per_separator_max_cuts_.find(sep_name);
                     const int32_t sep_cap = (it_cap != per_separator_max_cuts_.end())
@@ -404,7 +425,6 @@ void HiGHSBridge::install_separators() {
                     int32_t sep_added = 0;
                     for (size_t j = 0; j < cuts.size(); ++j) {
                         if (sep_cap > 0 && sep_added >= sep_cap) break;
-                        if (cuts[j].violation < min_viol) continue;
                         pool.push_back({i, j, cuts[j].violation});
                         sep_added++;
                     }

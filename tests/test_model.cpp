@@ -7,6 +7,7 @@
 
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
+#include "model/highs_bridge.h"
 #include "model/model.h"
 
 using Catch::Matchers::WithinAbs;
@@ -538,8 +539,6 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
     opts.push_back({"edge_elimination_nodes", "true"});
     opts.push_back({"max_cuts_sec", "2"});
     opts.push_back({"max_cuts_rci", "2"});
-    opts.push_back({"min_violation_sec", "0.01"});
-    opts.push_back({"min_violation_rci", "0.01"});
     opts.push_back({"branch_hyper", "pairs"});
     opts.push_back({"branch_hyper_sb_max_depth", "1"});
     opts.push_back({"branch_hyper_sb_iter_limit", "20"});
@@ -549,6 +548,57 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
     auto result = model.solve(opts);
     REQUIRE(result.has_solution());
     REQUIRE(result.objective <= -10.0);
+}
+
+TEST_CASE("Model: tree_violation_factor parses and preserves correctness",
+          "[model][options][cuts]") {
+    const char* factors[] = {"-2", "0", "1", "10"};
+    for (const char* factor : factors) {
+        cptp::Model model;
+        std::vector<cptp::Edge> edges = {
+            {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+        };
+        std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+        std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+        std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+
+        model.set_graph(4, edges, costs);
+        model.set_depot(0);
+        model.set_profits(profits);
+        model.add_capacity_resource(demands, 7.0);
+
+        auto opts = quiet;
+        opts.push_back({"tree_violation_factor", factor});
+        auto result = model.solve(opts);
+        REQUIRE(result.has_solution());
+        REQUIRE(result.objective <= -10.0);
+    }
+}
+
+TEST_CASE("HiGHSBridge: tree separator policy keeps SEC only when factor is zero",
+          "[model][options][cuts]") {
+    REQUIRE(cptp::HiGHSBridge::should_run_separator("SEC", true, 0.0));
+    REQUIRE(cptp::HiGHSBridge::should_run_separator("RCI", true, 0.0));
+    REQUIRE(cptp::HiGHSBridge::should_run_separator("SEC", false, 0.0));
+    REQUIRE_FALSE(cptp::HiGHSBridge::should_run_separator("RCI", false, 0.0));
+    REQUIRE_FALSE(cptp::HiGHSBridge::should_run_separator("RGLM", false, 0.0));
+}
+
+TEST_CASE("HiGHSBridge: effective separator tolerance scales only for non-SEC in tree",
+          "[model][options][cuts]") {
+    constexpr double sep_tol = 0.1;
+    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("SEC", true, sep_tol, 10.0),
+                 WithinAbs(0.1, 1e-12));
+    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("SEC", false, sep_tol, 10.0),
+                 WithinAbs(0.1, 1e-12));
+    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("RCI", true, sep_tol, 10.0),
+                 WithinAbs(0.1, 1e-12));
+    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("RCI", false, sep_tol, 1.0),
+                 WithinAbs(0.1, 1e-12));
+    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("RCI", false, sep_tol, 10.0),
+                 WithinAbs(1.0, 1e-12));
+    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("RCI", false, sep_tol, 0.0),
+                 WithinAbs(0.1, 1e-12));
 }
 
 TEST_CASE("Model: deterministic work-unit settings produce stable repeated solves",
