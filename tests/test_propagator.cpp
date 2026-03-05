@@ -311,3 +311,18 @@ TEST_CASE("All-pairs on larger instance B-n45-k6-54",
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }
+
+// ─── Path-instance propagator tests ───
+
+TEST_CASE("Propagator produces valid solution on path instance",
+          "[propagator]") {
+    auto r = solve_instance("tests/data/tiny4_path.txt");
+    REQUIRE(r.is_optimal());
+}
+
+TEST_CASE("All-pairs propagation on path instance",
+          "[propagator][all_pairs]") {
+    auto r = solve_instance("tests/data/tiny4_path.txt",
+                            {{"all_pairs_bounds", "true"}});
+    REQUIRE(r.is_optimal());
+}

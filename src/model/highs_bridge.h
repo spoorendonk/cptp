@@ -177,6 +177,7 @@ class HiGHSBridge {
     std::shared_ptr<int64_t> sweep_fixings_;
     std::shared_ptr<int64_t> chain_fixings_;
     std::shared_ptr<int64_t> sweep_node_fixings_;
+    std::shared_ptr<int64_t> chain_node_fixings_;
     std::shared_ptr<int64_t> ub_improvements_;
     std::shared_ptr<int64_t> propagator_calls_;
     std::shared_ptr<double> propagator_time_seconds_;
