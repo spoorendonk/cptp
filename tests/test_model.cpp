@@ -2,6 +2,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <cmath>
+#include <mutex>
+#include <stdexcept>
 
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
@@ -13,6 +15,41 @@ static const cptp::SolverOptions quiet = {
     {"time_limit", "30"},
     {"output_flag", "false"},
 };
+
+static cptp::Problem make_heuristic_small_tour_problem() {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 10.0, 10.0, 10.0, 10.0, 10.0};
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    prob.build(4, edges, costs, profits, demands, 7.0, 0, 0);
+    return prob;
+}
+
+static cptp::Problem make_heuristic_small_path_problem() {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {
+        {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
+    };
+    std::vector<double> costs = {10.0, 10.0, 10.0, 10.0, 10.0, 10.0};
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    prob.build(4, edges, costs, profits, demands, 7.0, 0, 3);
+    return prob;
+}
+
+// Build a 3-node tour where swap(1,1) is the only improving move from [0,1,0].
+static cptp::Problem make_swap_saturated_problem() {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    std::vector<double> costs = {100.0, 1.0, 1000.0};
+    std::vector<double> profits = {0.0, 0.0, 0.0};
+    std::vector<double> demands = {0.0, 5.0, 5.0};
+    prob.build(3, edges, costs, profits, demands, 5.0, 0, 0);
+    return prob;
+}
 
 TEST_CASE("Model solves trivial 3-node instance", "[model]") {
     cptp::Model model;
@@ -118,6 +155,217 @@ TEST_CASE("Initial heuristic allows single-customer tour with x=2 on depot edge"
     const double expected =
         2.0 * prob.edge_cost(0) - prob.profit(0) - prob.profit(1);
     REQUIRE_THAT(start.objective, WithinAbs(expected, 1e-9));
+}
+
+TEST_CASE("Heuristic local search: swap(1,1) improves saturated seed", "[heuristic]") {
+    auto prob = make_swap_saturated_problem();
+
+    std::vector<int32_t> tour = {0, 1, 0};
+    std::vector<bool> in_tour;
+    double remaining_cap = 0.0;
+    REQUIRE(cptp::heuristic::detail::init_seed_state(
+        prob, tour, in_tour, remaining_cap));
+    REQUIRE_THAT(remaining_cap, WithinAbs(0.0, 1e-12));
+
+    const double before = cptp::heuristic::detail::tour_objective(prob, tour);
+    cptp::heuristic::detail::local_search(prob, tour, in_tour, remaining_cap, {}, 50);
+    const double after = cptp::heuristic::detail::tour_objective(prob, tour);
+
+    REQUIRE(after + 1e-9 < before);
+    REQUIRE(tour == std::vector<int32_t>{0, 2, 0});
+    REQUIRE(in_tour[2]);
+    REQUIRE_FALSE(in_tour[1]);
+    REQUIRE_THAT(remaining_cap, WithinAbs(0.0, 1e-12));
+}
+
+TEST_CASE("Heuristic pool local search: deterministic across worker counts (tour)",
+          "[heuristic][determinism]") {
+    auto prob = make_heuristic_small_tour_problem();
+    auto pool = cptp::heuristic::build_construction_pool(prob, 16);
+    REQUIRE_FALSE(pool.candidates.empty());
+    const int starts = static_cast<int>(pool.candidates.size());
+
+    auto single = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, starts, 200, nullptr, 1);
+    auto parallel = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, starts, 200, nullptr, 4);
+
+    REQUIRE(single.objective == parallel.objective);
+    REQUIRE(single.col_values == parallel.col_values);
+}
+
+TEST_CASE("Heuristic pool local search: deterministic across worker counts (path)",
+          "[heuristic][determinism][path]") {
+    auto prob = make_heuristic_small_path_problem();
+    auto pool = cptp::heuristic::build_construction_pool(prob, 16);
+    REQUIRE_FALSE(pool.candidates.empty());
+    const int starts = static_cast<int>(pool.candidates.size());
+
+    auto single = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, starts, 200, nullptr, 1);
+    auto parallel = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, starts, 200, nullptr, 4);
+
+    REQUIRE(single.objective == parallel.objective);
+    REQUIRE(single.col_values == parallel.col_values);
+}
+
+TEST_CASE("Heuristic conversion throws on invalid route", "[heuristic][validation]") {
+    auto prob = make_heuristic_small_tour_problem();
+    // Demands: 3 + 4 + 2 > capacity 7.
+    std::vector<int32_t> invalid = {0, 1, 2, 3, 0};
+    REQUIRE_THROWS_AS(
+        cptp::heuristic::detail::tour_to_solution(prob, invalid),
+        std::runtime_error);
+}
+
+TEST_CASE("Heuristic warm-start progress snapshots are monotonic",
+          "[heuristic][progress]") {
+    auto prob = make_heuristic_small_tour_problem();
+    auto pool = cptp::heuristic::build_construction_pool(prob, 16);
+    REQUIRE_FALSE(pool.candidates.empty());
+
+    cptp::heuristic::WarmStartProgressOptions progress_opts;
+    progress_opts.report_every_work_units = 1;
+    progress_opts.report_on_ub_improvement = true;
+
+    std::vector<cptp::heuristic::WarmStartProgressSnapshot> snapshots;
+    std::mutex snapshots_mu;
+
+    auto result = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, static_cast<int>(pool.candidates.size()), 200,
+        nullptr, 4, {}, &progress_opts,
+        [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
+            std::lock_guard<std::mutex> lock(snapshots_mu);
+            snapshots.push_back(snap);
+        });
+    REQUIRE(std::isfinite(result.objective));
+    REQUIRE_FALSE(result.col_values.empty());
+
+    REQUIRE_FALSE(snapshots.empty());
+    REQUIRE(snapshots.back().final);
+
+    int32_t prev_starts = -1;
+    int64_t prev_wu = -1;
+    int64_t prev_iter = -1;
+    int64_t prev_imp = -1;
+    for (const auto& snap : snapshots) {
+        REQUIRE(snap.starts_done >= prev_starts);
+        REQUIRE(snap.work_units_used >= prev_wu);
+        REQUIRE(snap.ls_iterations_total >= prev_iter);
+        REQUIRE(snap.ub_improvements >= prev_imp);
+        prev_starts = snap.starts_done;
+        prev_wu = snap.work_units_used;
+        prev_iter = snap.ls_iterations_total;
+        prev_imp = snap.ub_improvements;
+    }
+
+    const auto& final = snapshots.back();
+    REQUIRE(final.starts_total == static_cast<int32_t>(pool.candidates.size()));
+    REQUIRE(final.starts_done == final.starts_total);
+    REQUIRE(final.work_units_used == final.starts_done);
+}
+
+TEST_CASE("Heuristic warm-start progress reports capped live work-unit usage",
+          "[heuristic][progress][budget]") {
+    auto prob = make_heuristic_small_tour_problem();
+    auto pool = cptp::heuristic::build_construction_pool(prob, 16);
+    REQUIRE_FALSE(pool.candidates.empty());
+    REQUIRE(static_cast<int>(pool.candidates.size()) > 3);
+
+    auto budget = std::make_shared<cptp::WorkUnitBudget>(3);
+    cptp::heuristic::WarmStartProgressOptions progress_opts;
+    progress_opts.report_every_work_units = 1;
+    progress_opts.report_on_ub_improvement = true;
+
+    std::vector<cptp::heuristic::WarmStartProgressSnapshot> snapshots;
+    std::mutex snapshots_mu;
+
+    auto result = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, static_cast<int>(pool.candidates.size()), 200,
+        budget, 4, {}, &progress_opts,
+        [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
+            std::lock_guard<std::mutex> lock(snapshots_mu);
+            snapshots.push_back(snap);
+        });
+    REQUIRE(std::isfinite(result.objective));
+    REQUIRE_FALSE(result.col_values.empty());
+
+    REQUIRE_FALSE(snapshots.empty());
+    const auto& final = snapshots.back();
+    REQUIRE(final.final);
+    REQUIRE(final.work_units_limit == 3);
+    REQUIRE(final.work_units_used == 3);
+    REQUIRE(final.starts_done == 3);
+    REQUIRE(final.starts_total == 3);
+    REQUIRE(final.starts_done == final.starts_total);
+    REQUIRE(budget->used() == 3);
+}
+
+TEST_CASE("Heuristic warm-start reuses seeds to honor requested starts",
+          "[heuristic][progress][restarts]") {
+    auto prob = make_heuristic_small_tour_problem();
+    auto pool = cptp::heuristic::build_construction_pool(prob, 4);
+    REQUIRE_FALSE(pool.candidates.empty());
+
+    const int requested_starts =
+        static_cast<int>(pool.candidates.size()) + 5;
+    cptp::heuristic::WarmStartProgressOptions progress_opts;
+    progress_opts.report_every_work_units = 1;
+    progress_opts.report_on_ub_improvement = true;
+
+    std::vector<cptp::heuristic::WarmStartProgressSnapshot> snapshots;
+    std::mutex snapshots_mu;
+
+    auto result = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, requested_starts, 200, nullptr, 4, {}, &progress_opts,
+        [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
+            std::lock_guard<std::mutex> lock(snapshots_mu);
+            snapshots.push_back(snap);
+        },
+        true);
+    REQUIRE(std::isfinite(result.objective));
+    REQUIRE_FALSE(result.col_values.empty());
+    REQUIRE_FALSE(snapshots.empty());
+
+    const auto& final = snapshots.back();
+    REQUIRE(final.final);
+    REQUIRE(final.starts_total == requested_starts);
+    REQUIRE(final.starts_done == requested_starts);
+    REQUIRE(final.work_units_used == requested_starts);
+}
+
+TEST_CASE("Heuristic warm-start reuse with uncapped budget stays bounded",
+          "[heuristic][progress][restarts][budget]") {
+    auto prob = make_heuristic_small_tour_problem();
+    auto pool = cptp::heuristic::build_construction_pool(prob, 4);
+    REQUIRE_FALSE(pool.candidates.empty());
+
+    const int requested_starts = 16;
+    auto budget = std::make_shared<cptp::WorkUnitBudget>(0);
+    cptp::heuristic::WarmStartProgressOptions progress_opts;
+    progress_opts.report_every_work_units = 1;
+    progress_opts.report_on_ub_improvement = true;
+
+    std::vector<cptp::heuristic::WarmStartProgressSnapshot> snapshots;
+    std::mutex snapshots_mu;
+
+    auto result = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, requested_starts, 200, budget, 16, {}, &progress_opts,
+        [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
+            std::lock_guard<std::mutex> lock(snapshots_mu);
+            snapshots.push_back(snap);
+        },
+        true);
+    REQUIRE(std::isfinite(result.objective));
+    REQUIRE_FALSE(result.col_values.empty());
+    REQUIRE_FALSE(snapshots.empty());
+
+    const auto& final = snapshots.back();
+    REQUIRE(final.final);
+    REQUIRE(final.starts_total == requested_starts);
+    REQUIRE(final.starts_done == requested_starts);
+    REQUIRE(final.work_units_used == requested_starts);
 }
 
 TEST_CASE("Model handles high-cost low-profit instance", "[model]") {

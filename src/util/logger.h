@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <format>
 #include <iostream>
 #include <mutex>
@@ -12,7 +13,16 @@ class Logger {
  public:
     explicit Logger(std::ostream& out = std::cout) : out_(out) {}
 
+    void set_enabled(bool enabled) {
+        enabled_.store(enabled, std::memory_order_relaxed);
+    }
+
+    bool enabled() const {
+        return enabled_.load(std::memory_order_relaxed);
+    }
+
     void log(std::string_view msg) {
+        if (!enabled()) return;
         std::lock_guard lock(mu_);
         out_ << msg;
         if (!msg.empty() && msg.back() != '\n') out_ << '\n';
@@ -27,6 +37,7 @@ class Logger {
 
  private:
     std::ostream& out_;
+    std::atomic<bool> enabled_{true};
     std::mutex mu_;
 };
 

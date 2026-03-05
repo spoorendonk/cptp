@@ -42,7 +42,7 @@ static void print_usage(const char* prog) {
               << "\nAll other options are forwarded to HiGHS. Common ones:\n"
               << "  --time_limit <sec>     Time limit (default 600)\n"
               << "  --threads <n>          Thread count\n"
-              << "  --output_flag false    Suppress HiGHS output\n"
+              << "  --output_flag false    Suppress informational output\n"
               << "\nSee HiGHS documentation for the full list.\n";
 }
 
@@ -80,6 +80,13 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    bool output_flag = true;
+    for (const auto& [key, value] : options) {
+        if (key == "output_flag") {
+            output_flag = (value == "true" || value == "1");
+        }
+    }
+
     try {
         auto problem = cptp::io::load(instance_path);
 
@@ -107,59 +114,45 @@ int main(int argc, char* argv[]) {
                           src, tgt);
         }
 
-        std::cout << "Instance: " << problem.name
-                  << " (" << problem.num_nodes() << " nodes, "
-                  << problem.num_edges() << " edges";
-        if (problem.is_tour()) {
-            std::cout << ", tour from depot " << problem.source();
-        } else {
-            std::cout << ", path " << problem.source() << " -> " << problem.target();
-        }
-        std::cout << ")\n";
-
         cptp::Model model;
         model.set_problem(std::move(problem));
 
         auto result = model.solve(options);
 
-        // Print solution
-        std::cout << "\n" << (model.problem().is_tour() ? "Tour" : "Path") << ": ";
-        for (size_t i = 0; i < result.tour.size(); ++i) {
-            if (i > 0) std::cout << " -> ";
-            std::cout << result.tour[i];
-        }
-        std::cout << "\n";
-
-        std::cout << "Objective: " << result.objective
-                  << "  Bound: " << result.bound
-                  << "  Gap: " << (result.gap * 100.0) << "%"
-                  << "  Time: " << result.time_seconds << "s"
-                  << "  Nodes: " << result.nodes << "\n";
-
-        if (!result.separator_stats.empty()) {
-            std::cout << "User cuts: " << result.total_cuts
-                      << " (" << result.separation_rounds << " rounds)\n";
-            std::cout << std::fixed << std::setprecision(3);
-            const std::array<std::string, 6> preferred = {
-                "SEC", "RCI", "Multistar", "Comb", "RGLM", "SPI"
-            };
-            auto print_sep_row = [](const std::string& name,
-                                    const cptp::SeparatorStats& stats) {
-                std::cout << "  " << std::setw(10) << std::left << name
-                          << std::right
-                          << std::setw(6) << stats.cuts_added << " cuts"
-                          << std::setw(6) << stats.rounds_called << " rounds"
-                          << std::setw(8) << stats.time_seconds << "s\n";
-            };
-            for (const auto& name : preferred) {
-                auto it = result.separator_stats.find(name);
-                if (it != result.separator_stats.end()) {
-                    print_sep_row(it->first, it->second);
-                }
+        if (output_flag) {
+            // Print route only: HiGHS already reports objective/bounds/nodes.
+            std::cout << "\n" << (model.problem().is_tour() ? "Tour" : "Path") << ": ";
+            for (size_t i = 0; i < result.tour.size(); ++i) {
+                if (i > 0) std::cout << " -> ";
+                std::cout << result.tour[i];
             }
-            for (const auto& [name, stats] : result.separator_stats) {
-                if (std::find(preferred.begin(), preferred.end(), name) == preferred.end()) {
-                    print_sep_row(name, stats);
+            std::cout << "\n";
+
+            if (!result.separator_stats.empty()) {
+                std::cout << "User cuts: " << result.total_cuts
+                          << " (" << result.separation_rounds << " rounds)\n";
+                std::cout << std::fixed << std::setprecision(3);
+                const std::array<std::string, 6> preferred = {
+                    "SEC", "RCI", "Multistar", "Comb", "RGLM", "SPI"
+                };
+                auto print_sep_row = [](const std::string& name,
+                                        const cptp::SeparatorStats& stats) {
+                    std::cout << "  " << std::setw(10) << std::left << name
+                              << std::right
+                              << std::setw(6) << stats.cuts_added << " cuts"
+                              << std::setw(6) << stats.rounds_called << " rounds"
+                              << std::setw(8) << stats.time_seconds << "s\n";
+                };
+                for (const auto& name : preferred) {
+                    auto it = result.separator_stats.find(name);
+                    if (it != result.separator_stats.end()) {
+                        print_sep_row(it->first, it->second);
+                    }
+                }
+                for (const auto& [name, stats] : result.separator_stats) {
+                    if (std::find(preferred.begin(), preferred.end(), name) == preferred.end()) {
+                        print_sep_row(name, stats);
+                    }
                 }
             }
         }
