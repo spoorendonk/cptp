@@ -745,7 +745,7 @@ struct WarmStartProgressSnapshot {
 };
 
 struct WarmStartProgressOptions {
-    int64_t report_every_work_units = 8;
+    int64_t report_every_starts = 8;
     bool report_on_ub_improvement = true;
 };
 
@@ -993,9 +993,9 @@ inline HeuristicResult run_local_search_from_pool(
     std::atomic<int64_t> ub_improvements{0};
     const bool progress_enabled = static_cast<bool>(progress_cb) && progress_opts != nullptr;
     const int64_t report_every = progress_enabled
-        ? std::max<int64_t>(1, progress_opts->report_every_work_units)
+        ? std::max<int64_t>(1, progress_opts->report_every_starts)
         : 0;
-    std::atomic<int64_t> next_wu_milestone{
+    std::atomic<int64_t> next_report_milestone{
         (progress_enabled && report_every > 0)
             ? report_every
             : std::numeric_limits<int64_t>::max()
@@ -1040,14 +1040,13 @@ inline HeuristicResult run_local_search_from_pool(
             throw std::runtime_error(
                 "warm-start local search exceeded requested start count");
         }
-        const int64_t wu_now = static_cast<int64_t>(done_after);
         bool periodic_due = false;
         if (progress_enabled && report_every > 0) {
             while (true) {
                 int64_t milestone =
-                    next_wu_milestone.load(std::memory_order_relaxed);
-                if (wu_now < milestone) break;
-                if (next_wu_milestone.compare_exchange_weak(
+                    next_report_milestone.load(std::memory_order_relaxed);
+                if (done_after < milestone) break;
+                if (next_report_milestone.compare_exchange_weak(
                         milestone, milestone + report_every,
                         std::memory_order_relaxed,
                         std::memory_order_relaxed)) {
