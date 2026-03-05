@@ -230,7 +230,6 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     double user_time_limit = -1.0;  // -1 = no limit specified
 
-    bool warned_legacy_internal_option = false;
     std::map<std::string, std::string> accepted_highs_options;
     bool threads_option_explicit = false;
 
@@ -247,9 +246,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         // --- Bounds & Preprocessing ---
         if (key == "two_cycle_elim_bounds") { two_cycle_elim_bounds = parse_bool(value); continue; }
-        if (key == "all_pairs_bounds" || key == "all_pairs_propagation") {
-            all_pairs_bounds = parse_bool(value); continue;
-        }
+        if (key == "all_pairs_bounds") { all_pairs_bounds = parse_bool(value); continue; }
         if (key == "edge_elimination") { edge_elimination = parse_bool(value); continue; }
         if (key == "edge_elimination_nodes") { edge_elimination_nodes = parse_bool(value); continue; }
         if (key == "bounds_propagation") { bounds_propagation = parse_bool(value); continue; }
@@ -257,28 +254,21 @@ SolveResult Model::solve(const SolverOptions& options) {
         if (key == "separation_interval") { separation_interval = std::stoi(value); continue; }
         if (key == "separation_tol") { separation_tol = std::stod(value); continue; }
         if (key == "max_cuts_per_round") { max_cuts_per_round = std::stoi(value); continue; }
-        // Legacy: accept old name
-        if (key == "max_cuts_per_separator") { max_cuts_per_round = std::stoi(value); continue; }
         // --- Heuristics: warm-start ---
         if (key == "heu_ws") { heu_ws = parse_bool(value); continue; }
-        if (key == "!heu_ws") { heu_ws = !parse_bool(value); continue; }
         if (key == "heu_ws_ls_max_iter") { heu_ws_ls_max_iter = std::stoi(value); continue; }
         // --- Heuristics: LP-guided ---
-        if (key == "heu_lpg" || key == "heuristic_callback") { heu_lpg = parse_bool(value); continue; }
-        if (key == "heu_lpg_strategy" || key == "heuristic_strategy") { heu_lpg_strategy = std::stoi(value); continue; }
-        if (key == "heu_lpg_budget_ms" || key == "heuristic_budget_ms") { heu_lpg_budget_ms = std::stod(value); continue; }
-        if (key == "heu_lpg_node_interval" || key == "heuristic_node_interval") { heu_lpg_node_interval = std::stoll(value); continue; }
-        if (key == "heu_lpg_deterministic_restarts" || key == "heuristic_deterministic_restarts") {
-            heu_lpg_deterministic_restarts = std::stoi(value); continue;
-        }
+        if (key == "heu_lpg") { heu_lpg = parse_bool(value); continue; }
+        if (key == "heu_lpg_strategy") { heu_lpg_strategy = std::stoi(value); continue; }
+        if (key == "heu_lpg_budget_ms") { heu_lpg_budget_ms = std::stod(value); continue; }
+        if (key == "heu_lpg_node_interval") { heu_lpg_node_interval = std::stoll(value); continue; }
+        if (key == "heu_lpg_deterministic_restarts") { heu_lpg_deterministic_restarts = std::stoi(value); continue; }
         if (key == "heu_lpg_edge_threshold") { heu_lpg_edge_threshold = std::stod(value); continue; }
         if (key == "heu_lpg_node_threshold") { heu_lpg_node_threshold = std::stod(value); continue; }
         if (key == "heu_lpg_lp_threshold") { heu_lpg_lp_threshold = std::stod(value); continue; }
         if (key == "heu_lpg_seed_threshold") { heu_lpg_seed_threshold = std::stod(value); continue; }
         // --- Heuristics: HiGHS sub-MIP ---
-        if (key == "heu_highs_submip_sec" || key == "submip_separation") {
-            heu_highs_submip_sec = parse_bool(value); continue;
-        }
+        if (key == "heu_highs_submip_sec") { heu_highs_submip_sec = parse_bool(value); continue; }
         // --- SPI separator ---
         if (key == "spi_max_dp_size") { spi_max_dp_size = std::stoi(value); continue; }
         if (key == "spi_max_seeds") { spi_max_seeds = std::stoi(value); continue; }
@@ -322,23 +312,6 @@ SolveResult Model::solve(const SolverOptions& options) {
         if (key == "branch_hyper_sb_min_reliable") { hyper_sb_min_reliable = std::stoi(value); continue; }
         if (key == "branch_hyper_sb_max_candidates") { hyper_sb_max_candidates = std::stoi(value); continue; }
         if (key == "output_flag") { output_flag = parse_bool(value); continue; }
-        if (key.rfind("_internal_", 0) == 0) {
-            if (!warned_legacy_internal_option) {
-                logger_.log("Warning: internal options are no longer supported and will be ignored");
-                warned_legacy_internal_option = true;
-            }
-            continue;
-        }
-        if (key == "disable_heuristics") {
-            logger_.log("Warning: disable_heuristics is deprecated; use --heu_ws false instead");
-            heu_ws = !parse_bool(value);
-            continue;
-        }
-        if (key == "preproc_stage1_bounds" || key == "ng_initial_size" ||
-            key == "ng_max_size" || key == "ng_dssr_iters" || key == "ng_simd") {
-            logger_.log("Warning: ng-DSSR option {}={} ignored (ng-DSSR removed, using 2-cycle bounds)", key, value);
-            continue;
-        }
         if (key == "random_seed") {
             random_seed = std::stoi(value);
             // Forward to HiGHS but don't duplicate in accepted_highs_options
@@ -487,6 +460,54 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     if (cutoff < std::numeric_limits<double>::infinity()) {
         nondefault_settings.push_back("cutoff=" + std::to_string(cutoff));
+    }
+    if (heu_lpg_budget_ms != 20.0) {
+        nondefault_settings.push_back("heu_lpg_budget_ms=" + std::to_string(heu_lpg_budget_ms));
+    }
+    if (separation_tol != sep::kDefaultFracTol) {
+        nondefault_settings.push_back("separation_tol=" + std::to_string(separation_tol));
+    }
+    if (rc_settings.strategy != RCFixingStrategy::off) {
+        auto rc_str = [](RCFixingStrategy s) -> const char* {
+            switch (s) {
+                case RCFixingStrategy::root_only: return "root_only";
+                case RCFixingStrategy::on_ub_improvement: return "on_ub_improvement";
+                case RCFixingStrategy::periodic: return "periodic";
+                case RCFixingStrategy::adaptive: return "adaptive";
+                default: return "off";
+            }
+        };
+        nondefault_settings.push_back(std::string("rc_fixing=") + rc_str(rc_settings.strategy));
+        if (rc_settings.periodic_interval != 100) {
+            nondefault_settings.push_back("rc_fixing_interval=" + std::to_string(rc_settings.periodic_interval));
+        }
+        if (rc_settings.fix_to_one) {
+            nondefault_settings.push_back("rc_fixing_to_one=on");
+        }
+    }
+    if (!enable_sec) nondefault_settings.push_back("enable_sec=off");
+    if (!enable_rci) nondefault_settings.push_back("enable_rci=off");
+    if (!enable_multistar) nondefault_settings.push_back("enable_multistar=off");
+    if (!enable_comb) nondefault_settings.push_back("enable_comb=off");
+    if (!enable_spi) nondefault_settings.push_back("enable_spi=off");
+    if (enable_rglm) nondefault_settings.push_back("enable_rglm=on");
+    if (max_cuts_sec != -1) nondefault_settings.push_back("max_cuts_sec=" + std::to_string(max_cuts_sec));
+    if (max_cuts_rci != -1) nondefault_settings.push_back("max_cuts_rci=" + std::to_string(max_cuts_rci));
+    if (max_cuts_multistar != -1) nondefault_settings.push_back("max_cuts_multistar=" + std::to_string(max_cuts_multistar));
+    if (max_cuts_comb != -1) nondefault_settings.push_back("max_cuts_comb=" + std::to_string(max_cuts_comb));
+    if (max_cuts_rglm != -1) nondefault_settings.push_back("max_cuts_rglm=" + std::to_string(max_cuts_rglm));
+    if (max_cuts_spi != -1) nondefault_settings.push_back("max_cuts_spi=" + std::to_string(max_cuts_spi));
+    if (min_violation_sec != -1.0) nondefault_settings.push_back("min_violation_sec=" + std::to_string(min_violation_sec));
+    if (min_violation_rci != -1.0) nondefault_settings.push_back("min_violation_rci=" + std::to_string(min_violation_rci));
+    if (min_violation_multistar != -1.0) nondefault_settings.push_back("min_violation_multistar=" + std::to_string(min_violation_multistar));
+    if (min_violation_comb != -1.0) nondefault_settings.push_back("min_violation_comb=" + std::to_string(min_violation_comb));
+    if (min_violation_rglm != -1.0) nondefault_settings.push_back("min_violation_rglm=" + std::to_string(min_violation_rglm));
+    if (min_violation_spi != -1.0) nondefault_settings.push_back("min_violation_spi=" + std::to_string(min_violation_spi));
+    if (branch_hyper != "off") {
+        if (hyper_sb_max_depth != 0) nondefault_settings.push_back("branch_hyper_sb_max_depth=" + std::to_string(hyper_sb_max_depth));
+        if (hyper_sb_iter_limit != 100) nondefault_settings.push_back("branch_hyper_sb_iter_limit=" + std::to_string(hyper_sb_iter_limit));
+        if (hyper_sb_min_reliable != 4) nondefault_settings.push_back("branch_hyper_sb_min_reliable=" + std::to_string(hyper_sb_min_reliable));
+        if (hyper_sb_max_candidates != 3) nondefault_settings.push_back("branch_hyper_sb_max_candidates=" + std::to_string(hyper_sb_max_candidates));
     }
     for (const auto& [k, v] : accepted_highs_options) {
         nondefault_settings.push_back(k + "=" + v);
