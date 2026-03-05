@@ -281,9 +281,10 @@ def test_binary_output_has_stage_headers():
     )
     assert result.returncode == 0
     assert "Running HiGHS " in result.stdout
-    assert "Startup Stage1 [Bounds]" in result.stdout
-    assert "fwd_finite=" in result.stdout
-    assert "bwd_finite=" in result.stdout
+    assert "Lower bounds calculation:" in result.stdout
+    assert "fwd_reachable=" in result.stdout
+    assert "bwd_reachable=" in result.stdout
+    assert "Startup Stage" not in result.stdout
     assert "Construction heuristic:" in result.stdout
     assert "Preprocess:" in result.stdout
     assert "Local search:" in result.stdout
@@ -304,7 +305,8 @@ def test_binary_output_all_pairs_block_before_local_search():
     )
     assert result.returncode == 0
     assert "Preprocess:" in result.stdout
-    assert "all-pairs 2-cycle bounds" in result.stdout
+    assert "Lower bounds all pairs calculation:" in result.stdout
+    assert "all_pairs_reachable=" in result.stdout
     assert "Local search:" in result.stdout
 
 
@@ -321,7 +323,7 @@ def test_binary_output_propagator_summary_format():
     )
     assert result.returncode == 0
     assert "Propagator:" in result.stdout
-    assert "sweep + " in result.stdout
+    assert "sweep=" in result.stdout
     assert "UB improvements" not in result.stdout
 
 

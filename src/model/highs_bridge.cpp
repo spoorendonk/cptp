@@ -484,6 +484,7 @@ void HiGHSBridge::install_propagator() {
     propagator_fixings_ = std::make_shared<int64_t>(0);
     sweep_fixings_ = std::make_shared<int64_t>(0);
     chain_fixings_ = std::make_shared<int64_t>(0);
+    sweep_node_fixings_ = std::make_shared<int64_t>(0);
     ub_improvements_ = std::make_shared<int64_t>(0);
     propagator_calls_ = std::make_shared<int64_t>(0);
     propagator_time_seconds_ = std::make_shared<double>(0.0);
@@ -495,6 +496,7 @@ void HiGHSBridge::install_propagator() {
     auto propagator_fixings = propagator_fixings_;
     auto sweep_fixings = sweep_fixings_;
     auto chain_fixings = chain_fixings_;
+    auto sweep_node_fixings = sweep_node_fixings_;
     auto ub_improvements = ub_improvements_;
     auto propagator_calls = propagator_calls_;
     auto propagator_time = propagator_time_seconds_;
@@ -605,6 +607,7 @@ void HiGHSBridge::install_propagator() {
                         domain.changeBound(
                             HighsBoundType::kUpper, m + i, 0.0,
                             HighsDomain::Reason::unspecified());
+                        (*sweep_node_fixings)++;
                     }
                 }
             }
@@ -919,8 +922,6 @@ void HiGHSBridge::install_propagator() {
             }
         });
 
-    logger_.log("Installed domain propagator (bounds_propagation={}, have_bounds={})",
-                bounds_prop ? "true" : "false", have_bounds ? "true" : "false");
 }
 
 void HiGHSBridge::install_heuristic_callback() {
@@ -1191,18 +1192,22 @@ SolveResult HiGHSBridge::extract_result() const {
 
     // Print propagator statistics
     if (propagator_calls_) {
+        const int64_t sweep_nodes = sweep_node_fixings_ ? *sweep_node_fixings_ : 0;
+        const int64_t sweep_total = *sweep_fixings_ + sweep_nodes;
         const int64_t propagator_fixings =
-            (sweep_fixings_ ? *sweep_fixings_ : 0)
-            + (chain_fixings_ ? *chain_fixings_ : 0);
-        logger_.log("Propagator: {} calls, {} fixings ({} sweep + {} chain), {:.3f}s",
+            sweep_total + (chain_fixings_ ? *chain_fixings_ : 0);
+        logger_.log("Propagator: calls={}  fixings={} (sweep={} [edges={} nodes={}] chain={})  time={:.3f}s",
                     *propagator_calls_, propagator_fixings,
-                    *sweep_fixings_, *chain_fixings_,
+                    sweep_total, *sweep_fixings_, sweep_nodes,
+                    *chain_fixings_,
                     propagator_time_seconds_ ? *propagator_time_seconds_ : 0.0);
     }
     if (rc_fix0_count_ && (*rc_fix0_count_ > 0 || *rc_fix1_count_ > 0)) {
-        logger_.log("RC fixing: {} edges fixed to 0, {} nodes fixed to 1, {} labeling runs, {} callback runs, {:.3f}s",
-                    *rc_fix0_count_, *rc_fix1_count_, *rc_label_runs_,
-                    rc_callback_runs_ ? *rc_callback_runs_ : 0,
+        const int64_t rc_fixings = *rc_fix0_count_ + *rc_fix1_count_;
+        const int64_t rc_calls = rc_callback_runs_ ? *rc_callback_runs_ : 0;
+        logger_.log("RC fixing:  calls={}  fixings={} (edges={} nodes={})  labeling_runs={}  time={:.3f}s",
+                    rc_calls, rc_fixings, *rc_fix0_count_, *rc_fix1_count_,
+                    *rc_label_runs_,
                     rc_time_seconds_ ? *rc_time_seconds_ : 0.0);
     }
 
@@ -1211,19 +1216,11 @@ SolveResult HiGHSBridge::extract_result() const {
         heuristic_calls_ ? *heuristic_calls_ : 0;
     const int64_t heuristic_solutions =
         heuristic_solutions_ ? *heuristic_solutions_ : 0;
-    const int64_t heuristic_wu =
-        heuristic_work_units_ ? *heuristic_work_units_ : 0;
     const double heuristic_time =
         heuristic_time_seconds_ ? *heuristic_time_seconds_ : 0.0;
-    if (heuristic_callback_ || heuristic_calls > 0
-        || heuristic_solutions > 0 || heuristic_wu > 0) {
-        const double wu_per_call = heuristic_calls > 0
-            ? static_cast<double>(heuristic_wu) / static_cast<double>(heuristic_calls)
-            : 0.0;
-        logger_.log(
-            "Heuristic callback: {} calls, {} solutions injected, {} wu ({:.1f} wu/call), {:.3f}s",
-            heuristic_calls, heuristic_solutions, heuristic_wu, wu_per_call,
-            heuristic_time);
+    if (heuristic_callback_ || heuristic_calls > 0) {
+        logger_.log("Heuristic:  calls={}  solutions={}  time={:.3f}s",
+                    heuristic_calls, heuristic_solutions, heuristic_time);
     }
 
     // Attach separator statistics
