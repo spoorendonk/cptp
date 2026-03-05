@@ -282,7 +282,7 @@ TEST_CASE("Propagator does not change optimal solution on tiny4", "[propagator]"
 TEST_CASE("All-pairs propagation produces valid solution on tiny4",
           "[propagator][all_pairs]") {
     auto r = solve_instance("tests/data/tiny4.txt",
-                            {{"all_pairs_propagation", "true"}});
+                            {{"all_pairs_bounds", "true"}});
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1.0));
 }
@@ -290,7 +290,7 @@ TEST_CASE("All-pairs propagation produces valid solution on tiny4",
 TEST_CASE("All-pairs and default produce same objective", "[propagator][all_pairs]") {
     auto r_default = solve_instance("tests/data/tiny4.txt");
     auto r_ap = solve_instance("tests/data/tiny4.txt",
-                               {{"all_pairs_propagation", "true"}});
+                               {{"all_pairs_bounds", "true"}});
     REQUIRE(r_default.is_optimal());
     REQUIRE(r_ap.is_optimal());
     REQUIRE_THAT(r_default.objective, WithinAbs(r_ap.objective, 1e-6));
@@ -307,7 +307,7 @@ TEST_CASE("All-pairs on larger instance B-n45-k6-54",
           "[propagator][all_pairs][slow]") {
     auto r = solve_instance("benchmarks/instances/spprclib/B-n45-k6-54.sppcc",
                             {{"time_limit", "60"},
-                             {"all_pairs_propagation", "true"}});
+                             {"all_pairs_bounds", "true"}});
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }

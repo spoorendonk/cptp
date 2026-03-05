@@ -19,7 +19,7 @@ static cptp::SolveResult prove_instance(const char* path, double cutoff,
     auto opts = quiet;
     opts.push_back({"time_limit", std::to_string(time_limit)});
     opts.push_back({"cutoff", std::to_string(cutoff)});
-    opts.push_back({"disable_heuristics", "true"});
+    opts.push_back({"heu_ws", "false"});
     return model.solve(opts);
 }
 
@@ -103,7 +103,7 @@ static cptp::SolveResult prove_rc_fixing(const char* path, double cutoff,
     auto opts = quiet;
     opts.push_back({"time_limit", std::to_string(time_limit)});
     opts.push_back({"cutoff", std::to_string(cutoff)});
-    opts.push_back({"disable_heuristics", "true"});
+    opts.push_back({"heu_ws", "false"});
     opts.push_back({"rc_fixing", strategy});
     if (fix_to_one)
         opts.push_back({"rc_fixing_to_one", "true"});
@@ -150,7 +150,7 @@ TEST_CASE("rc_fixing periodic: tiny4 tour optimal", "[prove][rc_fixing]") {
     auto opts = quiet;
     opts.push_back({"time_limit", "30"});
     opts.push_back({"cutoff", "-11.0"});
-    opts.push_back({"disable_heuristics", "true"});
+    opts.push_back({"heu_ws", "false"});
     opts.push_back({"rc_fixing", "periodic"});
     opts.push_back({"rc_fixing_interval", "10"});
     auto r = model.solve(opts);
@@ -212,7 +212,7 @@ TEST_CASE("rc_fixing periodic: tiny4 path optimal", "[prove][rc_fixing]") {
     auto opts = quiet;
     opts.push_back({"time_limit", "30"});
     opts.push_back({"cutoff", "-13.0"});
-    opts.push_back({"disable_heuristics", "true"});
+    opts.push_back({"heu_ws", "false"});
     opts.push_back({"rc_fixing", "periodic"});
     opts.push_back({"rc_fixing_interval", "10"});
     auto r = model.solve(opts);
@@ -227,7 +227,7 @@ TEST_CASE("rc_fixing periodic + fix_to_one: tiny4 tour", "[prove][rc_fixing]") {
     auto opts = quiet;
     opts.push_back({"time_limit", "30"});
     opts.push_back({"cutoff", "-11.0"});
-    opts.push_back({"disable_heuristics", "true"});
+    opts.push_back({"heu_ws", "false"});
     opts.push_back({"rc_fixing", "periodic"});
     opts.push_back({"rc_fixing_interval", "10"});
     opts.push_back({"rc_fixing_to_one", "true"});

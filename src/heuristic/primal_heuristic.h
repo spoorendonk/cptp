@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
-#include <memory>
 #include <mutex>
 #include <numeric>
 #include <random>
@@ -20,7 +19,6 @@
 #include "core/problem.h"
 #include "preprocess/edge_elimination.h"
 #include "sep/separation_oracle.h"
-#include "util/work_unit_budget.h"
 
 namespace cptp::heuristic {
 
@@ -740,8 +738,6 @@ struct HeuristicResult {
 struct WarmStartProgressSnapshot {
     int32_t starts_total = 0;
     int32_t starts_done = 0;
-    int64_t work_units_used = 0;
-    int64_t work_units_limit = 0;  // <= 0 means uncapped/unknown
     int64_t ls_iterations_total = 0;
     int64_t ub_improvements = 0;
     double best_objective = detail::kNoSolution;
@@ -972,7 +968,6 @@ inline HeuristicResult run_local_search_from_pool(
     const ConstructionPool& pool,
     int num_starts,
     int ls_max_iter_per_start = kDefaultLsMaxIterPerStart,
-    const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr,
     int32_t max_workers = 0,
     const std::vector<bool>& edge_active_override = {},
     const WarmStartProgressOptions* progress_opts = nullptr,
@@ -987,15 +982,6 @@ inline HeuristicResult run_local_search_from_pool(
     int starts = reuse_candidates_for_starts
         ? std::max(1, num_starts)
         : std::clamp(num_starts, 1, static_cast<int>(pool.candidates.size()));
-    if (work_budget && work_budget->capped()) {
-        // Cap starts before allocation/scheduling to avoid O(num_starts) overhead
-        // when a deterministic work-unit limit is much smaller.
-        const int64_t remaining = work_budget->remaining();
-        if (remaining <= 0) {
-            return {{}, detail::kNoSolution};
-        }
-        starts = static_cast<int>(std::min<int64_t>(starts, remaining));
-    }
     if (starts <= 0) {
         return {{}, detail::kNoSolution};
     }
@@ -1019,22 +1005,10 @@ inline HeuristicResult run_local_search_from_pool(
     std::mutex progress_emit_mu;
     int32_t last_emitted_starts = -1;
 
-    auto current_work_units_used = [&]() -> int64_t {
-        if (work_budget) return work_budget->used();
-        return static_cast<int64_t>(starts_done.load(std::memory_order_relaxed));
-    };
-
-    auto current_work_units_limit = [&]() -> int64_t {
-        if (!work_budget || !work_budget->capped()) return 0;
-        return work_budget->limit();
-    };
-
     auto build_progress_snapshot = [&](bool final) -> WarmStartProgressSnapshot {
         WarmStartProgressSnapshot snap;
         snap.starts_total = starts;
         snap.starts_done = starts_done.load(std::memory_order_relaxed);
-        snap.work_units_used = current_work_units_used();
-        snap.work_units_limit = current_work_units_limit();
         snap.ls_iterations_total = ls_iterations_total.load(std::memory_order_relaxed);
         snap.ub_improvements = ub_improvements.load(std::memory_order_relaxed);
         {
@@ -1066,7 +1040,7 @@ inline HeuristicResult run_local_search_from_pool(
             throw std::runtime_error(
                 "warm-start local search exceeded requested start count");
         }
-        const int64_t wu_now = current_work_units_used();
+        const int64_t wu_now = static_cast<int64_t>(done_after);
         bool periodic_due = false;
         if (progress_enabled && report_every > 0) {
             while (true) {
@@ -1093,7 +1067,6 @@ inline HeuristicResult run_local_search_from_pool(
             while (true) {
                 const int32_t i = next_start.fetch_add(1, std::memory_order_relaxed);
                 if (i >= starts) break;
-                if (work_budget && !work_budget->try_consume(1)) break;
 
                 bool ub_improved = false;
                 int64_t ls_iters_for_start = 0;
@@ -1202,7 +1175,6 @@ inline HeuristicResult run_local_search_from_pool(
 inline HeuristicResult build_initial_solution(const Problem& prob,
                                               int num_restarts = 50,
                                               double time_budget_ms = 0.0,
-                                              const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr,
                                               std::span<const double> fwd_bounds = {},
                                               std::span<const double> bwd_bounds = {},
                                               double correction = 0.0,
@@ -1220,7 +1192,7 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
         candidate_cap,
         std::max<int32_t>(1, max_workers > 0 ? max_workers : num_restarts));
     auto improved = run_local_search_from_pool(
-        prob, pool, ls_starts, kDefaultLsMaxIterPerStart, work_budget, max_workers);
+        prob, pool, ls_starts, kDefaultLsMaxIterPerStart, max_workers);
 
     if (improved.col_values.empty()
         || improved.objective > construction.objective + 1e-12) {
@@ -1233,14 +1205,13 @@ inline HeuristicResult build_initial_solution(const Problem& prob,
 inline HeuristicResult build_warm_start(const Problem& prob,
                                         int num_restarts = 50,
                                         double time_budget_ms = 0.0,
-                                        const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr,
                                         std::span<const double> fwd_bounds = {},
                                         std::span<const double> bwd_bounds = {},
                                         double correction = 0.0,
                                         double upper_bound = std::numeric_limits<double>::infinity(),
                                         int32_t max_workers = 0) {
     return build_initial_solution(
-        prob, num_restarts, time_budget_ms, work_budget,
+        prob, num_restarts, time_budget_ms,
         fwd_bounds, bwd_bounds, correction, upper_bound, max_workers);
 }
 
@@ -1257,7 +1228,10 @@ inline HeuristicResult lp_guided_heuristic(
     int strategy = 0,
     int max_restarts = 0,
     uint32_t restart_seed = 0,
-    const std::shared_ptr<WorkUnitBudget>& work_budget = nullptr) {
+    double lpg_edge_threshold = 0.1,
+    double lpg_node_threshold = 0.5,
+    double lpg_lp_threshold = 0.1,
+    double lpg_seed_threshold = 0.3) {
 
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
@@ -1268,11 +1242,14 @@ inline HeuristicResult lp_guided_heuristic(
     // Build reduced graphs for selected strategies
     std::vector<ReducedGraph> graphs;
     if (strategy == 0 || strategy == 1)
-        graphs.push_back(reduce_lp_threshold(prob, x_lp, y_lp));
+        graphs.push_back(reduce_lp_threshold(prob, x_lp, y_lp,
+                                             lpg_edge_threshold, lpg_node_threshold));
     if (strategy == 0 || strategy == 2)
-        graphs.push_back(reduce_rins(prob, x_lp, y_lp, incumbent));
+        graphs.push_back(reduce_rins(prob, x_lp, y_lp, incumbent,
+                                     lpg_lp_threshold));
     if (strategy == 0 || strategy == 3)
-        graphs.push_back(reduce_neighborhood(prob, x_lp, y_lp));
+        graphs.push_back(reduce_neighborhood(prob, x_lp, y_lp,
+                                             lpg_seed_threshold));
 
     std::vector<const ReducedGraph*> strategies;
     for (auto& g : graphs) strategies.push_back(&g);
@@ -1309,11 +1286,6 @@ inline HeuristicResult lp_guided_heuristic(
     const int restart_target =
         (max_restarts > 0) ? max_restarts : std::max(1, 8 * num_strategies);
     int total_restarts = restart_target;
-    if (work_budget) {
-        total_restarts = static_cast<int>(
-            std::min<int64_t>(total_restarts,
-                work_budget->reserve_up_to(total_restarts)));
-    }
     if (total_restarts <= 0) {
         return {{}, detail::kNoSolution};
     }

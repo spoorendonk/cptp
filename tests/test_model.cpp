@@ -186,9 +186,9 @@ TEST_CASE("Heuristic pool local search: deterministic across worker counts (tour
     const int starts = static_cast<int>(pool.candidates.size());
 
     auto single = cptp::heuristic::run_local_search_from_pool(
-        prob, pool, starts, 200, nullptr, 1);
+        prob, pool, starts, 200, 1);
     auto parallel = cptp::heuristic::run_local_search_from_pool(
-        prob, pool, starts, 200, nullptr, 4);
+        prob, pool, starts, 200, 4);
 
     REQUIRE(single.objective == parallel.objective);
     REQUIRE(single.col_values == parallel.col_values);
@@ -202,9 +202,9 @@ TEST_CASE("Heuristic pool local search: deterministic across worker counts (path
     const int starts = static_cast<int>(pool.candidates.size());
 
     auto single = cptp::heuristic::run_local_search_from_pool(
-        prob, pool, starts, 200, nullptr, 1);
+        prob, pool, starts, 200, 1);
     auto parallel = cptp::heuristic::run_local_search_from_pool(
-        prob, pool, starts, 200, nullptr, 4);
+        prob, pool, starts, 200, 4);
 
     REQUIRE(single.objective == parallel.objective);
     REQUIRE(single.col_values == parallel.col_values);
@@ -234,7 +234,7 @@ TEST_CASE("Heuristic warm-start progress snapshots are monotonic",
 
     auto result = cptp::heuristic::run_local_search_from_pool(
         prob, pool, static_cast<int>(pool.candidates.size()), 200,
-        nullptr, 4, {}, &progress_opts,
+        4, {}, &progress_opts,
         [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
             std::lock_guard<std::mutex> lock(snapshots_mu);
             snapshots.push_back(snap);
@@ -246,16 +246,13 @@ TEST_CASE("Heuristic warm-start progress snapshots are monotonic",
     REQUIRE(snapshots.back().final);
 
     int32_t prev_starts = -1;
-    int64_t prev_wu = -1;
     int64_t prev_iter = -1;
     int64_t prev_imp = -1;
     for (const auto& snap : snapshots) {
         REQUIRE(snap.starts_done >= prev_starts);
-        REQUIRE(snap.work_units_used >= prev_wu);
         REQUIRE(snap.ls_iterations_total >= prev_iter);
         REQUIRE(snap.ub_improvements >= prev_imp);
         prev_starts = snap.starts_done;
-        prev_wu = snap.work_units_used;
         prev_iter = snap.ls_iterations_total;
         prev_imp = snap.ub_improvements;
     }
@@ -263,43 +260,6 @@ TEST_CASE("Heuristic warm-start progress snapshots are monotonic",
     const auto& final = snapshots.back();
     REQUIRE(final.starts_total == static_cast<int32_t>(pool.candidates.size()));
     REQUIRE(final.starts_done == final.starts_total);
-    REQUIRE(final.work_units_used == final.starts_done);
-}
-
-TEST_CASE("Heuristic warm-start progress reports capped live work-unit usage",
-          "[heuristic][progress][budget]") {
-    auto prob = make_heuristic_small_tour_problem();
-    auto pool = cptp::heuristic::build_construction_pool(prob, 16);
-    REQUIRE_FALSE(pool.candidates.empty());
-    REQUIRE(static_cast<int>(pool.candidates.size()) > 3);
-
-    auto budget = std::make_shared<cptp::WorkUnitBudget>(3);
-    cptp::heuristic::WarmStartProgressOptions progress_opts;
-    progress_opts.report_every_work_units = 1;
-    progress_opts.report_on_ub_improvement = true;
-
-    std::vector<cptp::heuristic::WarmStartProgressSnapshot> snapshots;
-    std::mutex snapshots_mu;
-
-    auto result = cptp::heuristic::run_local_search_from_pool(
-        prob, pool, static_cast<int>(pool.candidates.size()), 200,
-        budget, 4, {}, &progress_opts,
-        [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
-            std::lock_guard<std::mutex> lock(snapshots_mu);
-            snapshots.push_back(snap);
-        });
-    REQUIRE(std::isfinite(result.objective));
-    REQUIRE_FALSE(result.col_values.empty());
-
-    REQUIRE_FALSE(snapshots.empty());
-    const auto& final = snapshots.back();
-    REQUIRE(final.final);
-    REQUIRE(final.work_units_limit == 3);
-    REQUIRE(final.work_units_used == 3);
-    REQUIRE(final.starts_done == 3);
-    REQUIRE(final.starts_total == 3);
-    REQUIRE(final.starts_done == final.starts_total);
-    REQUIRE(budget->used() == 3);
 }
 
 TEST_CASE("Heuristic warm-start reuses seeds to honor requested starts",
@@ -318,7 +278,7 @@ TEST_CASE("Heuristic warm-start reuses seeds to honor requested starts",
     std::mutex snapshots_mu;
 
     auto result = cptp::heuristic::run_local_search_from_pool(
-        prob, pool, requested_starts, 200, nullptr, 4, {}, &progress_opts,
+        prob, pool, requested_starts, 200, 4, {}, &progress_opts,
         [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
             std::lock_guard<std::mutex> lock(snapshots_mu);
             snapshots.push_back(snap);
@@ -332,40 +292,6 @@ TEST_CASE("Heuristic warm-start reuses seeds to honor requested starts",
     REQUIRE(final.final);
     REQUIRE(final.starts_total == requested_starts);
     REQUIRE(final.starts_done == requested_starts);
-    REQUIRE(final.work_units_used == requested_starts);
-}
-
-TEST_CASE("Heuristic warm-start reuse with uncapped budget stays bounded",
-          "[heuristic][progress][restarts][budget]") {
-    auto prob = make_heuristic_small_tour_problem();
-    auto pool = cptp::heuristic::build_construction_pool(prob, 4);
-    REQUIRE_FALSE(pool.candidates.empty());
-
-    const int requested_starts = 16;
-    auto budget = std::make_shared<cptp::WorkUnitBudget>(0);
-    cptp::heuristic::WarmStartProgressOptions progress_opts;
-    progress_opts.report_every_work_units = 1;
-    progress_opts.report_on_ub_improvement = true;
-
-    std::vector<cptp::heuristic::WarmStartProgressSnapshot> snapshots;
-    std::mutex snapshots_mu;
-
-    auto result = cptp::heuristic::run_local_search_from_pool(
-        prob, pool, requested_starts, 200, budget, 16, {}, &progress_opts,
-        [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
-            std::lock_guard<std::mutex> lock(snapshots_mu);
-            snapshots.push_back(snap);
-        },
-        true);
-    REQUIRE(std::isfinite(result.objective));
-    REQUIRE_FALSE(result.col_values.empty());
-    REQUIRE_FALSE(snapshots.empty());
-
-    const auto& final = snapshots.back();
-    REQUIRE(final.final);
-    REQUIRE(final.starts_total == requested_starts);
-    REQUIRE(final.starts_done == requested_starts);
-    REQUIRE(final.work_units_used == requested_starts);
 }
 
 TEST_CASE("Model handles high-cost low-profit instance", "[model]") {
@@ -422,7 +348,7 @@ TEST_CASE("Model solves s-t path instance", "[model][path]") {
     }
 }
 
-TEST_CASE("Model path: disable_heuristics still keeps optimal objective",
+TEST_CASE("Model path: heu_ws=false still keeps optimal objective",
           "[model][path][regression]") {
     cptp::Model model;
 
@@ -440,7 +366,7 @@ TEST_CASE("Model path: disable_heuristics still keeps optimal objective",
     model.add_capacity_resource(demands, 7.0);
 
     auto opts = quiet;
-    opts.push_back({"disable_heuristics", "true"});
+    opts.push_back({"heu_ws", "false"});
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -469,7 +395,7 @@ TEST_CASE("Model path: async incumbent proof handoff does not stop without solut
     model.add_capacity_resource(demands, 7.0);
 
     auto opts = quiet;
-    opts.push_back({"disable_heuristics", "true"});  // no initial setSolution
+    opts.push_back({"heu_ws", "false"});  // no initial setSolution
 
     auto result = model.solve(opts);
 
@@ -551,7 +477,7 @@ TEST_CASE("Model: submip_separation=false produces valid result", "[model]") {
     model.add_capacity_resource(demands, 10.0);
 
     auto opts = quiet;
-    opts.push_back({"submip_separation", "false"});
+    opts.push_back({"heu_highs_submip_sec", "false"});
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -576,7 +502,7 @@ TEST_CASE("Model: submip_separation=true produces valid result", "[model]") {
     model.add_capacity_resource(demands, 10.0);
 
     auto opts = quiet;
-    opts.push_back({"submip_separation", "true"});
+    opts.push_back({"heu_highs_submip_sec", "true"});
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -601,10 +527,8 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
     model.add_capacity_resource(demands, 7.0);
 
     auto opts = quiet;
-    opts.push_back({"max_concurrent_solves", "1"});
-    opts.push_back({"deterministic_work_units", "128"});
-    opts.push_back({"heuristic_deterministic_restarts", "8"});
-    opts.push_back({"heuristic_node_interval", "50"});
+    opts.push_back({"heu_lpg_deterministic_restarts", "8"});
+    opts.push_back({"heu_lpg_node_interval", "50"});
     opts.push_back({"enable_sec", "true"});
     opts.push_back({"enable_rci", "true"});
     opts.push_back({"enable_multistar", "true"});
@@ -645,8 +569,7 @@ TEST_CASE("Model: deterministic work-unit settings produce stable repeated solve
 
     auto opts = quiet;
     opts.push_back({"threads", "1"});
-    opts.push_back({"deterministic_work_units", "64"});
-    opts.push_back({"heuristic_deterministic_restarts", "8"});
+    opts.push_back({"heu_lpg_deterministic_restarts", "8"});
 
     auto r1 = model.solve(opts);
     auto r2 = model.solve(opts);
@@ -762,7 +685,7 @@ TEST_CASE("Model: connectivity check still enforced with SEC off and submip sepa
     opts.push_back({"enable_comb", "false"});
     opts.push_back({"enable_rglm", "false"});
     opts.push_back({"enable_spi", "false"});
-    opts.push_back({"submip_separation", "false"});
+    opts.push_back({"heu_highs_submip_sec", "false"});
     auto result = model.solve(opts);
 
     REQUIRE(result.is_optimal());
@@ -789,13 +712,13 @@ TEST_CASE("Model: edge elimination toggles preserve tiny optimum", "[model][opti
 
     auto opts_on = quiet;
     opts_on.push_back({"cutoff", "-11.0"});
-    opts_on.push_back({"disable_heuristics", "true"});
+    opts_on.push_back({"heu_ws", "false"});
     opts_on.push_back({"edge_elimination", "true"});
     opts_on.push_back({"edge_elimination_nodes", "true"});
 
     auto opts_off = quiet;
     opts_off.push_back({"cutoff", "-11.0"});
-    opts_off.push_back({"disable_heuristics", "true"});
+    opts_off.push_back({"heu_ws", "false"});
     opts_off.push_back({"edge_elimination", "false"});
     opts_off.push_back({"edge_elimination_nodes", "false"});
 
@@ -922,39 +845,11 @@ TEST_CASE("Model: deterministic parallel settings preserve objective",
     cptp::Model staged_model;
     setup_path_model(staged_model);
     auto staged_opts = quiet;
-    staged_opts.push_back({"deterministic_work_units", "64"});
-    staged_opts.push_back({"heuristic_deterministic_restarts", "8"});
+    staged_opts.push_back({"heu_lpg_deterministic_restarts", "8"});
     staged_opts.push_back({"preproc_fast_restarts", "4"});
     auto staged = staged_model.solve(staged_opts);
     REQUIRE(staged.has_solution());
     REQUIRE_THAT(staged.objective, WithinAbs(base.objective, 1e-6));
-}
-
-TEST_CASE("Model: workflow_dump option is accepted",
-          "[model][workflow]") {
-    cptp::Model model;
-    std::vector<cptp::Edge> edges = {
-        {0, 1}, {1, 2}, {0, 2}
-    };
-    std::vector<double> costs = {4.0, 3.0, 10.0};
-    std::vector<double> profits = {0.0, 7.0, 2.0};
-    std::vector<double> demands = {0.0, 1.0, 1.0};
-    model.set_graph(3, edges, costs);
-    model.set_source(0);
-    model.set_target(2);
-    model.set_profits(profits);
-    model.add_capacity_resource(demands, 2.0);
-
-    auto opts = quiet;
-    opts.push_back({"threads", "1"});
-    opts.push_back({"random_seed", "0"});
-    opts.push_back({"workflow_dump", "true"});
-
-    auto r = model.solve(opts);
-    if (r.status == cptp::SolveResult::Status::Error) {
-        WARN("workflow_dump run returned Error; skipping strict assertion");
-        return;
-    }
 }
 
 TEST_CASE("Model: mip_max_nodes limit is surfaced as non-error status",

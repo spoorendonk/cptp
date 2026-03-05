@@ -39,7 +39,6 @@ HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
       lp_cache_mutex_(std::make_shared<std::mutex>()),
       heuristic_calls_(std::make_shared<int64_t>(0)),
       heuristic_solutions_(std::make_shared<int64_t>(0)),
-      heuristic_work_units_(std::make_shared<int64_t>(0)),
       heuristic_time_seconds_(std::make_shared<double>(0.0)) {
     // Integral feasibility: tight but not zero to avoid rejecting
     // valid solutions due to floating-point noise in LP values.
@@ -375,7 +374,13 @@ void HiGHSBridge::install_separators() {
                 }
                 tg.wait();
 
-                // Add cuts to the cutpool (limited per separator)
+                // Pool all cuts from all separators, pre-filtered by min_violation
+                struct PooledCut {
+                    size_t sep_idx;
+                    size_t cut_idx;
+                    double violation;
+                };
+                std::vector<PooledCut> pool;
                 for (size_t i = 0; i < separators_.size(); ++i) {
                     const std::string sep_name = separators_[i]->name();
                     auto& stats = separator_stats_[sep_name];
@@ -385,31 +390,45 @@ void HiGHSBridge::install_separators() {
                     const double min_viol = (it_min != per_separator_min_violation_.end())
                         ? it_min->second
                         : 0.0;
+                    // Per-separator cap (optional pre-filter)
                     const auto it_cap = per_separator_max_cuts_.find(sep_name);
-                    const int32_t max_cuts = (it_cap != per_separator_max_cuts_.end())
+                    const int32_t sep_cap = (it_cap != per_separator_max_cuts_.end())
                         ? it_cap->second
-                        : max_cuts_per_sep_;
+                        : 0;  // 0 = unlimited per separator
 
                     auto& cuts = results[i];
-                    if (max_cuts == 0) continue;
                     std::stable_sort(cuts.begin(), cuts.end(),
                         [](const sep::Cut& a, const sep::Cut& b) {
                             return a.violation > b.violation;
                         });
-                    int32_t added = 0;
-                    for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
-                        if (max_cuts >= 0 && added >= max_cuts) break;
-                        auto& cut = cuts[j];
-                        if (cut.violation < min_viol) continue;
-                        std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
-                        cutpool.addCut(mipsolver,
-                                       hi.data(), cut.values.data(),
-                                       static_cast<HighsInt>(hi.size()),
-                                       cut.rhs);
-                        stats.cuts_added++;
-                        total_cuts_++;
-                        added++;
+                    int32_t sep_added = 0;
+                    for (size_t j = 0; j < cuts.size(); ++j) {
+                        if (sep_cap > 0 && sep_added >= sep_cap) break;
+                        if (cuts[j].violation < min_viol) continue;
+                        pool.push_back({i, j, cuts[j].violation});
+                        sep_added++;
                     }
+                }
+
+                // Sort entire pool by violation descending, add top max_cuts_per_round_
+                std::stable_sort(pool.begin(), pool.end(),
+                    [](const PooledCut& a, const PooledCut& b) {
+                        return a.violation > b.violation;
+                    });
+                int32_t round_added = 0;
+                for (const auto& pc : pool) {
+                    if (max_cuts_per_round_ > 0 && round_added >= max_cuts_per_round_) break;
+                    auto& cut = results[pc.sep_idx][pc.cut_idx];
+                    const std::string& sep_name = separators_[pc.sep_idx]->name();
+                    auto& stats = separator_stats_[sep_name];
+                    std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
+                    cutpool.addCut(mipsolver,
+                                   hi.data(), cut.values.data(),
+                                   static_cast<HighsInt>(hi.size()),
+                                   cut.rhs);
+                    stats.cuts_added++;
+                    total_cuts_++;
+                    round_added++;
                 }
             }
             separation_rounds_++;
@@ -448,7 +467,9 @@ void HiGHSBridge::set_all_pairs_bounds(std::vector<double> dist) {
 }
 
 void HiGHSBridge::install_propagator() {
-    if (fwd_bounds_.empty() || bwd_bounds_.empty()) return;
+    // No early return: even without bounds, RC fixing (Trigger C/D) is independent.
+    const bool have_bounds = !fwd_bounds_.empty() && !bwd_bounds_.empty();
+    const bool bounds_prop = bounds_propagation_ && have_bounds;
 
     const auto& graph = prob_.graph();
     const int32_t m = num_edges_;
@@ -462,6 +483,7 @@ void HiGHSBridge::install_propagator() {
     propagator_fixings_ = std::make_shared<int64_t>(0);
     sweep_fixings_ = std::make_shared<int64_t>(0);
     chain_fixings_ = std::make_shared<int64_t>(0);
+    sweep_node_fixings_ = std::make_shared<int64_t>(0);
     ub_improvements_ = std::make_shared<int64_t>(0);
     propagator_calls_ = std::make_shared<int64_t>(0);
     propagator_time_seconds_ = std::make_shared<double>(0.0);
@@ -473,6 +495,7 @@ void HiGHSBridge::install_propagator() {
     auto propagator_fixings = propagator_fixings_;
     auto sweep_fixings = sweep_fixings_;
     auto chain_fixings = chain_fixings_;
+    auto sweep_node_fixings = sweep_node_fixings_;
     auto ub_improvements = ub_improvements_;
     auto propagator_calls = propagator_calls_;
     auto propagator_time = propagator_time_seconds_;
@@ -538,11 +561,14 @@ void HiGHSBridge::install_propagator() {
             int64_t& fixings = *propagator_fixings;
 
             bool ub_improved = (ub < *last_ub - 1e-9);
-
-            // ── Trigger A: UB improved → full sweep ──
             if (ub_improved) {
                 *last_ub = ub;
                 (*ub_improvements)++;
+            }
+
+            // ── Trigger A: UB improved → full sweep ──
+            // (requires bounds-based propagation)
+            if (bounds_prop && ub_improved) {
                 // Reset processed edges — tighter UB may enable new fixings
                 std::fill(proc.begin(), proc.end(), false);
 
@@ -580,11 +606,14 @@ void HiGHSBridge::install_propagator() {
                         domain.changeBound(
                             HighsBoundType::kUpper, m + i, 0.0,
                             HighsDomain::Reason::unspecified());
+                        (*sweep_node_fixings)++;
                     }
                 }
             }
 
             // ── Trigger B: Fixed edge x_(a,i) = 1 → chained bounds ──
+            // (requires bounds-based propagation)
+            if (bounds_prop) {
             const auto& apd = *ap;
             const bool have_all_pairs = !apd.empty();
             const int32_t depot = prob.depot();
@@ -670,6 +699,7 @@ void HiGHSBridge::install_propagator() {
                     }
                 }
             }
+            }  // if (bounds_prop)
 
             // ── Trigger C: Lagrangian reduced-cost fixing (edges → 0) ──
             // ── Trigger D: Lagrangian reduced-cost fixing (nodes → 1) ──
@@ -901,25 +931,27 @@ void HiGHSBridge::install_heuristic_callback() {
 
     auto calls = heuristic_calls_;
     auto solutions = heuristic_solutions_;
-    auto heuristic_work_units = heuristic_work_units_;
     auto heuristic_time_seconds = heuristic_time_seconds_;
     int strategy = heuristic_strategy_;
     int64_t node_interval = std::max<int64_t>(1, heuristic_node_interval_);
     int deterministic_restarts = std::max<int32_t>(1, heuristic_deterministic_restarts_);
-    auto work_budget = work_unit_budget_;
-
     // Rate-limit: run heuristic at most once per N nodes.
     auto last_node_count = std::make_shared<int64_t>(0);
 
     auto cached_x = cached_x_lp_;
     auto cached_y = cached_y_lp_;
     auto cache_mtx = lp_cache_mutex_;
+    double lpg_edge_threshold = heu_lpg_edge_threshold_;
+    double lpg_node_threshold = heu_lpg_node_threshold_;
+    double lpg_lp_threshold = heu_lpg_lp_threshold_;
+    double lpg_seed_threshold = heu_lpg_seed_threshold_;
     highs_.setCallback(
         [this, heuristic_enabled, cached_x, cached_y, cache_mtx, calls, solutions,
-         heuristic_work_units, heuristic_time_seconds,
+         heuristic_time_seconds,
          last_node_count, strategy,
          node_interval,
-         deterministic_restarts, work_budget](
+         deterministic_restarts,
+         lpg_edge_threshold, lpg_node_threshold, lpg_lp_threshold, lpg_seed_threshold](
             int callback_type, const std::string& message,
             const HighsCallbackOutput* data_out,
             HighsCallbackInput* data_in,
@@ -985,20 +1017,13 @@ void HiGHSBridge::install_heuristic_callback() {
 
             (*calls)++;
             const auto heuristic_t0 = std::chrono::steady_clock::now();
-            const int64_t wu_before = work_budget ? work_budget->used() : 0;
-
             heuristic::HeuristicResult result = heuristic::lp_guided_heuristic(
                 prob_, x_lp, y_lp, incumbent,
                 0.0, strategy,
                 deterministic_restarts,
                 static_cast<uint32_t>(current_nodes),
-                work_budget);
-            if (work_budget && heuristic_work_units) {
-                const int64_t wu_after = work_budget->used();
-                if (wu_after > wu_before) {
-                    *heuristic_work_units += (wu_after - wu_before);
-                }
-            }
+                lpg_edge_threshold, lpg_node_threshold,
+                lpg_lp_threshold, lpg_seed_threshold);
 
             if (!result.col_values.empty() &&
                 result.objective < data_out->mip_primal_bound - 1e-6) {
@@ -1165,18 +1190,22 @@ SolveResult HiGHSBridge::extract_result() const {
 
     // Print propagator statistics
     if (propagator_calls_) {
+        const int64_t sweep_nodes = sweep_node_fixings_ ? *sweep_node_fixings_ : 0;
+        const int64_t sweep_total = *sweep_fixings_ + sweep_nodes;
         const int64_t propagator_fixings =
-            (sweep_fixings_ ? *sweep_fixings_ : 0)
-            + (chain_fixings_ ? *chain_fixings_ : 0);
-        logger_.log("Propagator: {} calls, {} fixings ({} sweep + {} chain), {:.3f}s",
+            sweep_total + (chain_fixings_ ? *chain_fixings_ : 0);
+        logger_.log("Propagator: calls={}  fixings={} (sweep={} [edges={} nodes={}] chain={})  time={:.3f}s",
                     *propagator_calls_, propagator_fixings,
-                    *sweep_fixings_, *chain_fixings_,
+                    sweep_total, *sweep_fixings_, sweep_nodes,
+                    *chain_fixings_,
                     propagator_time_seconds_ ? *propagator_time_seconds_ : 0.0);
     }
     if (rc_fix0_count_ && (*rc_fix0_count_ > 0 || *rc_fix1_count_ > 0)) {
-        logger_.log("RC fixing: {} edges fixed to 0, {} nodes fixed to 1, {} labeling runs, {} callback runs, {:.3f}s",
-                    *rc_fix0_count_, *rc_fix1_count_, *rc_label_runs_,
-                    rc_callback_runs_ ? *rc_callback_runs_ : 0,
+        const int64_t rc_fixings = *rc_fix0_count_ + *rc_fix1_count_;
+        const int64_t rc_calls = rc_callback_runs_ ? *rc_callback_runs_ : 0;
+        logger_.log("RC fixing:  calls={}  fixings={} (edges={} nodes={})  labeling_runs={}  time={:.3f}s",
+                    rc_calls, rc_fixings, *rc_fix0_count_, *rc_fix1_count_,
+                    *rc_label_runs_,
                     rc_time_seconds_ ? *rc_time_seconds_ : 0.0);
     }
 
@@ -1185,19 +1214,11 @@ SolveResult HiGHSBridge::extract_result() const {
         heuristic_calls_ ? *heuristic_calls_ : 0;
     const int64_t heuristic_solutions =
         heuristic_solutions_ ? *heuristic_solutions_ : 0;
-    const int64_t heuristic_wu =
-        heuristic_work_units_ ? *heuristic_work_units_ : 0;
     const double heuristic_time =
         heuristic_time_seconds_ ? *heuristic_time_seconds_ : 0.0;
-    if (heuristic_callback_ || heuristic_calls > 0
-        || heuristic_solutions > 0 || heuristic_wu > 0) {
-        const double wu_per_call = heuristic_calls > 0
-            ? static_cast<double>(heuristic_wu) / static_cast<double>(heuristic_calls)
-            : 0.0;
-        logger_.log(
-            "Heuristic callback: {} calls, {} solutions injected, {} wu ({:.1f} wu/call), {:.3f}s",
-            heuristic_calls, heuristic_solutions, heuristic_wu, wu_per_call,
-            heuristic_time);
+    if (heuristic_callback_ || heuristic_calls > 0) {
+        logger_.log("Heuristic:  calls={}  solutions={}  time={:.3f}s",
+                    heuristic_calls, heuristic_solutions, heuristic_time);
     }
 
     // Attach separator statistics

@@ -16,8 +16,6 @@
 #include "sep/separation_oracle.h"
 #include "sep/separator.h"
 #include "util/logger.h"
-#include "util/work_unit_budget.h"
-
 namespace cptp {
 
 /// HiGHS options as string key-value pairs, forwarded directly.
@@ -61,6 +59,8 @@ class HiGHSBridge {
     /// Max cuts to add per separator per round (0 = unlimited).
     /// Jepsen et al. recommend 1: add only the most-violated cut.
     void set_max_cuts_per_separator(int32_t max_cuts) { max_cuts_per_sep_ = max_cuts; }
+    /// Global cut cap: pool all cuts, sort by violation, add top N (0=unlimited).
+    void set_max_cuts_per_round(int32_t max_cuts) { max_cuts_per_round_ = max_cuts; }
     void set_separator_max_cuts(const std::string& name, int32_t max_cuts) {
         per_separator_max_cuts_[name] = max_cuts;
     }
@@ -111,10 +111,16 @@ class HiGHSBridge {
     void set_heuristic_deterministic_restarts(int32_t restarts) {
         heuristic_deterministic_restarts_ = restarts;
     }
+    /// Control bounds-based propagation (Trigger A/B) independently of RC fixing.
+    void set_bounds_propagation(bool enable) { bounds_propagation_ = enable; }
+
+    /// LP-guided heuristic threshold parameters.
+    void set_heu_lpg_edge_threshold(double v) { heu_lpg_edge_threshold_ = v; }
+    void set_heu_lpg_node_threshold(double v) { heu_lpg_node_threshold_ = v; }
+    void set_heu_lpg_lp_threshold(double v) { heu_lpg_lp_threshold_ = v; }
+    void set_heu_lpg_seed_threshold(double v) { heu_lpg_seed_threshold_ = v; }
+
     void set_fixed_y(std::vector<int8_t> fixed_y) { fixed_y_ = std::move(fixed_y); }
-    void set_work_unit_budget(std::shared_ptr<WorkUnitBudget> budget) {
-        work_unit_budget_ = std::move(budget);
-    }
 
  private:
     /// Order the visited nodes by following edges from source.
@@ -133,12 +139,20 @@ class HiGHSBridge {
     // Amortized separation: skip rounds to reduce overhead
     int32_t separation_interval_ = 1;  // 1 = every round (no skipping)
     int32_t max_cuts_per_sep_ = 3;     // max cuts per separator per round (0 = unlimited)
+    int32_t max_cuts_per_round_ = 0;   // global cut cap per round (0 = unlimited)
     std::unordered_map<std::string, int32_t> per_separator_max_cuts_;
     std::unordered_map<std::string, double> per_separator_min_violation_;
     bool submip_separation_ = true;    // SEC separation at sub-MIP root node
     double upper_bound_ = std::numeric_limits<double>::infinity();
     bool edge_elimination_enabled_ = true;
     bool edge_elimination_nodes_ = true;
+    bool bounds_propagation_ = true;
+
+    // LP-guided heuristic thresholds
+    double heu_lpg_edge_threshold_ = 0.1;
+    double heu_lpg_node_threshold_ = 0.5;
+    double heu_lpg_lp_threshold_ = 0.1;
+    double heu_lpg_seed_threshold_ = 0.3;
 
     // Labeling bounds for edge elimination and propagation
     std::vector<double> fwd_bounds_;   // f[v]: forward bounds (source → v)
@@ -162,6 +176,7 @@ class HiGHSBridge {
     std::shared_ptr<int64_t> propagator_fixings_;
     std::shared_ptr<int64_t> sweep_fixings_;
     std::shared_ptr<int64_t> chain_fixings_;
+    std::shared_ptr<int64_t> sweep_node_fixings_;
     std::shared_ptr<int64_t> ub_improvements_;
     std::shared_ptr<int64_t> propagator_calls_;
     std::shared_ptr<double> propagator_time_seconds_;
@@ -178,7 +193,6 @@ class HiGHSBridge {
     int heuristic_strategy_ = 0;  // 0=all, 1=threshold, 2=RINS, 3=neighborhood
     int64_t heuristic_node_interval_ = 200;
     int32_t heuristic_deterministic_restarts_ = 32;
-    std::shared_ptr<WorkUnitBudget> work_unit_budget_;
 
     // Cached LP relaxation from separator callback (shared with heuristic)
     std::shared_ptr<std::vector<double>> cached_x_lp_;
@@ -188,7 +202,6 @@ class HiGHSBridge {
     // Heuristic callback statistics
     std::shared_ptr<int64_t> heuristic_calls_;
     std::shared_ptr<int64_t> heuristic_solutions_;
-    std::shared_ptr<int64_t> heuristic_work_units_;
     std::shared_ptr<double> heuristic_time_seconds_;
 };
 

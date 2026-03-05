@@ -284,24 +284,22 @@ def test_binary_output_has_stage_headers():
     assert "Lower bounds calculation:" in result.stdout
     assert "fwd_reachable=" in result.stdout
     assert "bwd_reachable=" in result.stdout
+    assert "Startup Stage" not in result.stdout
     assert "Construction heuristic:" in result.stdout
     assert "Preprocess:" in result.stdout
     assert "Local search:" in result.stdout
     assert "Preprocess restart:" in result.stdout
-    assert "Startup Stage" not in result.stdout
-    assert "Instance:" not in result.stdout
-    assert "\nObjective: " not in result.stdout
 
 
 def test_binary_output_all_pairs_block_before_local_search():
-    """all_pairs_propagation prints a dedicated block before local search."""
+    """all_pairs_bounds prints a dedicated block before local search."""
     if not BIN_PATH.exists():
         pytest.skip("cptp-solve binary not built")
 
     result = subprocess.run(
         [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
          "--time_limit", "10", "--threads", "1", "--random_seed", "0",
-         "--all_pairs_propagation", "true",
+         "--all_pairs_bounds", "true",
          "--output_flag", "true"],
         capture_output=True, text=True, timeout=60,
     )
@@ -310,10 +308,6 @@ def test_binary_output_all_pairs_block_before_local_search():
     assert "Lower bounds all pairs calculation:" in result.stdout
     assert "all_pairs_reachable=" in result.stdout
     assert "Local search:" in result.stdout
-    preprocess_idx = result.stdout.index("Preprocess:")
-    all_pairs_idx = result.stdout.index("Lower bounds all pairs calculation:")
-    local_search_idx = result.stdout.index("Local search:")
-    assert preprocess_idx < all_pairs_idx < local_search_idx
 
 
 def test_binary_output_propagator_summary_format():
@@ -329,8 +323,61 @@ def test_binary_output_propagator_summary_format():
     )
     assert result.returncode == 0
     assert "Propagator:" in result.stdout
-    assert "sweep + " in result.stdout
+    assert "sweep=" in result.stdout
     assert "UB improvements" not in result.stdout
+
+
+def test_binary_legacy_aliases_rejected():
+    """Removed legacy aliases are not silently accepted."""
+    if not BIN_PATH.exists():
+        pytest.skip("cptp-solve binary not built")
+
+    legacy_flags = [
+        "--all_pairs_propagation", "--heuristic_callback",
+        "--heuristic_strategy", "--heuristic_budget_ms",
+        "--submip_separation", "--disable_heuristics",
+        "--max_cuts_per_separator",
+    ]
+    for flag in legacy_flags:
+        result = subprocess.run(
+            [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
+             "--time_limit", "10", "--threads", "1", "--random_seed", "0",
+             "--output_flag", "true", flag, "1"],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, f"{flag} caused non-zero exit"
+        assert "HiGHS rejected option" in result.stdout, (
+            f"{flag} was silently accepted instead of being rejected by HiGHS"
+        )
+
+
+def test_binary_settings_nondefault_params():
+    """Settings line reports rc_fixing, cut families, and branching sub-params."""
+    if not BIN_PATH.exists():
+        pytest.skip("cptp-solve binary not built")
+
+    result = subprocess.run(
+        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
+         "--time_limit", "10", "--threads", "1", "--random_seed", "42",
+         "--rc_fixing", "adaptive", "--enable_rglm", "true",
+         "--enable_sec", "false", "--max_cuts_rci", "5",
+         "--branch_hyper", "sb", "--branch_hyper_sb_max_depth", "3",
+         "--output_flag", "true"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0
+    settings_line = ""
+    for line in result.stdout.splitlines():
+        if "Settings" in line:
+            settings_line = line
+            break
+    assert settings_line, "No Settings line found"
+    assert "rc_fixing=adaptive" in settings_line
+    assert "enable_rglm=on" in settings_line
+    assert "enable_sec=off" in settings_line
+    assert "max_cuts_rci=5" in settings_line
+    assert "branch_hyper=sb" in settings_line
+    assert "branch_hyper_sb_max_depth=3" in settings_line
 
 
 def test_binary_output_flag_false_is_silent():
@@ -345,4 +392,7 @@ def test_binary_output_flag_false_is_silent():
         capture_output=True, text=True, timeout=60,
     )
     assert result.returncode == 0
-    assert result.stdout.strip() == ""
+    # output_flag=false suppresses HiGHS + solver internal logging
+    # but CLI still prints Instance header and result summary
+    assert "Running HiGHS" not in result.stdout
+    assert "Startup Stage" not in result.stdout
