@@ -72,6 +72,14 @@ class HiGHSBridge {
                                                 bool is_root_node,
                                                 double base_separation_tol,
                                                 double tree_violation_factor);
+    /// Apply tree policy to a separator call:
+    /// - skip non-SEC families in tree when factor<=0
+    /// - scale ctx.tol for non-SEC families in tree when factor>0
+    static std::vector<sep::Cut> run_separator_with_policy(
+        sep::Separator& separator,
+        const sep::SeparationContext& ctx,
+        bool is_root_node,
+        double tree_violation_factor);
     /// Tree-vs-root tolerance scaling for non-SEC families:
     /// effective_tree_tol = separation_tol * factor.
     /// factor = 0 keeps only SEC active in the tree.

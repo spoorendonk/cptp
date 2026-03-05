@@ -73,6 +73,21 @@ double HiGHSBridge::effective_separator_tolerance(const std::string& sep_name,
     return base_separation_tol;
 }
 
+std::vector<sep::Cut> HiGHSBridge::run_separator_with_policy(
+    sep::Separator& separator,
+    const sep::SeparationContext& ctx,
+    bool is_root_node,
+    double tree_violation_factor) {
+    const std::string sep_name = separator.name();
+    if (!should_run_separator(sep_name, is_root_node, tree_violation_factor)) {
+        return {};
+    }
+    sep::SeparationContext sep_ctx = ctx;
+    sep_ctx.tol = effective_separator_tolerance(
+        sep_name, is_root_node, ctx.tol, tree_violation_factor);
+    return separator.separate(sep_ctx);
+}
+
 void HiGHSBridge::build_formulation() {
     const auto& graph = prob_.graph();
     const int32_t n = num_nodes_;
@@ -384,12 +399,9 @@ void HiGHSBridge::install_separators() {
                                               is_root_node,
                                               tree_violation_factor_)) continue;
                     tg.run([&, i] {
-                        const std::string& task_sep_name = separators_[i]->name();
-                        sep::SeparationContext sep_ctx = ctx;
-                        sep_ctx.tol = effective_separator_tolerance(
-                            task_sep_name, is_root_node, frac_tol_, tree_violation_factor_);
                         auto t0 = clock::now();
-                        results[i] = separators_[i]->separate(sep_ctx);
+                        results[i] = run_separator_with_policy(
+                            *separators_[i], ctx, is_root_node, tree_violation_factor_);
                         elapsed[i] = std::chrono::duration<double>(
                             clock::now() - t0).count();
                     });
