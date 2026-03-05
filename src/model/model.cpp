@@ -172,6 +172,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t separation_interval = 1;
     double separation_tol = sep::kDefaultFracTol;
     int32_t max_cuts_per_round = 10;
+    double tree_violation_factor = 4.0;
 
     // --- Heuristics: warm-start ---
     bool heu_ws = true;
@@ -212,12 +213,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t max_cuts_comb = -1;
     int32_t max_cuts_rglm = -1;
     int32_t max_cuts_spi = -1;
-    double min_violation_sec = -1.0;
-    double min_violation_rci = -1.0;
-    double min_violation_multistar = -1.0;
-    double min_violation_comb = -1.0;
-    double min_violation_rglm = -1.0;
-    double min_violation_spi = -1.0;
 
     // --- Other ---
     std::string branch_hyper = "off";
@@ -254,6 +249,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         if (key == "separation_interval") { separation_interval = std::stoi(value); continue; }
         if (key == "separation_tol") { separation_tol = std::stod(value); continue; }
         if (key == "max_cuts_per_round") { max_cuts_per_round = std::stoi(value); continue; }
+        if (key == "tree_violation_factor") { tree_violation_factor = std::stod(value); continue; }
         // --- Heuristics: warm-start ---
         if (key == "heu_ws") { heu_ws = parse_bool(value); continue; }
         if (key == "heu_ws_ls_max_iter") { heu_ws_ls_max_iter = std::stoi(value); continue; }
@@ -297,12 +293,6 @@ SolveResult Model::solve(const SolverOptions& options) {
         if (key == "max_cuts_comb") { max_cuts_comb = std::stoi(value); continue; }
         if (key == "max_cuts_rglm") { max_cuts_rglm = std::stoi(value); continue; }
         if (key == "max_cuts_spi") { max_cuts_spi = std::stoi(value); continue; }
-        if (key == "min_violation_sec") { min_violation_sec = std::stod(value); continue; }
-        if (key == "min_violation_rci") { min_violation_rci = std::stod(value); continue; }
-        if (key == "min_violation_multistar") { min_violation_multistar = std::stod(value); continue; }
-        if (key == "min_violation_comb") { min_violation_comb = std::stod(value); continue; }
-        if (key == "min_violation_rglm") { min_violation_rglm = std::stod(value); continue; }
-        if (key == "min_violation_spi") { min_violation_spi = std::stod(value); continue; }
         // --- Other ---
         if (key == "cutoff") { cutoff = std::stod(value); continue; }
         if (key == "branch_hyper") { branch_hyper = value; continue; }
@@ -344,6 +334,11 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     preproc_fast_restarts = std::max<int32_t>(1, preproc_fast_restarts);
+    if (tree_violation_factor < 0.0) {
+        logger_.log("Warning: tree_violation_factor={} is invalid; clamping to 0",
+                    tree_violation_factor);
+        tree_violation_factor = 0.0;
+    }
     heu_lpg_node_interval = std::max<int64_t>(1, heu_lpg_node_interval);
     heu_lpg_deterministic_restarts =
         std::max<int32_t>(1, heu_lpg_deterministic_restarts);
@@ -467,6 +462,10 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (separation_tol != sep::kDefaultFracTol) {
         nondefault_settings.push_back("separation_tol=" + std::to_string(separation_tol));
     }
+    if (tree_violation_factor != 4.0) {
+        nondefault_settings.push_back(
+            "tree_violation_factor=" + std::to_string(tree_violation_factor));
+    }
     if (rc_settings.strategy != RCFixingStrategy::off) {
         auto rc_str = [](RCFixingStrategy s) -> const char* {
             switch (s) {
@@ -497,12 +496,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (max_cuts_comb != -1) nondefault_settings.push_back("max_cuts_comb=" + std::to_string(max_cuts_comb));
     if (max_cuts_rglm != -1) nondefault_settings.push_back("max_cuts_rglm=" + std::to_string(max_cuts_rglm));
     if (max_cuts_spi != -1) nondefault_settings.push_back("max_cuts_spi=" + std::to_string(max_cuts_spi));
-    if (min_violation_sec != -1.0) nondefault_settings.push_back("min_violation_sec=" + std::to_string(min_violation_sec));
-    if (min_violation_rci != -1.0) nondefault_settings.push_back("min_violation_rci=" + std::to_string(min_violation_rci));
-    if (min_violation_multistar != -1.0) nondefault_settings.push_back("min_violation_multistar=" + std::to_string(min_violation_multistar));
-    if (min_violation_comb != -1.0) nondefault_settings.push_back("min_violation_comb=" + std::to_string(min_violation_comb));
-    if (min_violation_rglm != -1.0) nondefault_settings.push_back("min_violation_rglm=" + std::to_string(min_violation_rglm));
-    if (min_violation_spi != -1.0) nondefault_settings.push_back("min_violation_spi=" + std::to_string(min_violation_spi));
     if (branch_hyper != "off") {
         if (hyper_sb_max_depth != 0) nondefault_settings.push_back("branch_hyper_sb_max_depth=" + std::to_string(hyper_sb_max_depth));
         if (hyper_sb_iter_limit != 100) nondefault_settings.push_back("branch_hyper_sb_iter_limit=" + std::to_string(hyper_sb_iter_limit));
@@ -793,6 +786,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     HiGHSBridge bridge(problem_, highs, logger_, separation_tol);
     bridge.set_separation_interval(separation_interval);
     bridge.set_max_cuts_per_round(max_cuts_per_round);
+    bridge.set_tree_violation_factor(tree_violation_factor);
     bridge.set_submip_separation(heu_highs_submip_sec);
     bridge.set_upper_bound(warm_start_ub);
     bridge.set_rc_fixing(rc_settings);
@@ -807,12 +801,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (max_cuts_comb >= 0) bridge.set_separator_max_cuts("Comb", max_cuts_comb);
     if (max_cuts_rglm >= 0) bridge.set_separator_max_cuts("RGLM", max_cuts_rglm);
     if (max_cuts_spi >= 0) bridge.set_separator_max_cuts("SPI", max_cuts_spi);
-    if (min_violation_sec >= 0.0) bridge.set_separator_min_violation("SEC", min_violation_sec);
-    if (min_violation_rci >= 0.0) bridge.set_separator_min_violation("RCI", min_violation_rci);
-    if (min_violation_multistar >= 0.0) bridge.set_separator_min_violation("Multistar", min_violation_multistar);
-    if (min_violation_comb >= 0.0) bridge.set_separator_min_violation("Comb", min_violation_comb);
-    if (min_violation_rglm >= 0.0) bridge.set_separator_min_violation("RGLM", min_violation_rglm);
-    if (min_violation_spi >= 0.0) bridge.set_separator_min_violation("SPI", min_violation_spi);
 
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
     if (all_pairs_bounds) {
