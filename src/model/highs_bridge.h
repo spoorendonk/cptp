@@ -202,7 +202,6 @@ class HiGHSBridge {
     // Heuristic callback statistics
     std::shared_ptr<int64_t> heuristic_calls_;
     std::shared_ptr<int64_t> heuristic_solutions_;
-    std::shared_ptr<int64_t> heuristic_work_units_;
     std::shared_ptr<double> heuristic_time_seconds_;
 };
 

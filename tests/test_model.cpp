@@ -246,16 +246,13 @@ TEST_CASE("Heuristic warm-start progress snapshots are monotonic",
     REQUIRE(snapshots.back().final);
 
     int32_t prev_starts = -1;
-    int64_t prev_wu = -1;
     int64_t prev_iter = -1;
     int64_t prev_imp = -1;
     for (const auto& snap : snapshots) {
         REQUIRE(snap.starts_done >= prev_starts);
-        REQUIRE(snap.work_units_used >= prev_wu);
         REQUIRE(snap.ls_iterations_total >= prev_iter);
         REQUIRE(snap.ub_improvements >= prev_imp);
         prev_starts = snap.starts_done;
-        prev_wu = snap.work_units_used;
         prev_iter = snap.ls_iterations_total;
         prev_imp = snap.ub_improvements;
     }
@@ -263,7 +260,6 @@ TEST_CASE("Heuristic warm-start progress snapshots are monotonic",
     const auto& final = snapshots.back();
     REQUIRE(final.starts_total == static_cast<int32_t>(pool.candidates.size()));
     REQUIRE(final.starts_done == final.starts_total);
-    REQUIRE(final.work_units_used == final.starts_done);
 }
 
 TEST_CASE("Heuristic warm-start reuses seeds to honor requested starts",
@@ -296,7 +292,6 @@ TEST_CASE("Heuristic warm-start reuses seeds to honor requested starts",
     REQUIRE(final.final);
     REQUIRE(final.starts_total == requested_starts);
     REQUIRE(final.starts_done == requested_starts);
-    REQUIRE(final.work_units_used == requested_starts);
 }
 
 TEST_CASE("Model handles high-cost low-profit instance", "[model]") {

@@ -39,7 +39,6 @@ HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
       lp_cache_mutex_(std::make_shared<std::mutex>()),
       heuristic_calls_(std::make_shared<int64_t>(0)),
       heuristic_solutions_(std::make_shared<int64_t>(0)),
-      heuristic_work_units_(std::make_shared<int64_t>(0)),
       heuristic_time_seconds_(std::make_shared<double>(0.0)) {
     // Integral feasibility: tight but not zero to avoid rejecting
     // valid solutions due to floating-point noise in LP values.
@@ -932,7 +931,6 @@ void HiGHSBridge::install_heuristic_callback() {
 
     auto calls = heuristic_calls_;
     auto solutions = heuristic_solutions_;
-    auto heuristic_work_units = heuristic_work_units_;
     auto heuristic_time_seconds = heuristic_time_seconds_;
     int strategy = heuristic_strategy_;
     int64_t node_interval = std::max<int64_t>(1, heuristic_node_interval_);
@@ -949,7 +947,7 @@ void HiGHSBridge::install_heuristic_callback() {
     double lpg_seed_threshold = heu_lpg_seed_threshold_;
     highs_.setCallback(
         [this, heuristic_enabled, cached_x, cached_y, cache_mtx, calls, solutions,
-         heuristic_work_units, heuristic_time_seconds,
+         heuristic_time_seconds,
          last_node_count, strategy,
          node_interval,
          deterministic_restarts,

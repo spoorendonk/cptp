@@ -738,8 +738,6 @@ struct HeuristicResult {
 struct WarmStartProgressSnapshot {
     int32_t starts_total = 0;
     int32_t starts_done = 0;
-    int64_t work_units_used = 0;
-    int64_t work_units_limit = 0;  // <= 0 means uncapped/unknown
     int64_t ls_iterations_total = 0;
     int64_t ub_improvements = 0;
     double best_objective = detail::kNoSolution;
@@ -1007,20 +1005,10 @@ inline HeuristicResult run_local_search_from_pool(
     std::mutex progress_emit_mu;
     int32_t last_emitted_starts = -1;
 
-    auto current_work_units_used = [&]() -> int64_t {
-        return static_cast<int64_t>(starts_done.load(std::memory_order_relaxed));
-    };
-
-    auto current_work_units_limit = [&]() -> int64_t {
-        return 0;
-    };
-
     auto build_progress_snapshot = [&](bool final) -> WarmStartProgressSnapshot {
         WarmStartProgressSnapshot snap;
         snap.starts_total = starts;
         snap.starts_done = starts_done.load(std::memory_order_relaxed);
-        snap.work_units_used = current_work_units_used();
-        snap.work_units_limit = current_work_units_limit();
         snap.ls_iterations_total = ls_iterations_total.load(std::memory_order_relaxed);
         snap.ub_improvements = ub_improvements.load(std::memory_order_relaxed);
         {
@@ -1052,7 +1040,7 @@ inline HeuristicResult run_local_search_from_pool(
             throw std::runtime_error(
                 "warm-start local search exceeded requested start count");
         }
-        const int64_t wu_now = current_work_units_used();
+        const int64_t wu_now = static_cast<int64_t>(done_after);
         bool periodic_due = false;
         if (progress_enabled && report_every > 0) {
             while (true) {
