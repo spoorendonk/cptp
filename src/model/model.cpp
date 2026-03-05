@@ -1035,19 +1035,24 @@ SolveResult Model::solve(const SolverOptions& options) {
         highs.setSolution(start);
     }
 
+    const double pre_highs_seconds = timer.elapsed_seconds();
     // Adjust time_limit to account for preprocessing time already spent.
     if (user_time_limit > 0.0) {
-        double remaining = user_time_limit - timer.elapsed_seconds();
+        double remaining = user_time_limit - pre_highs_seconds;
         if (remaining < 0.1) remaining = 0.1;  // give HiGHS at least 0.1s
         highs.setOptionValue("time_limit", remaining);
     }
+    logger_.log("HiGHS start offset (preprocessing): {:.3f}s", pre_highs_seconds);
     highs.run();
+    const double total_elapsed_seconds = timer.elapsed_seconds();
+    logger_.log("Total elapsed (preprocessing + HiGHS): {:.3f}s",
+                total_elapsed_seconds);
 
     // Clear static callbacks/state to avoid leaking between solves
     HighsUserSeparator::clearCallback();
 
     auto result = bridge.extract_result();
-    result.time_seconds = timer.elapsed_seconds();
+    result.time_seconds = total_elapsed_seconds;
 
     return result;
 }
