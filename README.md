@@ -69,8 +69,15 @@ Single-thread, AMD Ryzen 9 3950X. See `benchmarks/` for full results and reprodu
 ## Tests
 
 ```bash
-./build/cptp_tests                    # C++ tests
-pytest tests/python/test_solver.py     # Python tests
+# C++ tests (Catch2-discovered; runs cptp_tests + cptp_tests_extra)
+ctest --test-dir build --output-on-failure
+
+# Optional direct test binaries
+./build/cptp_tests
+./build/cptp_tests_extra
+
+# Python tests
+pytest tests/python/test_solver.py
 ```
 
 ## License
