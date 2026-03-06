@@ -66,9 +66,6 @@ static void print_usage(const char* prog) {
               << "\nSeparation (global):\n"
               << "  --separation_interval N                  Separate every N-th callback (default 1)\n"
               << "  --separation_tol X                       Fractional separation tolerance (default 0.1)\n"
-              << "  --tree_violation_factor X                Tree separation-tolerance scale factor:\n"
-              << "                                           tree tol for non-SEC = separation_tol*X (default 4)\n"
-              << "                                           X=0 disables non-SEC tree cuts (SEC stays)\n"
               << "  --max_cuts_per_round N                   Global cut cap: pool all cuts, sort by\n"
               << "                                           violation, add top N (default 10, 0=unlimited)\n"
               //
