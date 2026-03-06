@@ -2,14 +2,34 @@
 
 Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP) following [Jepsen et al. (2014)](https://doi.org/10.1016/j.disopt.2014.08.001). Also solves open s–t path variants.
 
+## Mathematical Model (Tour)
+
+The tour variant uses `source = target = depot (0)`. The solver minimizes travel cost minus collected profits. `y_i` indicates whether node `i` is visited, and `x_e` indicates edge usage. Depot-incident edges are allowed to take value `2` to permit 2-node tours.
+
+$$
+\begin{aligned}
+\min \quad & \sum_{e \in E} c_e x_e - \sum_{i \in V} p_i y_i \\
+\text{s.t.} \quad
+& \sum_{e \in \delta(i)} x_e = 2 y_i && \forall i \in V \\
+& y_0 = 1 \\
+& \sum_{i \in V} d_i y_i \le Q \\
+& \sum_{e \in \delta(S)} x_e \ge 2 y_i && \forall S \subset V \setminus \{0\}, \ \forall i \in S \\
+& x_e \in \{0,1\} && \forall e \in E \setminus \delta(0) \\
+& x_e \in \{0,1,2\} && \forall e \in \delta(0) \\
+& y_i \in \{0,1\} && \forall i \in V
+\end{aligned}
+$$
+
+Here, `c_e` is edge cost, `p_i` node profit, `d_i` node demand, `Q` vehicle capacity, and `\delta(.)` denotes incident edges/cut boundary edges. Connectivity (subtour elimination) inequalities are enforced via dynamic cut separation in branch-and-cut.
+
 ## Capabilities
 
-- **Cut separation**: SEC (Gomory-Hu), RCI, Multistar/GLM, RGLM, Comb, SPI (shortest-path inequalities — node-incompatibility cuts derived from all-pairs shortest-path bounds and Held-Karp DP; novel to this solver)
-- **Primal heuristic**: deterministic warm-start incumbent finding (staged before HiGHS)
-- **Domain propagation**: Lagrangian reduced-cost fixing (adaptive, periodic, root-only)
-- **Preprocessing**: edge/node elimination, ng/DSSR route bounding
-- **Concurrency**: deterministic staged preprocessing + deterministic callback scheduling
-- **MIP backend**: [HiGHS](https://highs.dev) with hyperplane strong branching. Uses patched internal callbacks for user cut separation (cut pool injection via `HighsUserSeparator`) and domain propagation (Lagrangian fixing during B&B via propagator callback)
+- **MIP backend**: [HiGHS](https://highs.dev) with custom callbacks for user cut separation, domain propagation, and hyperplane branching during branch-and-bound.
+- **Cut separation**: SEC (Gomory-Hu), RCI, Multistar/GLM, RGLM, Comb, SPI (shortest-path inequalities — node-incompatibility cuts derived from all-pairs shortest-path bounds and Held-Karp DP).
+- **Preprocessing / bounds**: 2-cycle elimination labeling with forward/backward bounds, optional all-pairs bounds, and bound-based edge/node elimination against the current upper bound.
+- **Domain propagation**: sweep fixing (remove edges/nodes inconsistent with bound + UB checks), chain fixing (propagate implications from newly fixed edges), and Lagrangian reduced-cost fixing from LP reduced costs and bound checks.
+- **Primal heuristics**: construction with 2-3 node seed routes, ILS neighborhoods (2-opt, relocate, swap, drop-add), and LP-guided in-tree ILS hooks on reduced graphs (threshold/RINS/neighborhood modes).
+- **Branching**: hyperplane branching supports pairs (Ryan-Foster-style customer pairs), clusters (small demand-seeded customer groups), demand (weighted sum of selected demands), and cardinality (number of selected customers).
 
 ## Build
 
