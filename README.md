@@ -79,7 +79,3 @@ ctest --test-dir build --output-on-failure
 # Python tests
 pytest tests/python/test_solver.py
 ```
-
-## License
-
-MIT
