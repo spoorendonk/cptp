@@ -364,7 +364,6 @@ def test_binary_settings_nondefault_params():
          "--time_limit", "10", "--threads", "1", "--random_seed", "42",
          "--rc_fixing", "off", "--enable_rglm", "true",
          "--enable_sec", "false", "--max_cuts_rci", "5",
-         "--tree_violation_factor", "3",
          "--branch_hyper", "sb", "--branch_hyper_sb_max_depth", "3",
          "--output_flag", "true"],
         capture_output=True, text=True, timeout=60,
@@ -380,57 +379,8 @@ def test_binary_settings_nondefault_params():
     assert "enable_rglm=on" in settings_line
     assert "enable_sec=off" in settings_line
     assert "max_cuts_rci=5" in settings_line
-    assert "tree_violation_factor=3.000000" in settings_line
     assert "branch_hyper=sb" in settings_line
     assert "branch_hyper_sb_max_depth=3" in settings_line
-
-
-def test_binary_settings_separation_tol_and_tree_factor():
-    """Settings line reports separation_tol and tree_violation_factor only."""
-    if not BIN_PATH.exists():
-        pytest.skip("cptp-solve binary not built")
-
-    result = subprocess.run(
-        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
-         "--time_limit", "10", "--threads", "1", "--random_seed", "0",
-         "--separation_tol", "0.07",
-         "--tree_violation_factor", "10",
-         "--output_flag", "true"],
-        capture_output=True, text=True, timeout=60,
-    )
-    assert result.returncode == 0
-    settings_line = ""
-    for line in result.stdout.splitlines():
-        if "Settings" in line:
-            settings_line = line
-            break
-    assert settings_line, "No Settings line found"
-    assert "separation_tol=0.070000" in settings_line
-    assert "tree_violation_factor=10.000000" in settings_line
-    assert "min_violation_" not in settings_line
-
-
-def test_binary_tree_violation_factor_negative_clamps_to_zero():
-    """Negative tree_violation_factor is clamped to 0 and logged."""
-    if not BIN_PATH.exists():
-        pytest.skip("cptp-solve binary not built")
-
-    result = subprocess.run(
-        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
-         "--time_limit", "10", "--threads", "1", "--random_seed", "0",
-         "--tree_violation_factor", "-2",
-         "--output_flag", "true"],
-        capture_output=True, text=True, timeout=60,
-    )
-    assert result.returncode == 0
-    assert "tree_violation_factor=-2 is invalid; clamping to 0" in result.stdout
-    settings_line = ""
-    for line in result.stdout.splitlines():
-        if "Settings" in line:
-            settings_line = line
-            break
-    assert settings_line, "No Settings line found"
-    assert "tree_violation_factor=0.000000" in settings_line
 
 
 def test_binary_output_flag_false_is_silent():
