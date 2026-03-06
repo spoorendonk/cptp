@@ -1251,6 +1251,7 @@ inline HeuristicResult lp_guided_heuristic(
                                              lpg_seed_threshold));
 
     std::vector<const ReducedGraph*> strategies;
+    strategies.reserve(graphs.size());
     for (auto& g : graphs) strategies.push_back(&g);
     const int num_strategies = static_cast<int>(strategies.size());
     if (num_strategies == 0)

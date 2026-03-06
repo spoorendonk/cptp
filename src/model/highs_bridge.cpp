@@ -25,6 +25,36 @@
 
 namespace cptp {
 
+namespace {
+
+struct PropagatorAdjEntry {
+    int32_t edge;
+    int32_t neighbor;
+};
+
+bool should_run_rc_fixing(const RCFixingSettings& settings,
+                          bool ub_improved,
+                          int64_t ub_improvements,
+                          int64_t propagator_calls,
+                          bool adaptive_disabled) {
+    switch (settings.strategy) {
+        case RCFixingStrategy::root_only:
+            // Run once when UB first becomes available.
+            return ub_improved && ub_improvements == 1;
+        case RCFixingStrategy::on_ub_improvement:
+            return ub_improved;
+        case RCFixingStrategy::periodic:
+            return (propagator_calls % settings.periodic_interval) == 0;
+        case RCFixingStrategy::adaptive:
+            return ub_improved && !adaptive_disabled;
+        case RCFixingStrategy::off:
+        default:
+            return false;
+    }
+}
+
+}  // namespace
+
 HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
                          double frac_tol)
     : prob_(prob),
@@ -503,9 +533,8 @@ void HiGHSBridge::install_propagator() {
     // All-pairs bounds for stronger Trigger B (empty if not computed)
     auto ap = std::make_shared<std::vector<double>>(std::move(all_pairs_));
 
-    // Pre-build adjacency: for each node, list of (edge_idx, neighbor)
-    struct AdjEntry { int32_t edge; int32_t neighbor; };
-    auto adj = std::make_shared<std::vector<std::vector<AdjEntry>>>(n);
+    // Pre-build adjacency: for each node, list of (edge_idx, neighbor).
+    auto adj = std::make_shared<std::vector<std::vector<PropagatorAdjEntry>>>(n);
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
@@ -551,6 +580,33 @@ void HiGHSBridge::install_propagator() {
             const auto& adjacency = *adj;
             auto& proc = *processed_edge;
             int64_t& fixings = *propagator_fixings;
+            auto fix_nodes_with_no_open_edges =
+                [&](bool skip_terminals,
+                    bool count_toward_total_fixings,
+                    const std::shared_ptr<int64_t>& node_fix_counter) {
+                    for (int32_t i = 0; i < n; ++i) {
+                        if (domain.col_upper_[m + i] < 0.5) continue;
+                        if (skip_terminals &&
+                            (i == prob.source() || i == prob.target())) {
+                            continue;
+                        }
+                        bool all_fixed = true;
+                        for (const auto& [e, nb] : adjacency[i]) {
+                            if (domain.col_upper_[e] > 0.5) {
+                                all_fixed = false;
+                                break;
+                            }
+                        }
+                        if (!all_fixed) continue;
+                        domain.changeBound(
+                            HighsBoundType::kUpper, m + i, 0.0,
+                            HighsDomain::Reason::unspecified());
+                        if (count_toward_total_fixings) {
+                            fixings++;
+                        }
+                        (*node_fix_counter)++;
+                    }
+                };
 
             bool ub_improved = (ub < *last_ub - 1e-9);
             if (ub_improved) {
@@ -584,23 +640,8 @@ void HiGHSBridge::install_propagator() {
                     }
                 }
 
-                // Fix nodes where all incident edges are fixed to 0
-                for (int32_t i = 0; i < n; ++i) {
-                    if (domain.col_upper_[m + i] < 0.5) continue;
-                    bool all_fixed = true;
-                    for (const auto& [e, nb] : adjacency[i]) {
-                        if (domain.col_upper_[e] > 0.5) {
-                            all_fixed = false;
-                            break;
-                        }
-                    }
-                    if (all_fixed) {
-                        domain.changeBound(
-                            HighsBoundType::kUpper, m + i, 0.0,
-                            HighsDomain::Reason::unspecified());
-                        (*sweep_node_fixings)++;
-                    }
-                }
+                fix_nodes_with_no_open_edges(
+                    false, false, sweep_node_fixings);
             }
 
             // ── Trigger B: Fixed edge x_(a,i) = 1 → chained bounds ──
@@ -693,50 +734,22 @@ void HiGHSBridge::install_propagator() {
                 }
             }
 
-            // Fix nodes where all incident edges are now fixed to 0
-            if (*chain_fixings > chain_before)
-            for (int32_t i = 0; i < n; ++i) {
-                if (domain.col_upper_[m + i] < 0.5) continue;
-                if (i == prob.source() || i == prob.target()) continue;
-                bool all_fixed = true;
-                for (const auto& [e, nb] : adjacency[i]) {
-                    if (domain.col_upper_[e] > 0.5) {
-                        all_fixed = false;
-                        break;
-                    }
-                }
-                if (all_fixed) {
-                    domain.changeBound(
-                        HighsBoundType::kUpper, m + i, 0.0,
-                        HighsDomain::Reason::unspecified());
-                    fixings++;
-                    (*chain_node_fixings)++;
-                }
+            // Fix nodes where all incident edges are now fixed to 0.
+            if (*chain_fixings > chain_before) {
+                fix_nodes_with_no_open_edges(
+                    true, true, chain_node_fixings);
             }
             }  // if (bounds_prop)
 
             // ── Trigger C: Lagrangian reduced-cost fixing (edges → 0) ──
             // ── Trigger D: Lagrangian reduced-cost fixing (nodes → 1) ──
             if (rc_settings.strategy != RCFixingStrategy::off) {
-                bool run_rc = false;
-                // Gate: decide whether to run RC fixing this call
-                switch (rc_settings.strategy) {
-                    case RCFixingStrategy::root_only:
-                        // Run once when UB first becomes available
-                        run_rc = ub_improved && (*ub_improvements == 1);
-                        break;
-                    case RCFixingStrategy::on_ub_improvement:
-                        run_rc = ub_improved;
-                        break;
-                    case RCFixingStrategy::periodic:
-                        run_rc = (*propagator_calls % rc_settings.periodic_interval) == 0;
-                        break;
-                    case RCFixingStrategy::adaptive:
-                        run_rc = ub_improved && !*rc_adaptive_disabled;
-                        break;
-                    default:
-                        break;
-                }
+                const bool run_rc = should_run_rc_fixing(
+                    rc_settings,
+                    ub_improved,
+                    *ub_improvements,
+                    *propagator_calls,
+                    *rc_adaptive_disabled);
 
                 if (run_rc && lp.getStatus() == HighsLpRelaxation::Status::kOptimal) {
                     auto rc_t0 = std::chrono::steady_clock::now();

@@ -2,6 +2,7 @@ build*/
 .cache/
 .claude/
 __pycache__/
+benchmarks/__pycache__/
 benchmarks/.pathwyse/
 .venv-mkdocs/
 site/
