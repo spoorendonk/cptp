@@ -77,7 +77,9 @@ if(CPTP_BUILD_TESTS)
     )
     target_include_directories(cptp_tests PRIVATE ${highs_SOURCE_DIR}/highs)
     target_link_libraries(cptp_tests PRIVATE cptp Catch2::Catch2WithMain)
-    catch_discover_tests(cptp_tests)
+    catch_discover_tests(cptp_tests
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
 
     # Extended unit tests (kept separate to control runtime impact).
     add_executable(cptp_tests_extra
@@ -86,7 +88,9 @@ if(CPTP_BUILD_TESTS)
         tests/test_separators.cpp
     )
     target_link_libraries(cptp_tests_extra PRIVATE cptp Catch2::Catch2WithMain)
-    catch_discover_tests(cptp_tests_extra)
+    catch_discover_tests(cptp_tests_extra
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
 
     # Instance integration tests
     add_executable(test_instances tests/test_instances.cpp)
