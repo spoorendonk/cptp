@@ -820,15 +820,16 @@ void HiGHSBridge::install_propagator() {
                             z_LR = rc_fwd[prob.target()];
                         }
 
-                        // Guard: only trust labeling-based RC fixing when
-                        // the Lagrangian gap is small relative to the
-                        // optimality gap.  Non-elementary labeling can
-                        // produce a z_LR far below the true elementary
-                        // bound, inflating the excess and causing
-                        // incorrect fixings.
+                        // Guard: skip RC fixing when the Lagrangian gap
+                        // (z_LP − z_LR) is negative or exceeds the
+                        // optimality gap.  A negative gap means z_LR > z_LP
+                        // (labeling looser than LP); a large positive gap
+                        // means the non-elementary excess overestimates
+                        // the true per-edge penalty.
                         double lagrangian_gap = z_LP - z_LR;
                         double optimality_gap = ub - z_LP;
-                        if (z_LR < inf && lagrangian_gap < optimality_gap + 1e-6) {
+                        if (z_LR < inf && lagrangian_gap >= 0.0 &&
+                            lagrangian_gap < optimality_gap + 1e-6) {
                             // Trigger C: Fix edges to 0
                             for (int32_t e = 0; e < m; ++e) {
                                 if (domain.col_upper_[e] < 0.5 || domain.col_lower_[e] > 0.5) continue;
