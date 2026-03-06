@@ -203,7 +203,7 @@ for inst in "${INSTANCES[@]}"; do
 
     # Write CSV row with timestamp and machine
     ROW_TIMESTAMP="$(date -Iseconds)"
-    echo "${name},${nodes_graph},${edges},${obj},${bound},${gap_pct},${time_s},${TIME_LIMIT},${bb_nodes},${lp_iters},${lp_iters_strongbr},${lp_iters_sep},${lp_iters_heur},${total_cuts},${cut_rounds},${sec_stats},${rci_stats},${multistar_stats},${rglm_stats},${comb_stats},${warmstart_ub},${warmstart_time},${ROW_TIMESTAMP},${MACHINE}" >> "$OUTFILE"
+    echo "${name},${nodes_graph},${edges},${obj},${bound},${gap_pct},${time_s},${TIME_LIMIT},${bb_nodes},${lp_iters},${lp_iters_strongbr},${lp_iters_sep},${lp_iters_heur},${total_cuts},${cut_rounds},${sec_stats},${rci_stats},${multistar_stats},${rglm_stats},${comb_stats},${warmstart_ub},${warmstart_time},${ROW_TIMESTAMP},\"${MACHINE}\"" >> "$OUTFILE"
 
     # Progress line
     printf "%-35s %12s %10s %8s %7s\n" "$name" "${obj:-N/A}" "${time_s:+${time_s}s}" "${bb_nodes:-N/A}" "${total_cuts:-N/A}"
