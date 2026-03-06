@@ -172,7 +172,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t separation_interval = 1;
     double separation_tol = sep::kDefaultFracTol;
     int32_t max_cuts_per_round = 10;
-    double tree_violation_factor = 4.0;
 
     // --- Heuristics: warm-start ---
     bool heu_ws = true;
@@ -249,7 +248,6 @@ SolveResult Model::solve(const SolverOptions& options) {
         if (key == "separation_interval") { separation_interval = std::stoi(value); continue; }
         if (key == "separation_tol") { separation_tol = std::stod(value); continue; }
         if (key == "max_cuts_per_round") { max_cuts_per_round = std::stoi(value); continue; }
-        if (key == "tree_violation_factor") { tree_violation_factor = std::stod(value); continue; }
         // --- Heuristics: warm-start ---
         if (key == "heu_ws") { heu_ws = parse_bool(value); continue; }
         if (key == "heu_ws_ls_max_iter") { heu_ws_ls_max_iter = std::stoi(value); continue; }
@@ -334,11 +332,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     preproc_fast_restarts = std::max<int32_t>(1, preproc_fast_restarts);
-    if (tree_violation_factor < 0.0) {
-        logger_.log("Warning: tree_violation_factor={} is invalid; clamping to 0",
-                    tree_violation_factor);
-        tree_violation_factor = 0.0;
-    }
     heu_lpg_node_interval = std::max<int64_t>(1, heu_lpg_node_interval);
     heu_lpg_deterministic_restarts =
         std::max<int32_t>(1, heu_lpg_deterministic_restarts);
@@ -461,10 +454,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     if (separation_tol != sep::kDefaultFracTol) {
         nondefault_settings.push_back("separation_tol=" + std::to_string(separation_tol));
-    }
-    if (tree_violation_factor != 4.0) {
-        nondefault_settings.push_back(
-            "tree_violation_factor=" + std::to_string(tree_violation_factor));
     }
     if (rc_settings.strategy != RCFixingStrategy::adaptive) {
         auto rc_str = [](RCFixingStrategy s) -> const char* {
@@ -789,7 +778,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     HiGHSBridge bridge(problem_, highs, logger_, separation_tol);
     bridge.set_separation_interval(separation_interval);
     bridge.set_max_cuts_per_round(max_cuts_per_round);
-    bridge.set_tree_violation_factor(tree_violation_factor);
     bridge.set_submip_separation(heu_highs_submip_sec);
     bridge.set_upper_bound(warm_start_ub);
     bridge.set_rc_fixing(rc_settings);

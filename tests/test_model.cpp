@@ -8,7 +8,6 @@
 
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
-#include "model/highs_bridge.h"
 #include "model/model.h"
 
 using Catch::Matchers::WithinAbs;
@@ -52,28 +51,6 @@ static cptp::Problem make_swap_saturated_problem() {
     prob.build(3, edges, costs, profits, demands, 5.0, 0, 0);
     return prob;
 }
-
-class TolProbeSeparator final : public cptp::sep::Separator {
- public:
-    explicit TolProbeSeparator(std::string name) : name_(std::move(name)) {}
-
-    std::string name() const override { return name_; }
-
-    std::vector<cptp::sep::Cut> separate(
-        const cptp::sep::SeparationContext& ctx) override {
-        called_ = true;
-        seen_tol_ = ctx.tol;
-        return {};
-    }
-
-    bool called() const { return called_; }
-    double seen_tol() const { return seen_tol_; }
-
- private:
-    std::string name_;
-    bool called_ = false;
-    double seen_tol_ = -1.0;
-};
 
 TEST_CASE("Model solves trivial 3-node instance", "[model]") {
     cptp::Model model;
@@ -571,110 +548,6 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
     auto result = model.solve(opts);
     REQUIRE(result.has_solution());
     REQUIRE(result.objective <= -10.0);
-}
-
-TEST_CASE("Model: tree_violation_factor parses and preserves correctness",
-          "[model][options][cuts]") {
-    const char* factors[] = {"-2", "0", "1", "10"};
-    for (const char* factor : factors) {
-        cptp::Model model;
-        std::vector<cptp::Edge> edges = {
-            {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}
-        };
-        std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
-        std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
-        std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
-
-        model.set_graph(4, edges, costs);
-        model.set_depot(0);
-        model.set_profits(profits);
-        model.add_capacity_resource(demands, 7.0);
-
-        auto opts = quiet;
-        opts.push_back({"tree_violation_factor", factor});
-        auto result = model.solve(opts);
-        REQUIRE(result.has_solution());
-        REQUIRE(result.objective <= -10.0);
-    }
-}
-
-TEST_CASE("HiGHSBridge: tree separator policy keeps SEC only when factor is zero",
-          "[model][options][cuts]") {
-    REQUIRE(cptp::HiGHSBridge::should_run_separator("SEC", true, 0.0));
-    REQUIRE(cptp::HiGHSBridge::should_run_separator("RCI", true, 0.0));
-    REQUIRE(cptp::HiGHSBridge::should_run_separator("SEC", false, 0.0));
-    REQUIRE_FALSE(cptp::HiGHSBridge::should_run_separator("RCI", false, 0.0));
-    REQUIRE_FALSE(cptp::HiGHSBridge::should_run_separator("RGLM", false, 0.0));
-}
-
-TEST_CASE("HiGHSBridge: effective separator tolerance scales only for non-SEC in tree",
-          "[model][options][cuts]") {
-    constexpr double sep_tol = 0.1;
-    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("SEC", true, sep_tol, 10.0),
-                 WithinAbs(0.1, 1e-12));
-    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("SEC", false, sep_tol, 10.0),
-                 WithinAbs(0.1, 1e-12));
-    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("RCI", true, sep_tol, 10.0),
-                 WithinAbs(0.1, 1e-12));
-    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("RCI", false, sep_tol, 1.0),
-                 WithinAbs(0.1, 1e-12));
-    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("RCI", false, sep_tol, 10.0),
-                 WithinAbs(1.0, 1e-12));
-    REQUIRE_THAT(cptp::HiGHSBridge::effective_separator_tolerance("RCI", false, sep_tol, 0.0),
-                 WithinAbs(0.1, 1e-12));
-}
-
-TEST_CASE("HiGHSBridge: run_separator_with_policy applies tree factor at call site",
-          "[model][options][cuts]") {
-    auto prob = make_heuristic_small_tour_problem();
-    std::vector<double> x(prob.num_edges(), 0.0);
-    std::vector<double> y(prob.num_nodes(), 0.0);
-    cptp::sep::SeparationContext ctx{
-        .problem = prob,
-        .x_values = std::span(x.data(), x.size()),
-        .y_values = std::span(y.data(), y.size()),
-        .x_offset = 0,
-        .y_offset = prob.num_edges(),
-        .tol = 0.1,
-        .flow_tree = nullptr,
-        .upper_bound = std::numeric_limits<double>::infinity(),
-        .all_pairs = std::span<const double>{},
-    };
-
-    SECTION("root non-SEC uses base tolerance") {
-        TolProbeSeparator sep("RCI");
-        auto cuts =
-            cptp::HiGHSBridge::run_separator_with_policy(sep, ctx, true, 4.0);
-        REQUIRE(cuts.empty());
-        REQUIRE(sep.called());
-        REQUIRE_THAT(sep.seen_tol(), WithinAbs(0.1, 1e-12));
-    }
-
-    SECTION("tree non-SEC scales tolerance") {
-        TolProbeSeparator sep("RCI");
-        auto cuts =
-            cptp::HiGHSBridge::run_separator_with_policy(sep, ctx, false, 4.0);
-        REQUIRE(cuts.empty());
-        REQUIRE(sep.called());
-        REQUIRE_THAT(sep.seen_tol(), WithinAbs(0.4, 1e-12));
-    }
-
-    SECTION("tree SEC keeps base tolerance") {
-        TolProbeSeparator sep("SEC");
-        auto cuts =
-            cptp::HiGHSBridge::run_separator_with_policy(sep, ctx, false, 4.0);
-        REQUIRE(cuts.empty());
-        REQUIRE(sep.called());
-        REQUIRE_THAT(sep.seen_tol(), WithinAbs(0.1, 1e-12));
-    }
-
-    SECTION("tree factor zero skips non-SEC") {
-        TolProbeSeparator sep("RCI");
-        auto cuts =
-            cptp::HiGHSBridge::run_separator_with_policy(sep, ctx, false, 0.0);
-        REQUIRE(cuts.empty());
-        REQUIRE_FALSE(sep.called());
-    }
 }
 
 TEST_CASE("Model: deterministic work-unit settings produce stable repeated solves",
