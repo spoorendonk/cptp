@@ -4,5 +4,6 @@ build*/
 __pycache__/
 benchmarks/__pycache__/
 benchmarks/.pathwyse/
+benchmarks/results/
 .venv-mkdocs/
 site/
