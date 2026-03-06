@@ -26,6 +26,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
@@ -354,6 +355,7 @@ def main():
     parser.add_argument("--pathwyse-bin", help="Path to PathWyse binary")
     parser.add_argument("--time-limit", type=int, default=120, help="Time limit per instance in seconds (default: 120)")
     parser.add_argument("--csv", help="Append results to CSV file")
+    parser.add_argument("--machine", help="Machine description (e.g. 'AMD Ryzen 9 3950X 32T')")
     args = parser.parse_args()
 
     pw_bin = find_pathwyse_bin(args.pathwyse_bin)
@@ -422,11 +424,20 @@ def main():
     # Write CSV if requested
     if args.csv:
         csv_path = Path(args.csv)
-        write_header = not csv_path.exists()
+        # Write header if the file has no non-comment data lines yet
+        write_header = True
+        if csv_path.exists():
+            with open(csv_path) as check:
+                for line in check:
+                    if line.strip() and not line.startswith("#"):
+                        write_header = False
+                        break
+        timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+        machine = args.machine or ""
         with open(csv_path, "a", newline="") as f:
             writer = csv.writer(f)
             if write_header:
-                writer.writerow(["instance", "set", "obj", "time_s", "status"])
+                writer.writerow(["instance", "set", "obj", "time_s", "status", "timestamp", "machine"])
             for r in results:
                 # Infer set from path
                 inst_path = Path(args.instance)
@@ -442,6 +453,8 @@ def main():
                     f"{r['obj']:.6g}" if r["obj"] is not None else "",
                     f"{r['time']:.3f}" if r["time"] is not None else "",
                     r["status"],
+                    timestamp,
+                    machine,
                 ])
 
     if mismatches > 0:

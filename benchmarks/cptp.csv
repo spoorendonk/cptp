@@ -1,0 +1,2 @@
+instance,nodes_graph,edges,obj,bound,gap_pct,time_s,time_limit,bb_nodes,lp_iters,lp_iters_strongbr,lp_iters_sep,lp_iters_heur,total_cuts,cut_rounds,sec_cuts,sec_rounds,sec_time,rci_cuts,rci_rounds,rci_time,multistar_cuts,multistar_rounds,multistar_time,rglm_cuts,rglm_rounds,rglm_time,comb_cuts,comb_rounds,comb_time,warmstart_ub,warmstart_time,timestamp,machine
+B-n45-k6-54,45,990,-74278,-74285,9.42406e-05,3.67411,30,136,,,,,842,101,349,80,0.016,10,53,0.007,423,76,0.008,,,,,,,-39637,0.006,2026-03-06T14:40:47+01:00,"AMD Ryzen 9 3950X 16-Core Processor 32T"
