@@ -362,7 +362,7 @@ def test_binary_settings_nondefault_params():
     result = subprocess.run(
         [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
          "--time_limit", "10", "--threads", "1", "--random_seed", "42",
-         "--rc_fixing", "adaptive", "--enable_rglm", "true",
+         "--rc_fixing", "off", "--enable_rglm", "true",
          "--enable_sec", "false", "--max_cuts_rci", "5",
          "--tree_violation_factor", "3",
          "--branch_hyper", "sb", "--branch_hyper_sb_max_depth", "3",
@@ -376,7 +376,7 @@ def test_binary_settings_nondefault_params():
             settings_line = line
             break
     assert settings_line, "No Settings line found"
-    assert "rc_fixing=adaptive" in settings_line
+    assert "rc_fixing=off" in settings_line
     assert "enable_rglm=on" in settings_line
     assert "enable_sec=off" in settings_line
     assert "max_cuts_rci=5" in settings_line
