@@ -52,8 +52,9 @@ endif()
 # ---------- Tests ----------
 option(CPTP_BUILD_TESTS "Build tests" ON)
 if(CPTP_BUILD_TESTS)
-    # FetchHiGHS sets BUILD_TESTING=OFF for third-party builds; re-enable for this project.
-    set(BUILD_TESTING ON CACHE BOOL "" FORCE)
+    # FetchHiGHS sets BUILD_TESTING=OFF in cache for third-party builds.
+    # Re-enable testing in this directory scope without forcing global cache.
+    set(BUILD_TESTING ON)
     include(FetchContent)
     FetchContent_Declare(Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
