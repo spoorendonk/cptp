@@ -204,9 +204,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool enable_sec = true;
     bool enable_rci = true;
     bool enable_multistar = true;
-    bool enable_comb = true;
+    bool enable_comb = false;
     bool enable_rglm = false;
-    bool enable_spi = true;
+    bool enable_spi = false;
     int32_t max_cuts_sec = -1;
     int32_t max_cuts_rci = -1;
     int32_t max_cuts_multistar = -1;
@@ -466,7 +466,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         nondefault_settings.push_back(
             "tree_violation_factor=" + std::to_string(tree_violation_factor));
     }
-    if (rc_settings.strategy != RCFixingStrategy::off) {
+    if (rc_settings.strategy != RCFixingStrategy::adaptive) {
         auto rc_str = [](RCFixingStrategy s) -> const char* {
             switch (s) {
                 case RCFixingStrategy::root_only: return "root_only";
@@ -487,8 +487,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (!enable_sec) nondefault_settings.push_back("enable_sec=off");
     if (!enable_rci) nondefault_settings.push_back("enable_rci=off");
     if (!enable_multistar) nondefault_settings.push_back("enable_multistar=off");
-    if (!enable_comb) nondefault_settings.push_back("enable_comb=off");
-    if (!enable_spi) nondefault_settings.push_back("enable_spi=off");
+    if (enable_comb) nondefault_settings.push_back("enable_comb=on");
+    if (enable_spi) nondefault_settings.push_back("enable_spi=on");
     if (enable_rglm) nondefault_settings.push_back("enable_rglm=on");
     if (max_cuts_sec != -1) nondefault_settings.push_back("max_cuts_sec=" + std::to_string(max_cuts_sec));
     if (max_cuts_rci != -1) nondefault_settings.push_back("max_cuts_rci=" + std::to_string(max_cuts_rci));
@@ -761,6 +761,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         Timer stage5_timer;
         if (edge_elimination
             && std::isfinite(warm_start_ub)
+            && warm_start_ub < construction_ub - 1e-9
             && !fwd_bounds.empty() && !bwd_bounds.empty()) {
             auto eliminated = preprocess::edge_elimination(
                 problem_, fwd_bounds, bwd_bounds, warm_start_ub, correction);
@@ -773,6 +774,8 @@ SolveResult Model::solve(const SolverOptions& options) {
                 "  eliminated={}/{} ({:.1f}%)  time={:.3f}s",
                 stage5_elim_edges, m, 100.0 * stage5_elim_ratio,
                 stage5_timer.elapsed_seconds());
+        } else if (edge_elimination && std::isfinite(warm_start_ub)) {
+            logger_.log("  skipped (ub not improved)  time=0.000s");
         } else {
             logger_.log(
                 "  skipped (edge_elimination={}, finite_ub={}, have_bounds={})  time={:.3f}s",
