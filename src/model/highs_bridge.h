@@ -25,7 +25,7 @@ using SolverOptions = std::vector<std::pair<std::string, std::string>>;
 enum class RCFixingStrategy { off, root_only, on_ub_improvement, periodic, adaptive };
 
 struct RCFixingSettings {
-    RCFixingStrategy strategy = RCFixingStrategy::off;
+    RCFixingStrategy strategy = RCFixingStrategy::adaptive;
     int32_t periodic_interval = 100;
     bool fix_to_one = false;
 };
