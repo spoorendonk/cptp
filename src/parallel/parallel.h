@@ -49,11 +49,7 @@ class task_group {
     threads_.clear();
   }
 
-  ~task_group() {
-    for (auto& t : threads_) {
-      if (t.joinable()) t.join();
-    }
-  }
+  ~task_group() { wait(); }
 };
 
 }  // namespace cptp::parallel
