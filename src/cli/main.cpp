@@ -36,8 +36,8 @@ static void print_usage(const char* prog) {
          "(default true)\n"
       //
       << "\nBounds & Preprocessing:\n"
-      << "  --two_cycle_elim_bounds true/false       2-cycle labeling bounds "
-         "(default true)\n"
+      << "  --labeling_elim_bounds true/false        Capacity-aware labeling "
+         "bounds (default true)\n"
       << "                                           When false, disables edge "
          "elim & propagation\n"
       << "  --all_pairs_bounds true/false            All-pairs bounds for "
@@ -243,8 +243,7 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "\n";
 
-    std::cout << std::setprecision(15)
-              << "Objective: " << result.objective
+    std::cout << std::setprecision(15) << "Objective: " << result.objective
               << "  Bound: " << result.bound
               << "  Gap: " << (result.gap * 100.0) << "%"
               << "  Time: " << result.time_seconds << "s"

@@ -10,20 +10,18 @@
 
 namespace cptp::preprocess {
 
-/// Label for the forward/backward ESPPRC-style labeling.
+/// Label for the capacity-aware labeling.
 /// Tracks net cost (edge costs - collected profits) and accumulated demand.
 struct Label {
   double cost;    // net cost = sum(edge_costs) - sum(profits along path)
   double demand;  // accumulated demand along path
-  int32_t prev;   // previous node (for 2-cycle elimination)
 };
 
-/// Capacity-aware 2-cycle elimination labeling from a given root node,
-/// with custom edge costs and node profits.
+/// Capacity-aware labeling from a given root node, with custom edge costs and
+/// node profits.
 ///
 /// For each node v, computes the minimum net cost f[v] to reach v from root
-/// via any path that respects: (1) vehicle capacity, (2) 2-cycle elimination
-/// (no immediate return to predecessor).
+/// via any (possibly non-elementary) path that respects vehicle capacity.
 ///
 /// Net cost = sum of edge costs along path - sum of profits of visited nodes
 /// (excluding root profit, which is always collected... see seed below).
@@ -42,7 +40,7 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
 
   double root_cost = -profits[root];
   double root_demand = prob.demand(root);
-  labels[root].push_back({root_cost, root_demand, -1});
+  labels[root].push_back({root_cost, root_demand});
   best_cost[root] = root_cost;
 
   struct QueueEntry {
@@ -61,8 +59,6 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
 
     for (auto e : graph.incident_edges(u)) {
       int32_t v = graph.other_endpoint(e, u);
-
-      if (v == lbl.prev) continue;
 
       double new_demand = lbl.demand + prob.demand(v);
       if (new_demand > Q) continue;
@@ -83,29 +79,20 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
         return new_cost <= ex.cost && new_demand <= ex.demand;
       });
 
-      v_labels.push_back({new_cost, new_demand, u});
-
-      int32_t new_idx = static_cast<int32_t>(v_labels.size()) - 1;
-      for (int32_t i = 0; i < static_cast<int32_t>(v_labels.size()); ++i) {
-        if (v_labels[i].cost == new_cost && v_labels[i].demand == new_demand &&
-            v_labels[i].prev == u) {
-          new_idx = i;
-          break;
-        }
-      }
+      v_labels.push_back({new_cost, new_demand});
 
       if (new_cost < best_cost[v]) {
         best_cost[v] = new_cost;
       }
 
-      queue.push_back({v, new_idx});
+      queue.push_back({v, static_cast<int32_t>(v_labels.size()) - 1});
     }
   }
 
   return best_cost;
 }
 
-/// Capacity-aware 2-cycle elimination labeling using the problem's own costs.
+/// Capacity-aware labeling using the problem's own costs.
 inline std::vector<double> labeling_from(const Problem& prob, int32_t root) {
   return labeling_from(prob, root, prob.edge_costs(), prob.profits());
 }

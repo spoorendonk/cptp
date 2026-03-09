@@ -1046,88 +1046,91 @@ inline HeuristicResult run_local_search_from_pool(
   };
 
   const int num_threads = max_workers > 0 ? max_workers : starts;
-  parallel::parallel_for(0, num_threads, [&](int) {
-    while (true) {
-      const int32_t i = next_start.fetch_add(1, std::memory_order_relaxed);
-      if (i >= starts) break;
+  parallel::parallel_for(
+      0, num_threads,
+      [&](int) {
+        while (true) {
+          const int32_t i = next_start.fetch_add(1, std::memory_order_relaxed);
+          if (i >= starts) break;
 
-      bool ub_improved = false;
-      int64_t ls_iters_for_start = 0;
-      const int32_t seed_index =
-          reuse_candidates_for_starts
-              ? (i % static_cast<int32_t>(pool.candidates.size()))
-              : i;
-      const auto& cand = pool.candidates[static_cast<size_t>(seed_index)];
-      std::vector<int32_t> tour = cand.tour;
-      if (!detail::seed_uses_active_edges(prob, tour, edge_active)) {
-        improved[static_cast<size_t>(i)] = detail::TourCandidate{};
-        finalize_start(false, ls_iters_for_start);
-        continue;
-      }
+          bool ub_improved = false;
+          int64_t ls_iters_for_start = 0;
+          const int32_t seed_index =
+              reuse_candidates_for_starts
+                  ? (i % static_cast<int32_t>(pool.candidates.size()))
+                  : i;
+          const auto& cand = pool.candidates[static_cast<size_t>(seed_index)];
+          std::vector<int32_t> tour = cand.tour;
+          if (!detail::seed_uses_active_edges(prob, tour, edge_active)) {
+            improved[static_cast<size_t>(i)] = detail::TourCandidate{};
+            finalize_start(false, ls_iters_for_start);
+            continue;
+          }
 
-      std::vector<bool> in_tour;
-      double remaining_cap = 0.0;
-      if (!detail::init_seed_state(prob, tour, in_tour, remaining_cap)) {
-        improved[static_cast<size_t>(i)] = detail::TourCandidate{};
-        finalize_start(false, ls_iters_for_start);
-        continue;
-      }
+          std::vector<bool> in_tour;
+          double remaining_cap = 0.0;
+          if (!detail::init_seed_state(prob, tour, in_tour, remaining_cap)) {
+            improved[static_cast<size_t>(i)] = detail::TourCandidate{};
+            finalize_start(false, ls_iters_for_start);
+            continue;
+          }
 
-      // Deterministic contract:
-      // - fixed move order in local_search()
-      // - fixed number of ILS rounds
-      // - deterministic kick candidate order derived from (start, round)
-      ls_iters_for_start +=
-          detail::local_search(prob, tour, in_tour, remaining_cap,
-                               edge_active, ls_max_iter_per_start);
-      detail::TourCandidate best_local{
-          .tour = tour, .objective = detail::tour_objective(prob, tour)};
+          // Deterministic contract:
+          // - fixed move order in local_search()
+          // - fixed number of ILS rounds
+          // - deterministic kick candidate order derived from (start, round)
+          ls_iters_for_start +=
+              detail::local_search(prob, tour, in_tour, remaining_cap,
+                                   edge_active, ls_max_iter_per_start);
+          detail::TourCandidate best_local{
+              .tour = tour, .objective = detail::tour_objective(prob, tour)};
 
-      for (int32_t round = 0; round < detail::kIlsRounds; ++round) {
-        std::vector<int32_t> kicked = best_local.tour;
-        std::vector<bool> kicked_in_tour;
-        double kicked_remaining_cap = 0.0;
-        if (!detail::init_seed_state(prob, kicked, kicked_in_tour,
-                                     kicked_remaining_cap)) {
-          break;
-        }
-        if (!detail::perturb_deterministic(prob, kicked, kicked_in_tour,
-                                           kicked_remaining_cap, edge_active,
-                                           i, round)) {
-          continue;
-        }
-        // Recompute state from the perturbed route to keep updates robust.
-        if (!detail::init_seed_state(prob, kicked, kicked_in_tour,
-                                     kicked_remaining_cap)) {
-          continue;
-        }
-        ls_iters_for_start += detail::local_search(
-            prob, kicked, kicked_in_tour, kicked_remaining_cap, edge_active,
-            ls_max_iter_per_start);
-        const double kicked_obj = detail::tour_objective(prob, kicked);
-        if (kicked_obj + detail::kLsEpsTie < best_local.objective ||
-            (std::abs(kicked_obj - best_local.objective) <=
-                 detail::kLsEpsTie &&
-             kicked < best_local.tour)) {
-          best_local.tour = std::move(kicked);
-          best_local.objective = kicked_obj;
-        }
-      }
+          for (int32_t round = 0; round < detail::kIlsRounds; ++round) {
+            std::vector<int32_t> kicked = best_local.tour;
+            std::vector<bool> kicked_in_tour;
+            double kicked_remaining_cap = 0.0;
+            if (!detail::init_seed_state(prob, kicked, kicked_in_tour,
+                                         kicked_remaining_cap)) {
+              break;
+            }
+            if (!detail::perturb_deterministic(prob, kicked, kicked_in_tour,
+                                               kicked_remaining_cap,
+                                               edge_active, i, round)) {
+              continue;
+            }
+            // Recompute state from the perturbed route to keep updates robust.
+            if (!detail::init_seed_state(prob, kicked, kicked_in_tour,
+                                         kicked_remaining_cap)) {
+              continue;
+            }
+            ls_iters_for_start += detail::local_search(
+                prob, kicked, kicked_in_tour, kicked_remaining_cap, edge_active,
+                ls_max_iter_per_start);
+            const double kicked_obj = detail::tour_objective(prob, kicked);
+            if (kicked_obj + detail::kLsEpsTie < best_local.objective ||
+                (std::abs(kicked_obj - best_local.objective) <=
+                     detail::kLsEpsTie &&
+                 kicked < best_local.tour)) {
+              best_local.tour = std::move(kicked);
+              best_local.objective = kicked_obj;
+            }
+          }
 
-      improved[static_cast<size_t>(i)] = std::move(best_local);
-      if (std::isfinite(improved[static_cast<size_t>(i)].objective)) {
-        std::lock_guard<std::mutex> lock(progress_best_mu);
-        if (!std::isfinite(progress_best_objective) ||
-            improved[static_cast<size_t>(i)].objective + detail::kLsEpsTie <
-                progress_best_objective) {
-          progress_best_objective =
-              improved[static_cast<size_t>(i)].objective;
-          ub_improved = true;
+          improved[static_cast<size_t>(i)] = std::move(best_local);
+          if (std::isfinite(improved[static_cast<size_t>(i)].objective)) {
+            std::lock_guard<std::mutex> lock(progress_best_mu);
+            if (!std::isfinite(progress_best_objective) ||
+                improved[static_cast<size_t>(i)].objective + detail::kLsEpsTie <
+                    progress_best_objective) {
+              progress_best_objective =
+                  improved[static_cast<size_t>(i)].objective;
+              ub_improved = true;
+            }
+          }
+          finalize_start(ub_improved, ls_iters_for_start);
         }
-      }
-      finalize_start(ub_improved, ls_iters_for_start);
-    }
-  }, num_threads);
+      },
+      num_threads);
   emit_progress(true);
 
   detail::TourCandidate best;
