@@ -442,10 +442,16 @@ void HiGHSBridge::install_separators() {
                     const std::string& sep_name = separators_[pc.sep_idx]->name();
                     auto& stats = separator_stats_[sep_name];
                     std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
+                    // Disable domain propagation for user cuts: fractional
+                    // coefficients (e.g. RCI's 2*q_i/Q_r) can cause HiGHS
+                    // propagation to over-tighten bounds and prune the
+                    // optimal solution.
                     cutpool.addCut(mipsolver,
                                    hi.data(), cut.values.data(),
                                    static_cast<HighsInt>(hi.size()),
-                                   cut.rhs);
+                                   cut.rhs,
+                                   /*integral=*/false,
+                                   /*propagate=*/false);
                     stats.cuts_added++;
                     total_cuts_++;
                     round_added++;

@@ -351,6 +351,7 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
 
                 if (viol > tol) {
                     auto cut = build_cut(c, prob, ctx, Q, tol);
+
                     per_candidate[idx].push_back({std::move(cut), viol});
                 }
             }
