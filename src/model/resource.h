@@ -8,11 +8,11 @@ namespace cptp {
 
 /// A resource constraint on the problem (e.g., capacity).
 struct Resource {
-    enum class Type { Capacity };
+  enum class Type { Capacity };
 
-    Type type;
-    std::vector<double> node_consumption;  // per-node resource usage
-    double limit;                          // upper bound
+  Type type;
+  std::vector<double> node_consumption;  // per-node resource usage
+  double limit;                          // upper bound
 };
 
 }  // namespace cptp
