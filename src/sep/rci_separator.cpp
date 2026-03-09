@@ -1,13 +1,11 @@
 #include "sep/rci_separator.h"
 
-#include <tbb/blocked_range.h>
-#include <tbb/parallel_for.h>
-
 #include <algorithm>
 #include <cmath>
 #include <vector>
 
 #include "core/gomory_hu.h"
+#include "parallel/parallel.h"
 #include "core/problem.h"
 
 namespace cptp::sep {
@@ -331,33 +329,31 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
   };
   std::vector<std::vector<CutResult>> per_candidate(candidates.size());
 
-  tbb::parallel_for(tbb::blocked_range<size_t>(0, candidates.size()),
-                    [&](const tbb::blocked_range<size_t>& range) {
-                      for (size_t idx = range.begin(); idx < range.end();
-                           ++idx) {
-                        auto& cr = candidates[idx];
+  parallel::parallel_for(
+      0, static_cast<int>(candidates.size()), [&](int idx) {
+        auto& cr = candidates[static_cast<size_t>(idx)];
 
-                        auto c = make_candidate(tree, cr.node, prob, ctx);
+        auto c = make_candidate(tree, cr.node, prob, ctx);
 
-                        double Q_r = std::fmod(c.d_S, Q);
-                        if (Q_r <= tol) continue;
-                        double k = std::ceil(c.d_S / Q);
-                        if (k <= 1.0) continue;
+        double Q_r = std::fmod(c.d_S, Q);
+        if (Q_r <= tol) return;
+        double k = std::ceil(c.d_S / Q);
+        if (k <= 1.0) return;
 
-                        double viol = compute_violation(c, Q, tol);
+        double viol = compute_violation(c, Q, tol);
 
-                        // Run add/drop on violated candidates to strengthen.
-                        if (viol > tol) {
-                          viol = add_drop_search(c, prob, ctx, Q, tol);
-                        }
+        // Run add/drop on violated candidates to strengthen.
+        if (viol > tol) {
+          viol = add_drop_search(c, prob, ctx, Q, tol);
+        }
 
-                        if (viol > tol) {
-                          auto cut = build_cut(c, prob, ctx, Q, tol);
+        if (viol > tol) {
+          auto cut = build_cut(c, prob, ctx, Q, tol);
 
-                          per_candidate[idx].push_back({std::move(cut), viol});
-                        }
-                      }
-                    });
+          per_candidate[static_cast<size_t>(idx)].push_back(
+              {std::move(cut), viol});
+        }
+      });
 
   // Step 3: Collect, sort by violation, and cap output.
   std::vector<CutResult> results;

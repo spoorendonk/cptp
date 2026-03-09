@@ -1,8 +1,5 @@
 #include "model/highs_bridge.h"
 
-#include <tbb/parallel_for.h>
-#include <tbb/task_group.h>
-
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -10,6 +7,7 @@
 #include <mutex>
 
 #include "core/digraph.h"
+#include "parallel/parallel.h"
 #include "core/gomory_hu.h"
 #include "heuristic/primal_heuristic.h"
 #include "lp_data/HighsCallback.h"
@@ -389,7 +387,7 @@ void HiGHSBridge::install_separators() {
       using clock = std::chrono::steady_clock;
       std::vector<std::vector<sep::Cut>> results(separators_.size());
       std::vector<double> elapsed(separators_.size(), 0.0);
-      tbb::task_group tg;
+      parallel::task_group tg;
       for (size_t i = 0; i < separators_.size(); ++i) {
         tg.run([&, i] {
           auto t0 = clock::now();
@@ -796,21 +794,18 @@ void HiGHSBridge::install_propagator() {
 
           // Forward + backward labeling with RC costs (parallel)
           std::vector<double> rc_fwd, rc_bwd;
-          {
-            tbb::task_group tg;
-            tg.run([&] {
-              rc_fwd = preprocess::labeling_from(prob, prob.source(),
-                                                 rc_edge_costs, rc_profits);
-            });
-            if (prob.is_tour()) {
-              tg.wait();
-              rc_bwd = rc_fwd;
-            } else {
-              tg.run([&] {
-                rc_bwd = preprocess::labeling_from(prob, prob.target(),
+          if (prob.is_tour()) {
+            rc_fwd = preprocess::labeling_from(prob, prob.source(),
+                                               rc_edge_costs, rc_profits);
+            rc_bwd = rc_fwd;
+          } else {
+            {
+              std::jthread t_fwd([&] {
+                rc_fwd = preprocess::labeling_from(prob, prob.source(),
                                                    rc_edge_costs, rc_profits);
               });
-              tg.wait();
+              rc_bwd = preprocess::labeling_from(prob, prob.target(),
+                                                 rc_edge_costs, rc_profits);
             }
           }
           (*rc_runs) += prob.is_tour() ? 1 : 2;
@@ -901,8 +896,8 @@ void HiGHSBridge::install_propagator() {
 
               // Parallel labeling with each node forbidden
               std::vector<double> z_LR_minus(candidates.size(), inf);
-              tbb::parallel_for(
-                  static_cast<size_t>(0), candidates.size(), [&](size_t idx) {
+              parallel::parallel_for(
+                  0, static_cast<int>(candidates.size()), [&](int idx) {
                     int32_t node_i = candidates[idx];
                     // Copy profits and set forbidden node to -1e30
                     std::vector<double> mod_profits = rc_profits;

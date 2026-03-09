@@ -10,14 +10,11 @@
 #include <thread>
 
 #include "model/highs_bridge.h"
+#include "parallel/parallel.h"
 
 #ifdef __linux__
 #include <unistd.h>
 #endif
-
-#include <tbb/parallel_for.h>
-#include <tbb/task_arena.h>
-#include <tbb/task_group.h>
 
 #include "heuristic/primal_heuristic.h"
 #include "mip/HighsMipSolverData.h"
@@ -708,7 +705,6 @@ SolveResult Model::solve(const SolverOptions& options) {
   const unsigned logical_threads =
       std::max(1u, std::thread::hardware_concurrency());
   const unsigned physical_cores = detect_physical_cores();
-  const char* tbb_str = ", TBB";
   const char* simd_str =
 #ifdef __AVX512F__
       ", AVX-512";
@@ -727,8 +723,8 @@ SolveResult Model::solve(const SolverOptions& options) {
               highs_githash);
   logger_.log(
       "Thread count: {} physical cores, {} logical processors, using up to {} "
-      "threads{}{}",
-      physical_cores, logical_threads, preproc_thread_limit, tbb_str, simd_str);
+      "threads{}",
+      physical_cores, logical_threads, preproc_thread_limit, simd_str);
 
   std::vector<std::string> nondefault_settings;
   if (random_seed != 0) {
@@ -948,23 +944,16 @@ SolveResult Model::solve(const SolverOptions& options) {
 
   {
     Timer stage1_timer;
-    tbb::task_arena preproc_arena(preproc_thread_limit);
     if (two_cycle_elim_bounds) {
       logger_.log("Lower bounds calculation:");
       logger_.log("  two-cycle labeling (source={}, target={})", source,
                   target);
-      preproc_arena.execute([&] {
-        tbb::task_group stage1_tg;
-        stage1_tg.run(
+      if (source != target) {
+        std::jthread t_fwd(
             [&] { fwd_bounds = preprocess::labeling_from(problem_, source); });
-        if (source != target) {
-          stage1_tg.run([&] {
-            bwd_bounds = preprocess::labeling_from(problem_, target);
-          });
-        }
-        stage1_tg.wait();
-      });
-      if (source == target) {
+        bwd_bounds = preprocess::labeling_from(problem_, target);
+      } else {
+        fwd_bounds = preprocess::labeling_from(problem_, source);
         bwd_bounds = fwd_bounds;
       }
       logger_.log(
@@ -1053,15 +1042,15 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (all_pairs_bounds) {
       logger_.log("Lower bounds all pairs calculation:");
       Timer all_pairs_timer;
-      preproc_arena.execute([&] {
+      {
         constexpr double inf = std::numeric_limits<double>::infinity();
         all_pairs.assign(static_cast<size_t>(n) * n, inf);
-        tbb::parallel_for(0, n, [&](int32_t s) {
+        parallel::parallel_for(0, n, [&](int s) {
           auto row = preprocess::forward_labeling(problem_, s);
           std::copy(row.begin(), row.end(),
                     all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
-        });
-      });
+        }, preproc_thread_limit);
+      }
       if (!all_pairs.empty()) {
         const int64_t all_pairs_total =
             static_cast<int64_t>(n) * static_cast<int64_t>(n);
@@ -1085,42 +1074,36 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     logger_.log("Local search:");
     Timer stage4_timer;
-    preproc_arena.execute([&] {
-      tbb::task_group stage4_tg;
-      if (heu_ws && !construction_pool.candidates.empty()) {
-        const int64_t scaled_starts =
-            static_cast<int64_t>(preproc_thread_limit) *
-            static_cast<int64_t>(kWarmStartLsStartsPerThread);
-        const int32_t starts_from_threads =
-            static_cast<int32_t>(std::clamp<int64_t>(
-                scaled_starts, 1, std::numeric_limits<int32_t>::max()));
-        const int32_t requested_starts =
-            std::max<int32_t>(preproc_fast_restarts, starts_from_threads);
-        logger_.log("  starts={}  max_iter_per_start={}", requested_starts,
-                    heu_ws_ls_max_iter);
-        logger_.log("  starts iter_accum           ub impr     time");
-        stage4_tg.run([&, requested_starts] {
-          heuristic::WarmStartProgressOptions progress_opts;
-          progress_opts.report_every_starts = 32;
-          progress_opts.report_on_ub_improvement = true;
-          auto progress_cb =
-              [&](const heuristic::WarmStartProgressSnapshot& snap) {
-                logger_.log("  {:>6} {:>10} {:>12.6g} {:>4} {:>8.3f}s",
-                            snap.starts_done, snap.ls_iterations_total,
-                            snap.best_objective, snap.ub_improvements,
-                            stage4_timer.elapsed_seconds());
-              };
-          ls_stage4 = heuristic::run_local_search_from_pool(
-              problem_, construction_pool, requested_starts, heu_ws_ls_max_iter,
-              0, stage3_edge_active, &progress_opts, progress_cb, true);
-        });
-      } else {
-        logger_.log("  skipped (heu_ws=false or candidates=0)  time={:.3f}s",
-                    stage4_timer.elapsed_seconds());
-      }
-
-      stage4_tg.wait();
-    });
+    if (heu_ws && !construction_pool.candidates.empty()) {
+      const int64_t scaled_starts =
+          static_cast<int64_t>(preproc_thread_limit) *
+          static_cast<int64_t>(kWarmStartLsStartsPerThread);
+      const int32_t starts_from_threads =
+          static_cast<int32_t>(std::clamp<int64_t>(
+              scaled_starts, 1, std::numeric_limits<int32_t>::max()));
+      const int32_t requested_starts =
+          std::max<int32_t>(preproc_fast_restarts, starts_from_threads);
+      logger_.log("  starts={}  max_iter_per_start={}", requested_starts,
+                  heu_ws_ls_max_iter);
+      logger_.log("  starts iter_accum           ub impr     time");
+      heuristic::WarmStartProgressOptions progress_opts;
+      progress_opts.report_every_starts = 32;
+      progress_opts.report_on_ub_improvement = true;
+      auto progress_cb =
+          [&](const heuristic::WarmStartProgressSnapshot& snap) {
+            logger_.log("  {:>6} {:>10} {:>12.6g} {:>4} {:>8.3f}s",
+                        snap.starts_done, snap.ls_iterations_total,
+                        snap.best_objective, snap.ub_improvements,
+                        stage4_timer.elapsed_seconds());
+          };
+      ls_stage4 = heuristic::run_local_search_from_pool(
+          problem_, construction_pool, requested_starts, heu_ws_ls_max_iter,
+          preproc_thread_limit, stage3_edge_active, &progress_opts, progress_cb,
+          true);
+    } else {
+      logger_.log("  skipped (heu_ws=false or candidates=0)  time={:.3f}s",
+                  stage4_timer.elapsed_seconds());
+    }
 
     if (has_feasible_heuristic(ls_stage4) &&
         (!has_feasible_heuristic(warm_start) ||

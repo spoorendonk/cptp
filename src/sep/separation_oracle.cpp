@@ -1,13 +1,12 @@
 #include "sep/separation_oracle.h"
 
-#include <tbb/task_group.h>
-
 #include <algorithm>
 #include <vector>
 
 #include "core/digraph.h"
 #include "core/gomory_hu.h"
 #include "core/problem.h"
+#include "parallel/parallel.h"
 #include "sep/comb_separator.h"
 #include "sep/multistar_separator.h"
 #include "sep/rci_separator.h"
@@ -64,7 +63,7 @@ std::vector<Cut> SeparationOracle::separate(std::span<const double> x_values,
 
   // Run all separators in parallel
   std::vector<std::vector<Cut>> results(separators_.size());
-  tbb::task_group tg;
+  parallel::task_group tg;
   for (size_t i = 0; i < separators_.size(); ++i) {
     tg.run([&, i] { results[i] = separators_[i]->separate(ctx); });
   }

@@ -9,9 +9,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include(cmake/CompilerFlags.cmake)
 
-# TBB — system package
-find_package(TBB REQUIRED)
-
 # ============================================================
 # cptp — unified solver library
 # Core + algorithms + HiGHS integration
@@ -36,7 +33,7 @@ target_include_directories(cptp PUBLIC src)
 # HiGHS internal headers (mip/HighsUserSeparator.h) are PRIVATE in the highs target,
 # so we need to add them explicitly for our cutpool callback integration.
 target_include_directories(cptp PRIVATE ${highs_SOURCE_DIR}/highs)
-target_link_libraries(cptp PUBLIC TBB::tbb highs)
+target_link_libraries(cptp PUBLIC highs)
 cptp_set_compiler_flags(cptp)
 
 # ---------- CLI ----------
