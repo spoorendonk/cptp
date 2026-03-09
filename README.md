@@ -81,8 +81,8 @@ result = cptp.solve(
 
 | Set | Instances | Solved | Rate |
 |---|--:|--:|--:|
-| SPPRCLIB (45 instances, 45–262 nodes) | 45 | 45 | 100% |
-| Roberti Set 3 (31 instances, 76–200 nodes, 300s) | 31 | 22 | 71% |
+| SPPRCLIB (45 instances, 45–262 nodes) | 45 | 44 | 98% |
+| Roberti Set 3 (31 instances, 76–200 nodes, 3600s) | 31 | 27 | 87% |
 
 Single-thread, AMD Ryzen 9 3950X. See `benchmarks/` for full results and reproduction scripts.
 
