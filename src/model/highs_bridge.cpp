@@ -531,6 +531,7 @@ void HiGHSBridge::install_propagator() {
   auto rc_callbacks = rc_callback_runs_;
   auto rc_time = rc_time_seconds_;
   auto rc_settings = rc_settings_;
+  int64_t labeling_limit = labeling_max_queue_pops_;
   bool obj_is_integer = obj_is_integer_;
   double mip_int_tol = 0.0;
   highs_.getOptionValue("mip_feasibility_tolerance", mip_int_tol);
@@ -796,19 +797,25 @@ void HiGHSBridge::install_propagator() {
           std::vector<double> rc_fwd, rc_bwd;
           if (prob.is_tour()) {
             rc_fwd = preprocess::labeling_from(prob, prob.source(),
-                                               rc_edge_costs, rc_profits);
+                                               rc_edge_costs, rc_profits,
+                                               labeling_limit);
             rc_bwd = rc_fwd;
           } else {
             {
               std::jthread t_fwd([&] {
                 rc_fwd = preprocess::labeling_from(prob, prob.source(),
-                                                   rc_edge_costs, rc_profits);
+                                                   rc_edge_costs, rc_profits,
+                                                   labeling_limit);
               });
               rc_bwd = preprocess::labeling_from(prob, prob.target(),
-                                                 rc_edge_costs, rc_profits);
+                                                 rc_edge_costs, rc_profits,
+                                                 labeling_limit);
             }
           }
           (*rc_runs) += prob.is_tour() ? 1 : 2;
+
+          // If labeling was aborted due to budget, skip this RC round
+          if (!rc_fwd.empty() && !rc_bwd.empty()) {
 
           // Compute z_LR: cheapest resource-feasible tour/path under RC costs
           double z_LR = inf;
@@ -904,7 +911,10 @@ void HiGHSBridge::install_propagator() {
                     mod_profits[node_i] = -1e30;
 
                     auto fwd_i = preprocess::labeling_from(
-                        prob, prob.source(), rc_edge_costs, mod_profits);
+                        prob, prob.source(), rc_edge_costs, mod_profits,
+                        labeling_limit);
+
+                    if (fwd_i.empty()) return;  // budget exhausted
 
                     if (prob.is_tour()) {
                       double best = inf;
@@ -938,6 +948,7 @@ void HiGHSBridge::install_propagator() {
             }
           }
         }
+        }  // if (!rc_fwd.empty() && !rc_bwd.empty())
 
         (*rc_callbacks)++;
         auto rc_t1 = std::chrono::steady_clock::now();

@@ -87,6 +87,9 @@ class HiGHSBridge {
 
   /// Configure Lagrangian reduced-cost fixing in the propagator.
   void set_rc_fixing(RCFixingSettings settings) { rc_settings_ = settings; }
+  void set_labeling_max_queue_pops(int64_t limit) {
+    labeling_max_queue_pops_ = limit;
+  }
   void set_edge_elimination(bool enable) { edge_elimination_enabled_ = enable; }
 
   /// True if all objective coefficients are integer-valued (detected in
@@ -190,6 +193,7 @@ class HiGHSBridge {
 
   // RC fixing settings and statistics
   bool obj_is_integer_ = false;  // true if all obj coefficients are integral
+  int64_t labeling_max_queue_pops_ = 0;
   RCFixingSettings rc_settings_;
   std::shared_ptr<int64_t> rc_fix0_count_;
   std::shared_ptr<int64_t> rc_fix1_count_;
