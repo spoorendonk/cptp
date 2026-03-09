@@ -258,6 +258,60 @@ TEST_CASE("labeling_from with negative costs finds shorter paths",
   }
 }
 
+// ─── Labeling budget tests ───
+
+TEST_CASE("labeling_from returns empty on budget exhaustion", "[labeling]") {
+  auto prob = cptp::io::load("tests/data/tiny4.txt");
+
+  // With a budget of 1 pop, labeling should abort (graph has multiple nodes)
+  auto bounds = cptp::preprocess::labeling_from(prob, prob.depot(), 1);
+  REQUIRE(bounds.empty());
+}
+
+TEST_CASE("labeling_from with zero budget is unlimited", "[labeling]") {
+  auto prob = cptp::io::load("tests/data/tiny4.txt");
+
+  // Budget 0 means unlimited — should complete normally
+  auto bounds = cptp::preprocess::labeling_from(prob, prob.depot(), 0);
+  REQUIRE_FALSE(bounds.empty());
+  REQUIRE(bounds.size() == static_cast<size_t>(prob.num_nodes()));
+}
+
+TEST_CASE("labeling_from with large budget completes normally", "[labeling]") {
+  auto prob = cptp::io::load("tests/data/tiny4.txt");
+
+  auto unlimited = cptp::preprocess::labeling_from(prob, prob.depot(), 0);
+  auto large_budget =
+      cptp::preprocess::labeling_from(prob, prob.depot(), 1'000'000);
+
+  // Large budget should produce identical results to unlimited
+  REQUIRE(large_budget.size() == unlimited.size());
+  for (size_t i = 0; i < unlimited.size(); ++i) {
+    REQUIRE_THAT(large_budget[i], WithinAbs(unlimited[i], 1e-9));
+  }
+}
+
+TEST_CASE("labeling_from custom costs respects budget", "[labeling]") {
+  auto prob = cptp::io::load("tests/data/tiny4.txt");
+
+  auto bounds = cptp::preprocess::labeling_from(
+      prob, prob.depot(), prob.edge_costs(), prob.profits(), 1);
+  REQUIRE(bounds.empty());
+}
+
+TEST_CASE("solver handles labeling budget exhaustion", "[labeling]") {
+  auto prob = cptp::io::load("tests/data/tiny4.txt");
+  cptp::Model model;
+  model.set_problem(std::move(prob));
+
+  // With budget of 1, labeling will abort but solver should still find optimal
+  auto r = model.solve({{"time_limit", "30"},
+                        {"output_flag", "false"},
+                        {"labeling_max_queue_pops", "1"}});
+  REQUIRE(r.has_solution());
+  REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1.0));
+}
+
 // ─── Propagator integration tests ───
 
 static const cptp::SolverOptions quiet = {

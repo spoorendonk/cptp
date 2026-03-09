@@ -380,6 +380,9 @@ SolveResult Model::solve(const SolverOptions& options) {
   // --- RC fixing ---
   RCFixingSettings rc_settings;
 
+  // --- Labeling work limit ---
+  int64_t labeling_max_queue_pops = 1'000'000;
+
   // --- Cut families ---
   bool enable_sec = true;
   bool enable_rci = true;
@@ -540,6 +543,10 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     if (key == "rc_fixing_to_one") {
       rc_settings.fix_to_one = parse_bool(value);
+      continue;
+    }
+    if (key == "labeling_max_queue_pops") {
+      labeling_max_queue_pops = std::stoll(value);
       continue;
     }
     // --- Cut families ---
@@ -733,6 +740,9 @@ SolveResult Model::solve(const SolverOptions& options) {
   nondefault_settings.push_back("presolve=off");
   if (!labeling_elim_bounds)
     nondefault_settings.push_back("labeling_elim_bounds=off");
+  if (labeling_max_queue_pops != 1'000'000)
+    nondefault_settings.push_back("labeling_max_queue_pops=" +
+                                  std::to_string(labeling_max_queue_pops));
   if (all_pairs_bounds) nondefault_settings.push_back("all_pairs_bounds=on");
   if (!edge_elimination) nondefault_settings.push_back("edge_elimination=off");
   if (!edge_elimination_nodes)
@@ -949,23 +959,42 @@ SolveResult Model::solve(const SolverOptions& options) {
       logger_.log("  capacity-aware labeling (source={}, target={})", source,
                   target);
       if (source != target) {
-        std::jthread t_fwd(
-            [&] { fwd_bounds = preprocess::labeling_from(problem_, source); });
-        bwd_bounds = preprocess::labeling_from(problem_, target);
+        std::jthread t_fwd([&] {
+          fwd_bounds = preprocess::labeling_from(problem_, source,
+                                                 labeling_max_queue_pops);
+        });
+        bwd_bounds =
+            preprocess::labeling_from(problem_, target, labeling_max_queue_pops);
       } else {
-        fwd_bounds = preprocess::labeling_from(problem_, source);
+        fwd_bounds = preprocess::labeling_from(problem_, source,
+                                               labeling_max_queue_pops);
         bwd_bounds = fwd_bounds;
       }
-      logger_.log(
-          "  fwd_reachable={}/{}  bwd_reachable={}/{}  fwd[target]={}  "
-          "time={:.3f}s",
-          count_finite_bounds(fwd_bounds), n, count_finite_bounds(bwd_bounds),
-          n,
-          (target >= 0 && target < n &&
-           target < static_cast<int32_t>(fwd_bounds.size()))
-              ? fwd_bounds[static_cast<size_t>(target)]
-              : std::numeric_limits<double>::infinity(),
-          stage1_timer.elapsed_seconds());
+      if (fwd_bounds.empty() || bwd_bounds.empty()) {
+        logger_.log(
+            "  labeling budget exhausted ({} pops) — disabling "
+            "bounds-dependent features",
+            labeling_max_queue_pops);
+        fwd_bounds.clear();
+        bwd_bounds.clear();
+        labeling_elim_bounds = false;
+        edge_elimination = false;
+        edge_elimination_nodes = false;
+        bounds_propagation = false;
+        all_pairs_bounds = false;
+        rc_settings.strategy = RCFixingStrategy::off;
+      } else {
+        logger_.log(
+            "  fwd_reachable={}/{}  bwd_reachable={}/{}  fwd[target]={}  "
+            "time={:.3f}s",
+            count_finite_bounds(fwd_bounds), n, count_finite_bounds(bwd_bounds),
+            n,
+            (target >= 0 && target < n &&
+             target < static_cast<int32_t>(fwd_bounds.size()))
+                ? fwd_bounds[static_cast<size_t>(target)]
+                : std::numeric_limits<double>::infinity(),
+            stage1_timer.elapsed_seconds());
+      }
     } else {
       // No log when bounds skipped (matches PR #49 style)
     }
@@ -1154,6 +1183,7 @@ SolveResult Model::solve(const SolverOptions& options) {
   bridge.set_submip_separation(heu_highs_submip_sec);
   bridge.set_upper_bound(warm_start_ub);
   bridge.set_rc_fixing(rc_settings);
+  bridge.set_labeling_max_queue_pops(labeling_max_queue_pops);
   bridge.set_edge_elimination(edge_elimination);
   bridge.set_edge_elimination_nodes(edge_elimination_nodes);
   bridge.set_heuristic_node_interval(heu_lpg_node_interval);

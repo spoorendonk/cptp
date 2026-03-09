@@ -29,7 +29,8 @@ struct Label {
 /// Returns f[v] for each node. f[root] = -profits[root].
 inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                                          std::span<const double> edge_costs,
-                                         std::span<const double> profits) {
+                                         std::span<const double> profits,
+                                         int64_t max_queue_pops = 0) {
   const int32_t n = prob.num_nodes();
   const auto& graph = prob.graph();
   const double Q = prob.capacity();
@@ -52,6 +53,9 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
 
   size_t head = 0;
   while (head < queue.size()) {
+    if (max_queue_pops > 0 && static_cast<int64_t>(head) >= max_queue_pops) {
+      return {};  // budget exhausted — caller checks .empty()
+    }
     auto [u, li] = queue[head++];
 
     if (li >= static_cast<int32_t>(labels[u].size())) continue;
@@ -93,26 +97,31 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
 }
 
 /// Capacity-aware labeling using the problem's own costs.
-inline std::vector<double> labeling_from(const Problem& prob, int32_t root) {
-  return labeling_from(prob, root, prob.edge_costs(), prob.profits());
+inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
+                                         int64_t max_queue_pops = 0) {
+  return labeling_from(prob, root, prob.edge_costs(), prob.profits(),
+                       max_queue_pops);
 }
 
 /// Forward labeling from a given source node (wrapper for labeling_from).
 inline std::vector<double> forward_labeling(const Problem& prob,
-                                            int32_t source) {
-  return labeling_from(prob, source);
+                                            int32_t source,
+                                            int64_t max_queue_pops = 0) {
+  return labeling_from(prob, source, max_queue_pops);
 }
 
 /// Forward labeling from the problem's source node.
-inline std::vector<double> forward_labeling(const Problem& prob) {
-  return labeling_from(prob, prob.source());
+inline std::vector<double> forward_labeling(const Problem& prob,
+                                            int64_t max_queue_pops = 0) {
+  return labeling_from(prob, prob.source(), max_queue_pops);
 }
 
 /// Backward labeling from a given target node.
 /// For undirected graphs, this is identical to forward_labeling(prob, target).
 inline std::vector<double> backward_labeling(const Problem& prob,
-                                             int32_t target) {
-  return labeling_from(prob, target);
+                                             int32_t target,
+                                             int64_t max_queue_pops = 0) {
+  return labeling_from(prob, target, max_queue_pops);
 }
 
 /// Edge elimination using pre-computed forward/backward labeling bounds.
