@@ -343,7 +343,7 @@ SolveResult Model::solve(const SolverOptions& options) {
 
   // Intercept our custom options, forward the rest to HiGHS
   // --- Bounds & Preprocessing ---
-  bool two_cycle_elim_bounds = true;
+  bool labeling_elim_bounds = true;
   bool all_pairs_bounds = false;
   bool edge_elimination = true;
   bool edge_elimination_nodes = true;
@@ -423,8 +423,8 @@ SolveResult Model::solve(const SolverOptions& options) {
       continue;
     }
     // --- Bounds & Preprocessing ---
-    if (key == "two_cycle_elim_bounds") {
-      two_cycle_elim_bounds = parse_bool(value);
+    if (key == "labeling_elim_bounds") {
+      labeling_elim_bounds = parse_bool(value);
       continue;
     }
     if (key == "all_pairs_bounds") {
@@ -646,15 +646,15 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
   }
 
-  // Cascading disables: two_cycle_elim_bounds=false disables bounds-dependent
+  // Cascading disables: labeling_elim_bounds=false disables bounds-dependent
   // features
-  if (!two_cycle_elim_bounds) {
+  if (!labeling_elim_bounds) {
     edge_elimination = false;
     edge_elimination_nodes = false;
     bounds_propagation = false;
     all_pairs_bounds = false;
     logger_.log(
-        "two_cycle_elim_bounds=false: cascading off edge_elimination, "
+        "labeling_elim_bounds=false: cascading off edge_elimination, "
         "edge_elimination_nodes, bounds_propagation, all_pairs_bounds");
   }
 
@@ -731,8 +731,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     nondefault_settings.push_back("random_seed=" + std::to_string(random_seed));
   }
   nondefault_settings.push_back("presolve=off");
-  if (!two_cycle_elim_bounds)
-    nondefault_settings.push_back("two_cycle_elim_bounds=off");
+  if (!labeling_elim_bounds)
+    nondefault_settings.push_back("labeling_elim_bounds=off");
   if (all_pairs_bounds) nondefault_settings.push_back("all_pairs_bounds=on");
   if (!edge_elimination) nondefault_settings.push_back("edge_elimination=off");
   if (!edge_elimination_nodes)
@@ -944,9 +944,9 @@ SolveResult Model::solve(const SolverOptions& options) {
 
   {
     Timer stage1_timer;
-    if (two_cycle_elim_bounds) {
+    if (labeling_elim_bounds) {
       logger_.log("Lower bounds calculation:");
-      logger_.log("  two-cycle labeling (source={}, target={})", source,
+      logger_.log("  capacity-aware labeling (source={}, target={})", source,
                   target);
       if (source != target) {
         std::jthread t_fwd(
@@ -1045,11 +1045,14 @@ SolveResult Model::solve(const SolverOptions& options) {
       {
         constexpr double inf = std::numeric_limits<double>::infinity();
         all_pairs.assign(static_cast<size_t>(n) * n, inf);
-        parallel::parallel_for(0, n, [&](int s) {
-          auto row = preprocess::forward_labeling(problem_, s);
-          std::copy(row.begin(), row.end(),
-                    all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
-        }, preproc_thread_limit);
+        parallel::parallel_for(
+            0, n,
+            [&](int s) {
+              auto row = preprocess::forward_labeling(problem_, s);
+              std::copy(row.begin(), row.end(),
+                        all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
+            },
+            preproc_thread_limit);
       }
       if (!all_pairs.empty()) {
         const int64_t all_pairs_total =
@@ -1089,13 +1092,12 @@ SolveResult Model::solve(const SolverOptions& options) {
       heuristic::WarmStartProgressOptions progress_opts;
       progress_opts.report_every_starts = 32;
       progress_opts.report_on_ub_improvement = true;
-      auto progress_cb =
-          [&](const heuristic::WarmStartProgressSnapshot& snap) {
-            logger_.log("  {:>6} {:>10} {:>12.6g} {:>4} {:>8.3f}s",
-                        snap.starts_done, snap.ls_iterations_total,
-                        snap.best_objective, snap.ub_improvements,
-                        stage4_timer.elapsed_seconds());
-          };
+      auto progress_cb = [&](const heuristic::WarmStartProgressSnapshot& snap) {
+        logger_.log("  {:>6} {:>10} {:>12.6g} {:>4} {:>8.3f}s",
+                    snap.starts_done, snap.ls_iterations_total,
+                    snap.best_objective, snap.ub_improvements,
+                    stage4_timer.elapsed_seconds());
+      };
       ls_stage4 = heuristic::run_local_search_from_pool(
           problem_, construction_pool, requested_starts, heu_ws_ls_max_iter,
           preproc_thread_limit, stage3_edge_active, &progress_opts, progress_cb,
@@ -1193,6 +1195,7 @@ SolveResult Model::solve(const SolverOptions& options) {
       hyper_sb_iter_limit, hyper_sb_min_reliable, hyper_sb_max_candidates);
 
   bridge.install_separators();
+  bridge.set_bounds_propagation(bounds_propagation);
   bridge.install_propagator();
   bridge.set_heuristic_callback(heu_lpg);
   bridge.set_heuristic_budget_ms(heu_lpg_budget_ms);
@@ -1201,7 +1204,6 @@ SolveResult Model::solve(const SolverOptions& options) {
   bridge.set_heu_lpg_node_threshold(heu_lpg_node_threshold);
   bridge.set_heu_lpg_lp_threshold(heu_lpg_lp_threshold);
   bridge.set_heu_lpg_seed_threshold(heu_lpg_seed_threshold);
-  bridge.set_bounds_propagation(bounds_propagation);
   bridge.install_heuristic_callback();
 
   if (heu_ws && has_feasible_heuristic(warm_start)) {

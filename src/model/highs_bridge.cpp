@@ -7,13 +7,13 @@
 #include <mutex>
 
 #include "core/digraph.h"
-#include "parallel/parallel.h"
 #include "core/gomory_hu.h"
 #include "heuristic/primal_heuristic.h"
 #include "lp_data/HighsCallback.h"
 #include "mip/HighsMipSolverData.h"
 #include "mip/HighsUserPropagator.h"
 #include "mip/HighsUserSeparator.h"
+#include "parallel/parallel.h"
 #include "preprocess/edge_elimination.h"
 #include "preprocess/reachability.h"
 #include "sep/sec_separator.h"

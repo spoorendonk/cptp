@@ -6,7 +6,8 @@
 
 namespace cptp::parallel {
 
-/// Split [begin, end) across jthreads. num_threads=0 means hardware_concurrency.
+/// Split [begin, end) across jthreads. num_threads=0 means
+/// hardware_concurrency.
 template <typename F>
 void parallel_for(int begin, int end, F&& f, int num_threads = 0) {
   if (begin >= end) return;
