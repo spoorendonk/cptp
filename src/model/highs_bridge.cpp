@@ -179,6 +179,11 @@ void HiGHSBridge::build_formulation() {
     col_cost[m + i] = -prob_.profit(i);
   }
 
+  // Check if all objective coefficients are integer-valued.
+  obj_is_integer_ = std::all_of(col_cost.begin(), col_cost.end(), [](double c) {
+    return std::abs(c - std::round(c)) < 1e-9;
+  });
+
   // Add columns with costs
   for (int i = 0; i < total_vars; ++i) {
     highs_.addCol(col_cost[i], col_lower[i], col_upper[i], 0, nullptr, nullptr);
@@ -528,6 +533,9 @@ void HiGHSBridge::install_propagator() {
   auto rc_callbacks = rc_callback_runs_;
   auto rc_time = rc_time_seconds_;
   auto rc_settings = rc_settings_;
+  bool obj_is_integer = obj_is_integer_;
+  double mip_int_tol = 0.0;
+  highs_.getOptionValue("mip_feasibility_tolerance", mip_int_tol);
   auto rc_adaptive_disabled = std::make_shared<bool>(false);
   auto rc_low_yield_streak = std::make_shared<int32_t>(0);
 
@@ -754,6 +762,12 @@ void HiGHSBridge::install_propagator() {
         int64_t fix1_before = *rc_fix1;
         const auto& lp_sol = lp.getSolution();
         double z_LP = lp.getObjective();
+        if (obj_is_integer) {
+          double c = std::ceil(z_LP - mip_int_tol);
+          if (std::abs(z_LP - c) <= mip_int_tol) {
+            z_LP = c;
+          }
+        }
         int32_t ncols = static_cast<int32_t>(lp_sol.col_dual.size());
 
         // Build reduced-cost edge weights and node profits.
@@ -1190,6 +1204,24 @@ SolveResult HiGHSBridge::extract_result() const {
     result.simplex_iterations = static_cast<int64_t>(simplex_iters);
   }
   highs_.getInfoValue("mip_dual_bound", result.bound);
+
+  // Snap objective and bound to integers when all objective coefficients
+  // are integral, guarded by HiGHS's MIP integrality tolerance.
+  if (obj_is_integer_) {
+    double int_tol = 0.0;
+    highs_.getOptionValue("mip_feasibility_tolerance", int_tol);
+    double r = std::round(result.objective);
+    if (std::abs(result.objective - r) <= int_tol) {
+      result.objective = r;
+    }
+    if (std::isfinite(result.bound)) {
+      // Dual bound in minimization: ceil is conservative (never optimistic).
+      double c = std::ceil(result.bound - int_tol);
+      if (std::abs(result.bound - c) <= int_tol) {
+        result.bound = c;
+      }
+    }
+  }
   double mip_gap = 0.0;
   highs_.getInfoValue("mip_gap", mip_gap);
   result.gap = mip_gap / 100.0;

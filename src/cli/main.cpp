@@ -243,7 +243,8 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "\n";
 
-    std::cout << "Objective: " << result.objective
+    std::cout << std::setprecision(15)
+              << "Objective: " << result.objective
               << "  Bound: " << result.bound
               << "  Gap: " << (result.gap * 100.0) << "%"
               << "  Time: " << result.time_seconds << "s"
