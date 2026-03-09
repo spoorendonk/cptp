@@ -6,6 +6,7 @@
 
 #include "core/io.h"
 #include "core/problem.h"
+#include "model/highs_bridge.h"
 #include "model/model.h"
 #include "preprocess/edge_elimination.h"
 
@@ -264,13 +265,13 @@ static const cptp::SolverOptions quiet = {
     {"output_flag", "false"},
 };
 
-static cptp::SolveResult solve_instance(const char* path,
-                                        const cptp::SolverOptions& extra = {}) {
+static cptp::SolveResult solve_instance(const char *path,
+                                        const cptp::SolverOptions &extra = {}) {
   auto prob = cptp::io::load(path);
   cptp::Model model;
   model.set_problem(std::move(prob));
   auto opts = quiet;
-  for (const auto& kv : extra) opts.push_back(kv);
+  for (const auto &kv : extra) opts.push_back(kv);
   return model.solve(opts);
 }
 
@@ -327,4 +328,80 @@ TEST_CASE("All-pairs propagation on path instance", "[propagator][all_pairs]") {
   auto r = solve_instance("tests/data/tiny4_path.txt",
                           {{"all_pairs_bounds", "true"}});
   REQUIRE(r.is_optimal());
+}
+
+// ─── Objective integrality detection tests ───
+
+TEST_CASE("obj_is_integer is true for integer-cost instance",
+          "[propagator][obj_integrality]") {
+  auto prob = cptp::io::load("tests/data/tiny4.txt");
+  Highs highs;
+  highs.setOptionValue("output_flag", false);
+  cptp::Logger logger;
+  cptp::HiGHSBridge bridge(prob, highs, logger);
+  bridge.build_formulation();
+  REQUIRE(bridge.obj_is_integer());
+}
+
+TEST_CASE("obj_is_integer is true for integer-cost path instance",
+          "[propagator][obj_integrality]") {
+  auto prob = cptp::io::load("tests/data/tiny4_path.txt");
+  Highs highs;
+  highs.setOptionValue("output_flag", false);
+  cptp::Logger logger;
+  cptp::HiGHSBridge bridge(prob, highs, logger);
+  bridge.build_formulation();
+  REQUIRE(bridge.obj_is_integer());
+}
+
+TEST_CASE("obj_is_integer is false for fractional-cost instance",
+          "[propagator][obj_integrality]") {
+  // Load a normal instance, then rebuild with one fractional edge cost.
+  auto prob = cptp::io::load("tests/data/tiny4.txt");
+  const auto &g = prob.graph();
+  int32_t m = prob.num_edges();
+  int32_t n = prob.num_nodes();
+
+  std::vector<cptp::Edge> edges(m);
+  for (int32_t e = 0; e < m; ++e) {
+    edges[e] = {g.edge_source(e), g.edge_target(e)};
+  }
+  auto costs = prob.edge_costs();
+  costs[0] += 0.5;  // make one cost fractional
+
+  cptp::Problem frac_prob;
+  frac_prob.build(n, edges, costs, prob.profits(), prob.demands(),
+                  prob.capacity(), prob.source(), prob.target());
+
+  Highs highs;
+  highs.setOptionValue("output_flag", false);
+  cptp::Logger logger;
+  cptp::HiGHSBridge bridge(frac_prob, highs, logger);
+  bridge.build_formulation();
+  REQUIRE_FALSE(bridge.obj_is_integer());
+}
+
+TEST_CASE("RC-fixing with integer obj tightening preserves optimal on tiny4",
+          "[propagator][obj_integrality]") {
+  auto r = solve_instance("tests/data/tiny4.txt", {{"rc_fixing", "adaptive"}});
+  REQUIRE(r.is_optimal());
+  REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1.0));
+}
+
+TEST_CASE("RC-fixing with integer obj tightening preserves optimal on path",
+          "[propagator][obj_integrality]") {
+  auto r_default = solve_instance("tests/data/tiny4_path.txt");
+  auto r_rc =
+      solve_instance("tests/data/tiny4_path.txt", {{"rc_fixing", "adaptive"}});
+  REQUIRE(r_default.is_optimal());
+  REQUIRE(r_rc.is_optimal());
+  REQUIRE_THAT(r_default.objective, WithinAbs(r_rc.objective, 1e-6));
+}
+
+TEST_CASE("RC-fixing with integer obj on B-n45-k6-54",
+          "[propagator][obj_integrality][slow]") {
+  auto r = solve_instance("benchmarks/instances/spprclib/B-n45-k6-54.sppcc",
+                          {{"time_limit", "60"}, {"rc_fixing", "adaptive"}});
+  REQUIRE(r.is_optimal());
+  REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }

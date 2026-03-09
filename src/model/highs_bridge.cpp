@@ -179,6 +179,11 @@ void HiGHSBridge::build_formulation() {
     col_cost[m + i] = -prob_.profit(i);
   }
 
+  // Check if all objective coefficients are integer-valued.
+  obj_is_integer_ = std::all_of(col_cost.begin(), col_cost.end(), [](double c) {
+    return std::abs(c - std::round(c)) < 1e-9;
+  });
+
   // Add columns with costs
   for (int i = 0; i < total_vars; ++i) {
     highs_.addCol(col_cost[i], col_lower[i], col_upper[i], 0, nullptr, nullptr);
@@ -528,6 +533,7 @@ void HiGHSBridge::install_propagator() {
   auto rc_callbacks = rc_callback_runs_;
   auto rc_time = rc_time_seconds_;
   auto rc_settings = rc_settings_;
+  bool obj_is_integer = obj_is_integer_;
   auto rc_adaptive_disabled = std::make_shared<bool>(false);
   auto rc_low_yield_streak = std::make_shared<int32_t>(0);
 
@@ -754,6 +760,9 @@ void HiGHSBridge::install_propagator() {
         int64_t fix1_before = *rc_fix1;
         const auto& lp_sol = lp.getSolution();
         double z_LP = lp.getObjective();
+        if (obj_is_integer) {
+          z_LP = std::ceil(z_LP - 1e-9);
+        }
         int32_t ncols = static_cast<int32_t>(lp_sol.col_dual.size());
 
         // Build reduced-cost edge weights and node profits.

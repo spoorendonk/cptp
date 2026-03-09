@@ -88,6 +88,10 @@ class HiGHSBridge {
   /// Configure Lagrangian reduced-cost fixing in the propagator.
   void set_rc_fixing(RCFixingSettings settings) { rc_settings_ = settings; }
   void set_edge_elimination(bool enable) { edge_elimination_enabled_ = enable; }
+
+  /// True if all objective coefficients are integer-valued (detected in
+  /// build_formulation). Used to tighten LP bounds via ceiling in RC-fixing.
+  bool obj_is_integer() const { return obj_is_integer_; }
   void set_edge_elimination_nodes(bool enable) {
     edge_elimination_nodes_ = enable;
   }
@@ -185,6 +189,7 @@ class HiGHSBridge {
   std::shared_ptr<std::atomic<bool>> interrupt_flag_;
 
   // RC fixing settings and statistics
+  bool obj_is_integer_ = false;  // true if all obj coefficients are integral
   RCFixingSettings rc_settings_;
   std::shared_ptr<int64_t> rc_fix0_count_;
   std::shared_ptr<int64_t> rc_fix1_count_;
