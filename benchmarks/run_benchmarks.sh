@@ -30,6 +30,9 @@
 
 set -euo pipefail
 
+# Round a number to at most 3 decimal places, stripping trailing zeros.
+round3() { [[ -n "$1" ]] && awk -v val="$1" 'BEGIN{v=val+0; if(v>999999||v<-999999){print val}else{x=sprintf("%.3f",v); sub(/\.?0+$/,"",x); print x}}' || echo ""; }
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOLVER="$REPO_DIR/build/cptp-solve"
@@ -152,10 +155,10 @@ for inst in "${INSTANCES[@]}"; do
     # Parse Objective line
     obj="" bound="" gap_pct="" time_s="" bb_nodes=""
     if obj_line="$(echo "$output" | grep -P '^Objective:')"; then
-        obj="$(echo "$obj_line" | grep -oP 'Objective: \K[-0-9.e+]+')"
-        bound="$(echo "$obj_line" | grep -oP 'Bound: \K[-0-9.e+]+')"
-        gap_pct="$(echo "$obj_line" | grep -oP 'Gap: \K[0-9.e+-]+')"
-        time_s="$(echo "$obj_line" | grep -oP 'Time: \K[0-9.]+')"
+        obj="$(round3 "$(echo "$obj_line" | grep -oP 'Objective: \K[-0-9.e+]+')")"
+        bound="$(round3 "$(echo "$obj_line" | grep -oP 'Bound: \K[-0-9.e+]+')")"
+        gap_pct="$(round3 "$(echo "$obj_line" | grep -oP 'Gap: \K[0-9.e+-]+')")"
+        time_s="$(round3 "$(echo "$obj_line" | grep -oP 'Time: \K[0-9.]+')")"
         bb_nodes="$(echo "$obj_line" | grep -oP 'Nodes: \K[0-9]+')"
     fi
 
@@ -175,7 +178,7 @@ for inst in "${INSTANCES[@]}"; do
             local cuts rounds stime
             cuts="$(echo "$line" | grep -oP '[0-9]+(?= cuts)')" || cuts=""
             rounds="$(echo "$line" | grep -oP '[0-9]+(?= rounds)')" || rounds=""
-            stime="$(echo "$line" | grep -oP '[0-9.]+(?=s\s*$)')" || stime=""
+            stime="$(round3 "$(echo "$line" | grep -oP '[0-9.]+(?=s\s*$)')")" || stime=""
             echo "${cuts},${rounds},${stime}"
         else
             echo ",,"
@@ -194,8 +197,8 @@ for inst in "${INSTANCES[@]}"; do
     ws_block="$(echo "$output" | sed -n '/^Local search:/,/^Preprocess restart:/p')" || true
     ws_line="$(echo "$ws_block" | grep -P '^\s+\d+\s+\d+\s+[-0-9.e+]+\s+\d+\s+[0-9.]+s\s*$' | tail -1)" || true
     if [[ -n "$ws_line" ]]; then
-        warmstart_ub="$(echo "$ws_line" | awk '{print $3}')"
-        warmstart_time="$(echo "$ws_line" | awk '{gsub(/s$/,"",$5); print $5}')"
+        warmstart_ub="$(round3 "$(echo "$ws_line" | awk '{print $3}')")"
+        warmstart_time="$(round3 "$(echo "$ws_line" | awk '{gsub(/s$/,"",$5); print $5}')")"
     fi
 
     # lp_iters fields are not printed by cptp-solve stdout; leave blank
