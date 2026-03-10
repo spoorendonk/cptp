@@ -101,11 +101,15 @@ for name in all_instances:
     pw_time = float(pw_time_str) if pw_time_str else None
     cptp_obj = float(cptp_obj_str) if cptp_obj_str else None
     cptp_time = float(cptp_time_str) if cptp_time_str else None
+    cptp_gap = float(c.get('gap_pct', '0') or '0')
 
     # Objective match
     match_str = '?'
     if pw_obj is not None and cptp_obj is not None:
-        if abs(pw_obj - cptp_obj) < 0.01:
+        if cptp_gap > 0:
+            match_str = 'TLIM'
+            mismatches += 1
+        elif abs(pw_obj - cptp_obj) < 0.01:
             match_str = 'OK'
             matches += 1
         else:
