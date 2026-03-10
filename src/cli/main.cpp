@@ -184,9 +184,21 @@ int main(int argc, char* argv[]) {
   for (int i = 2; i < argc; ++i) {
     std::string arg = argv[i];
     if (arg == "--source" && i + 1 < argc) {
-      override_source = std::stoi(argv[++i]);
+      try {
+        override_source = std::stoi(argv[++i]);
+      } catch (const std::exception&) {
+        std::cerr << "Error: invalid value for --source\n";
+        print_usage(argv[0]);
+        return 1;
+      }
     } else if (arg == "--target" && i + 1 < argc) {
-      override_target = std::stoi(argv[++i]);
+      try {
+        override_target = std::stoi(argv[++i]);
+      } catch (const std::exception&) {
+        std::cerr << "Error: invalid value for --target\n";
+        print_usage(argv[0]);
+        return 1;
+      }
     } else if (arg == "--highs_help") {
       Highs highs;
       highs.writeOptions("");
@@ -209,20 +221,13 @@ int main(int argc, char* argv[]) {
       int32_t tgt = (override_target >= 0) ? override_target : problem.target();
 
       // Rebuild problem with new source/target
-      problem.build(
-          problem.num_nodes(),
-          // We need the edges — rebuild via the graph
-          // Actually, set_problem on Model handles this already.
-          // For CLI override, we re-build the problem.
-          [&] {
-            std::vector<cptp::Edge> edges;
-            const auto& g = problem.graph();
-            for (auto e : g.edges())
-              edges.push_back({g.edge_source(e), g.edge_target(e)});
-            return edges;
-          }(),
-          problem.edge_costs(), problem.profits(), problem.demands(),
-          problem.capacity(), src, tgt);
+      std::vector<cptp::Edge> edges;
+      const auto& g = problem.graph();
+      for (auto e : g.edges())
+        edges.push_back({g.edge_source(e), g.edge_target(e)});
+      problem.build(problem.num_nodes(), edges, problem.edge_costs(),
+                    problem.profits(), problem.demands(), problem.capacity(),
+                    src, tgt);
     }
 
     std::cout << "Instance: " << problem.name << " (" << problem.num_nodes()

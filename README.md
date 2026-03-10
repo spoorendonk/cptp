@@ -51,8 +51,10 @@ cmake --build build -j$(nproc)
 
 ## Python
 
+The Python package requires the C++ build dependencies (CMake, a C++23 compiler, libtbb-dev).
+
 ```bash
-pip install cptp
+pip install .
 ```
 
 ```python
@@ -99,3 +101,7 @@ ctest --test-dir build --output-on-failure
 # Python tests
 pytest tests/python/test_solver.py
 ```
+
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.

@@ -114,6 +114,7 @@ done
 
 # Build a temporary file without rows for instances we're about to run
 TMPFILE="$(mktemp)"
+trap 'rm -f "$TMPFILE"' EXIT
 head -1 "$OUTFILE" > "$TMPFILE"
 tail -n +2 "$OUTFILE" | while IFS= read -r line; do
     row_instance="${line%%,*}"

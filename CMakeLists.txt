@@ -26,6 +26,7 @@ add_library(cptp
     src/sep/spi_separator.cpp
     src/sep/separation_oracle.cpp
     src/preprocess/bound_propagator.cpp
+    src/heuristic/primal_heuristic.cpp
     src/model/model.cpp
     src/model/highs_bridge.cpp
 )

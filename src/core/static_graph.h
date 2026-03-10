@@ -1,10 +1,10 @@
 #pragma once
 
 #include <algorithm>
-#include <cassert>
 #include <cstdint>
 #include <numeric>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 namespace cptp {
@@ -22,7 +22,8 @@ class static_graph {
       : num_nodes_(n), num_edges_(static_cast<int32_t>(edges.size())) {
     endpoints_.resize(2 * num_edges_);
     for (int32_t i = 0; i < num_edges_; ++i) {
-      assert(edges[i].u < edges[i].v);
+      if (edges[i].u >= edges[i].v)
+        throw std::invalid_argument("static_graph: edge u must be less than v");
       endpoints_[2 * i] = edges[i].u;
       endpoints_[2 * i + 1] = edges[i].v;
     }

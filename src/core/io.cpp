@@ -140,8 +140,16 @@ Problem load_tsplib(const std::filesystem::path& path) {
         auto key = trim(line.substr(0, pos));
         auto val = trim(line.substr(pos + 1));
         header[key] = val;
-        if (key == "DIMENSION") dimension = std::stoi(val);
-        if (key == "CAPACITY") capacity = std::stoi(val);
+        if (key == "DIMENSION") {
+          dimension = std::stoi(val);
+          if (dimension <= 0)
+            throw std::runtime_error("TSPLIB: DIMENSION must be positive");
+        }
+        if (key == "CAPACITY") {
+          capacity = std::stoi(val);
+          if (capacity < 0)
+            throw std::runtime_error("TSPLIB: CAPACITY must be non-negative");
+        }
         if (key == "EDGE_WEIGHT_TYPE") edge_weight_type = val;
         if (key == "NAME") {
         }  // stored in header map
@@ -189,7 +197,7 @@ Problem load_tsplib(const std::filesystem::path& path) {
         profits.push_back(v);
       }
       // If we've read all weights, switch back to header
-      if (static_cast<int>(profits.size()) >= dimension) {
+      if (dimension > 0 && static_cast<int>(profits.size()) >= dimension) {
         section = Section::Header;
       }
       continue;

@@ -5,5 +5,8 @@ __pycache__/
 benchmarks/__pycache__/
 benchmarks/.pathwyse/
 benchmarks/results/
-.venv-mkdocs/
-site/
+.venv/
+.pytest_cache/
+*.egg-info/
+dist/
+.DS_Store

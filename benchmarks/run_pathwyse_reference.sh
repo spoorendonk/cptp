@@ -79,6 +79,7 @@ done
 # Remove existing rows for instances we're about to run
 if [[ -f "$OUTFILE" ]]; then
     TMPFILE="$(mktemp)"
+    trap 'rm -f "$TMPFILE"' EXIT
     head -1 "$OUTFILE" > "$TMPFILE"
     tail -n +2 "$OUTFILE" | while IFS= read -r line; do
         row_instance="${line%%,*}"
