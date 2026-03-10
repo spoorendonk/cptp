@@ -12,7 +12,7 @@ requires-python = ">=3.10"
 dependencies = ["numpy"]
 
 [project.urls]
-Repository = "https://github.com/simonbowly/cptp"
+Repository = "https://github.com/spoorendonk/cptp"
 
 [project.scripts]
 cptp = "cptp.__main__:main"
