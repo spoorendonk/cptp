@@ -218,6 +218,7 @@ class HiGHSBridge {
   std::shared_ptr<std::atomic<bool>> interrupt_flag_;
 
   // RC fixing settings and statistics
+  bool propagator_installed_ = false;
   bool obj_is_integer_ = false;  // true if all obj coefficients are integral
   int64_t labeling_max_queue_pops_ = 0;
   RCFixingSettings rc_settings_;

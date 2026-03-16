@@ -483,6 +483,7 @@ void HiGHSBridge::set_all_pairs_bounds(std::vector<double> dist) {
 }
 
 void HiGHSBridge::install_propagator() {
+  propagator_installed_ = true;
   // No early return: even without bounds, RC fixing (Trigger C/D) is
   // independent.
   const bool have_bounds = !fwd_bounds_.empty() && !bwd_bounds_.empty();
@@ -1229,7 +1230,7 @@ SolveResult HiGHSBridge::extract_result() const {
   result.tour_arcs = std::move(active_edges);
 
   // Print propagator statistics
-  if (stats_->propagator_calls > 0) {
+  if (propagator_installed_) {
     const auto& s = *stats_;
     const int64_t sweep_total = s.sweep_fixings + s.sweep_node_fixings;
     const int64_t chain_total = s.chain_fixings + s.chain_node_fixings;
