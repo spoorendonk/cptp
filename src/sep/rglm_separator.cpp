@@ -17,7 +17,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
   const bool is_tour = prob.is_tour();
   const int32_t path_target = prob.target();
 
-  if (Q <= 0 || Q >= 1e17) return {};
+  if (Q <= 0 || Q >= kInfiniteCapacity) return {};
 
   // Precompute total demand (constant across all targets).
   double d_total = 0.0;

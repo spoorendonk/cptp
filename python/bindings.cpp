@@ -1,3 +1,5 @@
+#include <memory>
+
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/map.h>
@@ -97,17 +99,18 @@ NB_MODULE(_cptp, m) {
           [](const cptp::Problem& self) {
             const auto& g = self.graph();
             size_t m = static_cast<size_t>(self.num_edges());
-            auto* data = new std::vector<int32_t>(m * 2);
+            auto data = std::make_unique<std::vector<int32_t>>(m * 2);
             size_t idx = 0;
             for (auto e : g.edges()) {
               (*data)[idx++] = g.edge_source(e);
               (*data)[idx++] = g.edge_target(e);
             }
-            nb::capsule owner(data, [](void* p) noexcept {
+            auto* raw = data.release();
+            nb::capsule owner(raw, [](void* p) noexcept {
               delete static_cast<std::vector<int32_t>*>(p);
             });
             return nb::ndarray<nb::numpy, int32_t, nb::shape<-1, 2>>(
-                data->data(), {m, 2}, std::move(owner));
+                raw->data(), {m, 2}, std::move(owner));
           },
           "Return (m, 2) numpy array of (tail, head) pairs")
       .def(

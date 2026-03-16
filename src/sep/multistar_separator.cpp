@@ -17,7 +17,7 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
   const bool is_tour = prob.is_tour();
   const int32_t path_target = prob.target();
 
-  if (Q <= 0 || Q >= 1e17) return {};
+  if (Q <= 0 || Q >= kInfiniteCapacity) return {};
 
   std::vector<Cut> all_cuts;
 

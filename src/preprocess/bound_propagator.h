@@ -58,11 +58,6 @@ class BoundPropagator {
   double correction() const { return correction_; }
 
  private:
-  struct AdjEntry {
-    int32_t edge;
-    int32_t neighbor;
-  };
-
   const Problem& prob_;
   std::vector<double> fwd_bounds_;
   std::vector<double> bwd_bounds_;

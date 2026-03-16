@@ -75,6 +75,7 @@ if(CPTP_BUILD_TESTS)
     )
     target_include_directories(cptp_tests PRIVATE ${highs_SOURCE_DIR}/highs)
     target_link_libraries(cptp_tests PRIVATE cptp Catch2::Catch2WithMain)
+    cptp_set_compiler_flags(cptp_tests)
     catch_discover_tests(cptp_tests
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
@@ -86,6 +87,7 @@ if(CPTP_BUILD_TESTS)
         tests/test_separators.cpp
     )
     target_link_libraries(cptp_tests_extra PRIVATE cptp Catch2::Catch2WithMain)
+    cptp_set_compiler_flags(cptp_tests_extra)
     catch_discover_tests(cptp_tests_extra
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
@@ -97,6 +99,7 @@ if(CPTP_BUILD_TESTS)
 
     add_executable(test_formulation tests/test_formulation.cpp)
     target_link_libraries(test_formulation PRIVATE cptp)
+    cptp_set_compiler_flags(test_formulation)
 
     # Heuristic-stage UB regression gate over benchmark corpora.
     # Intentionally not auto-discovered in ctest due long runtime.

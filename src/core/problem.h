@@ -16,6 +16,12 @@ struct Edge {
   int32_t head;
 };
 
+/// Adjacency list entry: an edge index and the neighbor reachable via it.
+struct AdjEntry {
+  int32_t edge;
+  int32_t neighbor;
+};
+
 /// CPTP instance: undirected graph with profits, costs, demands, capacity.
 class Problem {
  public:

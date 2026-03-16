@@ -9,6 +9,10 @@
 
 namespace cptp::sep {
 
+/// Sentinel capacity value treated as "uncapacitated" by capacity-based
+/// separators (GLM, RGLM).  Any capacity >= this threshold disables the cut.
+constexpr double kInfiniteCapacity = 1e17;
+
 /// Base class for solver-independent cut separators.
 class Separator {
  public:

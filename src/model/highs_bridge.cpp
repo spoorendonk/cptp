@@ -24,11 +24,6 @@ namespace cptp {
 
 namespace {
 
-struct PropagatorAdjEntry {
-  int32_t edge;
-  int32_t neighbor;
-};
-
 bool should_run_rc_fixing(const RCFixingSettings& settings, bool ub_improved,
                           int64_t ub_improvements, int64_t propagator_calls,
                           bool adaptive_disabled) {
@@ -62,9 +57,7 @@ HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger,
       cached_x_lp_(std::make_shared<std::vector<double>>()),
       cached_y_lp_(std::make_shared<std::vector<double>>()),
       lp_cache_mutex_(std::make_shared<std::mutex>()),
-      heuristic_calls_(std::make_shared<int64_t>(0)),
-      heuristic_solutions_(std::make_shared<int64_t>(0)),
-      heuristic_time_seconds_(std::make_shared<double>(0.0)) {
+      stats_(std::make_shared<CallbackStats>()) {
   // Integral feasibility: tight but not zero to avoid rejecting
   // valid solutions due to floating-point noise in LP values.
   // Fractional separation uses a looser tolerance (default 1e-2).
@@ -504,32 +497,9 @@ void HiGHSBridge::install_propagator() {
   // These are mutable across callback invocations.
   auto last_ub = std::make_shared<double>(inf);
   auto processed_edge = std::make_shared<std::vector<bool>>(m, false);
-  propagator_fixings_ = std::make_shared<int64_t>(0);
-  sweep_fixings_ = std::make_shared<int64_t>(0);
-  chain_fixings_ = std::make_shared<int64_t>(0);
-  sweep_node_fixings_ = std::make_shared<int64_t>(0);
-  chain_node_fixings_ = std::make_shared<int64_t>(0);
-  ub_improvements_ = std::make_shared<int64_t>(0);
-  propagator_calls_ = std::make_shared<int64_t>(0);
-  propagator_time_seconds_ = std::make_shared<double>(0.0);
-  rc_fix0_count_ = std::make_shared<int64_t>(0);
-  rc_fix1_count_ = std::make_shared<int64_t>(0);
-  rc_label_runs_ = std::make_shared<int64_t>(0);
-  rc_callback_runs_ = std::make_shared<int64_t>(0);
-  rc_time_seconds_ = std::make_shared<double>(0.0);
-  auto propagator_fixings = propagator_fixings_;
-  auto sweep_fixings = sweep_fixings_;
-  auto chain_fixings = chain_fixings_;
-  auto sweep_node_fixings = sweep_node_fixings_;
-  auto chain_node_fixings = chain_node_fixings_;
-  auto ub_improvements = ub_improvements_;
-  auto propagator_calls = propagator_calls_;
-  auto propagator_time = propagator_time_seconds_;
-  auto rc_fix0 = rc_fix0_count_;
-  auto rc_fix1 = rc_fix1_count_;
-  auto rc_runs = rc_label_runs_;
-  auto rc_callbacks = rc_callback_runs_;
-  auto rc_time = rc_time_seconds_;
+  // Reset stats for this propagator installation.
+  *stats_ = CallbackStats{};
+  auto stats = stats_;
   auto rc_settings = rc_settings_;
   int64_t labeling_limit = labeling_max_queue_pops_;
   bool obj_is_integer = obj_is_integer_;
@@ -542,7 +512,7 @@ void HiGHSBridge::install_propagator() {
   auto ap = std::make_shared<std::vector<double>>(std::move(all_pairs_));
 
   // Pre-build adjacency: for each node, list of (edge_idx, neighbor).
-  auto adj = std::make_shared<std::vector<std::vector<PropagatorAdjEntry>>>(n);
+  auto adj = std::make_shared<std::vector<std::vector<AdjEntry>>>(n);
   for (auto e : graph.edges()) {
     int32_t u = graph.edge_source(e);
     int32_t v = graph.edge_target(e);
@@ -581,16 +551,16 @@ void HiGHSBridge::install_propagator() {
     double ub = mipsolver.mipdata_->upper_limit;
     if (ub >= inf) return;
 
-    (*propagator_calls)++;
+    stats->propagator_calls++;
     const auto propagator_t0 = std::chrono::steady_clock::now();
     const auto& ec = *edge_costs;
     const auto& pr = *profits;
     const auto& adjacency = *adj;
     auto& proc = *processed_edge;
-    int64_t& fixings = *propagator_fixings;
+    int64_t& fixings = stats->propagator_fixings;
     auto fix_nodes_with_no_open_edges =
         [&](bool skip_terminals, bool count_toward_total_fixings,
-            const std::shared_ptr<int64_t>& node_fix_counter) {
+            int64_t& node_fix_counter) {
           for (int32_t i = 0; i < n; ++i) {
             if (domain.col_upper_[m + i] < 0.5) continue;
             if (skip_terminals && (i == prob.source() || i == prob.target())) {
@@ -609,14 +579,14 @@ void HiGHSBridge::install_propagator() {
             if (count_toward_total_fixings) {
               fixings++;
             }
-            (*node_fix_counter)++;
+            node_fix_counter++;
           }
         };
 
     bool ub_improved = (ub < *last_ub - 1e-9);
     if (ub_improved) {
       *last_ub = ub;
-      (*ub_improvements)++;
+      stats->ub_improvements++;
     }
 
     // ── Trigger A: UB improved → full sweep ──
@@ -640,11 +610,11 @@ void HiGHSBridge::install_propagator() {
           domain.changeBound(HighsBoundType::kUpper, e, 0.0,
                              HighsDomain::Reason::unspecified());
           fixings++;
-          (*sweep_fixings)++;
+          stats->sweep_fixings++;
         }
       }
 
-      fix_nodes_with_no_open_edges(false, false, sweep_node_fixings);
+      fix_nodes_with_no_open_edges(false, false, stats->sweep_node_fixings);
     }
 
     // ── Trigger B: Fixed edge x_(a,i) = 1 → chained bounds ──
@@ -653,7 +623,7 @@ void HiGHSBridge::install_propagator() {
       const auto& apd = *ap;
       const bool have_all_pairs = !apd.empty();
       const int32_t depot = prob.depot();
-      const int64_t chain_before = *chain_fixings;
+      const int64_t chain_before = stats->chain_fixings;
 
       for (int32_t e = 0; e < m; ++e) {
         if (proc[e]) continue;
@@ -705,7 +675,7 @@ void HiGHSBridge::install_propagator() {
               domain.changeBound(HighsBoundType::kUpper, ej, 0.0,
                                  HighsDomain::Reason::unspecified());
               fixings++;
-              (*chain_fixings)++;
+              stats->chain_fixings++;
             }
           }
         } else {
@@ -721,7 +691,7 @@ void HiGHSBridge::install_propagator() {
               domain.changeBound(HighsBoundType::kUpper, ej, 0.0,
                                  HighsDomain::Reason::unspecified());
               fixings++;
-              (*chain_fixings)++;
+              stats->chain_fixings++;
             }
           }
 
@@ -736,15 +706,15 @@ void HiGHSBridge::install_propagator() {
               domain.changeBound(HighsBoundType::kUpper, ek, 0.0,
                                  HighsDomain::Reason::unspecified());
               fixings++;
-              (*chain_fixings)++;
+              stats->chain_fixings++;
             }
           }
         }
       }
 
       // Fix nodes where all incident edges are now fixed to 0.
-      if (*chain_fixings > chain_before) {
-        fix_nodes_with_no_open_edges(true, true, chain_node_fixings);
+      if (stats->chain_fixings > chain_before) {
+        fix_nodes_with_no_open_edges(true, true, stats->chain_node_fixings);
       }
     }  // if (bounds_prop)
 
@@ -752,13 +722,13 @@ void HiGHSBridge::install_propagator() {
     // ── Trigger D: Lagrangian reduced-cost fixing (nodes → 1) ──
     if (rc_settings.strategy != RCFixingStrategy::off) {
       const bool run_rc =
-          should_run_rc_fixing(rc_settings, ub_improved, *ub_improvements,
-                               *propagator_calls, *rc_adaptive_disabled);
+          should_run_rc_fixing(rc_settings, ub_improved, stats->ub_improvements,
+                               stats->propagator_calls, *rc_adaptive_disabled);
 
       if (run_rc && lp.getStatus() == HighsLpRelaxation::Status::kOptimal) {
         auto rc_t0 = std::chrono::steady_clock::now();
-        int64_t fix0_before = *rc_fix0;
-        int64_t fix1_before = *rc_fix1;
+        int64_t fix0_before = stats->rc_fix0_count;
+        int64_t fix1_before = stats->rc_fix1_count;
         const auto& lp_sol = lp.getSolution();
         double z_LP = lp.getObjective();
         if (obj_is_integer) {
@@ -812,7 +782,7 @@ void HiGHSBridge::install_propagator() {
                                                  labeling_limit);
             }
           }
-          (*rc_runs) += prob.is_tour() ? 1 : 2;
+          stats->rc_label_runs += prob.is_tour() ? 1 : 2;
 
           // If labeling was aborted due to budget, skip this RC round
           if (!rc_fwd.empty() && !rc_bwd.empty()) {
@@ -867,7 +837,7 @@ void HiGHSBridge::install_propagator() {
               if (z_LP + excess > ub + 1e-6) {
                 domain.changeBound(HighsBoundType::kUpper, e, 0.0,
                                    HighsDomain::Reason::unspecified());
-                (*rc_fix0)++;
+                stats->rc_fix0_count++;
               }
             }
 
@@ -933,7 +903,7 @@ void HiGHSBridge::install_propagator() {
                     }
                   });
 
-              (*rc_runs) += static_cast<int64_t>(candidates.size());
+              stats->rc_label_runs += static_cast<int64_t>(candidates.size());
 
               for (size_t idx = 0; idx < candidates.size(); ++idx) {
                 if (z_LR_minus[idx] >= inf) continue;
@@ -942,7 +912,7 @@ void HiGHSBridge::install_propagator() {
                   int32_t node_i = candidates[idx];
                   domain.changeBound(HighsBoundType::kLower, m + node_i, 1.0,
                                      HighsDomain::Reason::unspecified());
-                  (*rc_fix1)++;
+                  stats->rc_fix1_count++;
                 }
               }
             }
@@ -950,14 +920,14 @@ void HiGHSBridge::install_propagator() {
         }
         }  // if (!rc_fwd.empty() && !rc_bwd.empty())
 
-        (*rc_callbacks)++;
+        stats->rc_callback_runs++;
         auto rc_t1 = std::chrono::steady_clock::now();
-        *rc_time += std::chrono::duration<double>(rc_t1 - rc_t0).count();
+        stats->rc_time_seconds += std::chrono::duration<double>(rc_t1 - rc_t0).count();
 
         if (rc_settings.strategy == RCFixingStrategy::adaptive &&
-            *rc_callbacks >= 2) {
+            stats->rc_callback_runs >= 2) {
           const int64_t delta_fix =
-              (*rc_fix0 - fix0_before) + (*rc_fix1 - fix1_before);
+              (stats->rc_fix0_count - fix0_before) + (stats->rc_fix1_count - fix1_before);
           if (delta_fix < 5) {
             (*rc_low_yield_streak)++;
           } else {
@@ -971,9 +941,9 @@ void HiGHSBridge::install_propagator() {
         }
       }
     }
-    if (propagator_time) {
+    {
       const auto propagator_t1 = std::chrono::steady_clock::now();
-      *propagator_time +=
+      stats->propagator_time_seconds +=
           std::chrono::duration<double>(propagator_t1 - propagator_t0).count();
     }
   });
@@ -985,9 +955,7 @@ void HiGHSBridge::install_heuristic_callback() {
   const bool logging_enabled = logger_.enabled();
   if (!heuristic_enabled && !interrupt_enabled && !logging_enabled) return;
 
-  auto calls = heuristic_calls_;
-  auto solutions = heuristic_solutions_;
-  auto heuristic_time_seconds = heuristic_time_seconds_;
+  auto stats = stats_;
   int strategy = heuristic_strategy_;
   int64_t node_interval = std::max<int64_t>(1, heuristic_node_interval_);
   int deterministic_restarts =
@@ -1003,11 +971,10 @@ void HiGHSBridge::install_heuristic_callback() {
   double lpg_lp_threshold = heu_lpg_lp_threshold_;
   double lpg_seed_threshold = heu_lpg_seed_threshold_;
   highs_.setCallback(
-      [this, heuristic_enabled, cached_x, cached_y, cache_mtx, calls, solutions,
-       heuristic_time_seconds, last_node_count, strategy, node_interval,
+      [this, heuristic_enabled, cached_x, cached_y, cache_mtx, stats,
+       last_node_count, strategy, node_interval,
        deterministic_restarts, lpg_edge_threshold, lpg_node_threshold,
-       lpg_lp_threshold,
-       lpg_seed_threshold](int callback_type, const std::string& message,
+       lpg_lp_threshold, lpg_seed_threshold](int callback_type, const std::string& message,
                            const HighsCallbackOutput* data_out,
                            HighsCallbackInput* data_in, void* /*user_data*/) {
         if (callback_type ==
@@ -1072,7 +1039,7 @@ void HiGHSBridge::install_heuristic_callback() {
           incumbent = data_out->mip_solution;
         }
 
-        (*calls)++;
+        stats->heuristic_calls++;
         const auto heuristic_t0 = std::chrono::steady_clock::now();
         heuristic::HeuristicResult result = heuristic::lp_guided_heuristic(
             prob_, x_lp, y_lp, incumbent, 0.0, strategy, deterministic_restarts,
@@ -1083,11 +1050,11 @@ void HiGHSBridge::install_heuristic_callback() {
             result.objective < data_out->mip_primal_bound - 1e-6) {
           data_in->user_has_solution = true;
           data_in->user_solution = std::move(result.col_values);
-          (*solutions)++;
+          stats->heuristic_solutions++;
         }
-        if (heuristic_time_seconds) {
+        {
           const auto heuristic_t1 = std::chrono::steady_clock::now();
-          *heuristic_time_seconds +=
+          stats->heuristic_time_seconds +=
               std::chrono::duration<double>(heuristic_t1 - heuristic_t0)
                   .count();
         }
@@ -1262,39 +1229,34 @@ SolveResult HiGHSBridge::extract_result() const {
   result.tour_arcs = std::move(active_edges);
 
   // Print propagator statistics
-  if (propagator_calls_) {
-    const int64_t sweep_nodes = sweep_node_fixings_ ? *sweep_node_fixings_ : 0;
-    const int64_t sweep_total = *sweep_fixings_ + sweep_nodes;
-    const int64_t chain_nodes = chain_node_fixings_ ? *chain_node_fixings_ : 0;
-    const int64_t chain_total =
-        (chain_fixings_ ? *chain_fixings_ : 0) + chain_nodes;
+  if (stats_->propagator_calls > 0) {
+    const auto& s = *stats_;
+    const int64_t sweep_total = s.sweep_fixings + s.sweep_node_fixings;
+    const int64_t chain_total = s.chain_fixings + s.chain_node_fixings;
     const int64_t propagator_fixings = sweep_total + chain_total;
     logger_.log(
         "Propagator: calls={}  fixings={} (sweep={} [edges={} nodes={}] "
         "chain={} [edges={} nodes={}])  time={:.3f}s",
-        *propagator_calls_, propagator_fixings, sweep_total, *sweep_fixings_,
-        sweep_nodes, chain_total, *chain_fixings_, chain_nodes,
-        propagator_time_seconds_ ? *propagator_time_seconds_ : 0.0);
+        s.propagator_calls, propagator_fixings, sweep_total, s.sweep_fixings,
+        s.sweep_node_fixings, chain_total, s.chain_fixings,
+        s.chain_node_fixings, s.propagator_time_seconds);
   }
-  if (rc_fix0_count_ && (*rc_fix0_count_ > 0 || *rc_fix1_count_ > 0)) {
-    const int64_t rc_fixings = *rc_fix0_count_ + *rc_fix1_count_;
-    const int64_t rc_calls = rc_callback_runs_ ? *rc_callback_runs_ : 0;
+  if (stats_->rc_fix0_count > 0 || stats_->rc_fix1_count > 0) {
+    const auto& s = *stats_;
+    const int64_t rc_fixings = s.rc_fix0_count + s.rc_fix1_count;
     logger_.log(
         "RC fixing:  calls={}  fixings={} (edges={} nodes={})  "
         "labeling_runs={}  time={:.3f}s",
-        rc_calls, rc_fixings, *rc_fix0_count_, *rc_fix1_count_, *rc_label_runs_,
-        rc_time_seconds_ ? *rc_time_seconds_ : 0.0);
+        s.rc_callback_runs, rc_fixings, s.rc_fix0_count, s.rc_fix1_count,
+        s.rc_label_runs, s.rc_time_seconds);
   }
 
   // Print heuristic callback statistics for evaluation.
-  const int64_t heuristic_calls = heuristic_calls_ ? *heuristic_calls_ : 0;
-  const int64_t heuristic_solutions =
-      heuristic_solutions_ ? *heuristic_solutions_ : 0;
-  const double heuristic_time =
-      heuristic_time_seconds_ ? *heuristic_time_seconds_ : 0.0;
-  if (heuristic_callback_ || heuristic_calls > 0) {
+  if (heuristic_callback_ || stats_->heuristic_calls > 0) {
+    const auto& s = *stats_;
     logger_.log("Heuristic:  calls={}  solutions={}  time={:.3f}s",
-                heuristic_calls, heuristic_solutions, heuristic_time);
+                s.heuristic_calls, s.heuristic_solutions,
+                s.heuristic_time_seconds);
   }
 
   // Attach separator statistics

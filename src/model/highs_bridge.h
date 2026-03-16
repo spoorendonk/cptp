@@ -36,6 +36,32 @@ struct RCFixingSettings {
   bool fix_to_one = false;
 };
 
+/// Aggregated statistics from HiGHS callback lambdas.
+/// Single allocation shared between the bridge and its callback closures.
+struct CallbackStats {
+  // Propagator
+  int64_t propagator_fixings = 0;
+  int64_t sweep_fixings = 0;
+  int64_t chain_fixings = 0;
+  int64_t sweep_node_fixings = 0;
+  int64_t chain_node_fixings = 0;
+  int64_t ub_improvements = 0;
+  int64_t propagator_calls = 0;
+  double propagator_time_seconds = 0.0;
+
+  // RC fixing
+  int64_t rc_fix0_count = 0;
+  int64_t rc_fix1_count = 0;
+  int64_t rc_label_runs = 0;
+  int64_t rc_callback_runs = 0;
+  double rc_time_seconds = 0.0;
+
+  // Heuristic
+  int64_t heuristic_calls = 0;
+  int64_t heuristic_solutions = 0;
+  double heuristic_time_seconds = 0.0;
+};
+
 /// Wires the CPTP formulation and custom separators into HiGHS.
 class HiGHSBridge {
  public:
@@ -195,21 +221,6 @@ class HiGHSBridge {
   bool obj_is_integer_ = false;  // true if all obj coefficients are integral
   int64_t labeling_max_queue_pops_ = 0;
   RCFixingSettings rc_settings_;
-  std::shared_ptr<int64_t> rc_fix0_count_;
-  std::shared_ptr<int64_t> rc_fix1_count_;
-  std::shared_ptr<int64_t> rc_label_runs_;
-  std::shared_ptr<int64_t> rc_callback_runs_;
-  std::shared_ptr<double> rc_time_seconds_;
-
-  // Propagator statistics (shared with callback lambda)
-  std::shared_ptr<int64_t> propagator_fixings_;
-  std::shared_ptr<int64_t> sweep_fixings_;
-  std::shared_ptr<int64_t> chain_fixings_;
-  std::shared_ptr<int64_t> sweep_node_fixings_;
-  std::shared_ptr<int64_t> chain_node_fixings_;
-  std::shared_ptr<int64_t> ub_improvements_;
-  std::shared_ptr<int64_t> propagator_calls_;
-  std::shared_ptr<double> propagator_time_seconds_;
 
   // Cut statistics (updated from callback)
   mutable std::map<std::string, SeparatorStats> separator_stats_;
@@ -229,10 +240,8 @@ class HiGHSBridge {
   std::shared_ptr<std::vector<double>> cached_y_lp_;
   std::shared_ptr<std::mutex> lp_cache_mutex_;
 
-  // Heuristic callback statistics
-  std::shared_ptr<int64_t> heuristic_calls_;
-  std::shared_ptr<int64_t> heuristic_solutions_;
-  std::shared_ptr<double> heuristic_time_seconds_;
+  // Callback statistics (single allocation shared with callback lambdas)
+  std::shared_ptr<CallbackStats> stats_;
 };
 
 }  // namespace cptp
