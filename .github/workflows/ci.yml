@@ -27,7 +27,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Python package
-        run: pip install .
+        run: pip install . pytest
 
       - name: Python tests
         run: pytest tests/python/test_solver.py
