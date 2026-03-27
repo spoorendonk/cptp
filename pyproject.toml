@@ -22,3 +22,30 @@ cmake.args = ["-DCPTP_BUILD_PYTHON=ON", "-DCPTP_BUILD_TESTS=OFF"]
 cmake.minimum-version = "3.25"
 cmake.build-type = "Release"
 wheel.packages = ["python/cptp"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C901", # mccabe complexity
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
