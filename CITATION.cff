@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "cptp"
+abstract: "Branch-and-cut solver for the Capacitated Profitable Tour Problem"
+authors:
+  - family-names: Spoorendonk
+    given-names: Simon
+repository-code: "https://github.com/spoorendonk/cptp"
+license: MIT
+version: "0.1.0"
