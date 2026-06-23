@@ -291,6 +291,20 @@ def test_binary_output_has_stage_headers():
     assert "Preprocess restart:" in result.stdout
 
 
+def test_binary_version_flag():
+    """cptp-solve --version prints cptp and HiGHS versions, then exits 0."""
+    if not BIN_PATH.exists():
+        pytest.skip("cptp-solve binary not built")
+
+    result = subprocess.run(
+        [str(BIN_PATH), "--version"],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0
+    assert "cptp-solve " in result.stdout
+    assert "HiGHS " in result.stdout
+
+
 def test_binary_output_all_pairs_block_before_local_search():
     """all_pairs_bounds prints a dedicated block before local search."""
     if not BIN_PATH.exists():

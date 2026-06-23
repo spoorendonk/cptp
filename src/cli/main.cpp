@@ -163,8 +163,10 @@ static void print_usage(const char* prog) {
 // Prints the cptp-solve version (with git describe) and the bundled HiGHS
 // version, to stdout — the same stream HiGHS itself logs to.
 static void print_version() {
+  std::string highs_githash = highsGithash();
+  if (highs_githash.empty()) highs_githash = "unknown";
   std::cout << "cptp-solve " << CPTP_VERSION << " (" << CPTP_GIT_HASH << ")\n"
-            << "HiGHS " << highsVersion() << " (git hash: " << highsGithash()
+            << "HiGHS " << highsVersion() << " (git hash: " << highs_githash
             << ")\n";
 }
 
