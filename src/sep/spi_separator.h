@@ -19,6 +19,14 @@ namespace cptp::sep {
 ///        + profit(depot) + profit(i) + profit(j)
 /// The junction-node profit correction accounts for profits being
 /// double-subtracted when concatenating shortest-path segments.
+///
+/// Attribution: these are a variant of the node-precedence / conflict-graph
+/// inequalities of Garcia (2009, PhD thesis, Georgia Tech), whose validity
+/// rests on shortest-path-bound feasibility arguments with roots in the
+/// preprocessing of Aneja, Aggarwal & Nair (1983), Networks 13(2):295-302.
+/// The only cptp-specific element is computing the bound with a Held-Karp DP
+/// instead of a plain shortest path -- a tightening of a known cut, not a new
+/// inequality class.
 class SPISeparator : public Separator {
  public:
   std::string name() const override { return "SPI"; }
