@@ -1,0 +1,5 @@
+#pragma once
+
+// Populated by cmake/generate_version.cmake at build time.
+#define CPTP_VERSION "@CPTP_VERSION@"
+#define CPTP_GIT_HASH "@CPTP_GIT_DESCRIBE@"

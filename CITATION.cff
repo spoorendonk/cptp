@@ -1,11 +1,33 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it as below."
-type: software
 title: "cptp"
-abstract: "Branch-and-cut solver for the Capacitated Profitable Tour Problem"
+type: software
+message: "If you use this software, please cite it as below."
 authors:
   - family-names: Spoorendonk
     given-names: Simon
-repository-code: "https://github.com/spoorendonk/cptp"
-license: MIT
+    orcid: "https://orcid.org/0009-0007-4304-6956"
+abstract: "Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP), with a HiGHS MIP backend and custom callbacks for cut separation, domain propagation, and hyperplane branching; also solves open s-t path variants."
 version: "0.1.0"
+repository-code: "https://github.com/spoorendonk/cptp"
+url: "https://github.com/spoorendonk/cptp"
+date-released: "2026-06-23"
+license: MIT
+# doi: added after the first Zenodo release (concept DOI).
+references:
+  - type: article
+    title: "A branch-and-cut algorithm for the capacitated profitable tour problem"
+    authors:
+      - family-names: Jepsen
+        given-names: "Mads Kehlet"
+      - family-names: Petersen
+        given-names: Bjørn
+      - family-names: Spoorendonk
+        given-names: Simon
+      - family-names: Pisinger
+        given-names: David
+    journal: "Discrete Optimization"
+    volume: 14
+    start: 78
+    end: 96
+    year: 2014
+    doi: 10.1016/j.disopt.2014.08.001

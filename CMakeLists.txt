@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(cptp LANGUAGES CXX)
+project(cptp VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -36,10 +36,31 @@ target_include_directories(cptp PUBLIC src)
 target_include_directories(cptp PRIVATE ${highs_SOURCE_DIR}/highs)
 target_link_libraries(cptp PUBLIC highs)
 cptp_set_compiler_flags(cptp)
+# Embed the project version (single source of truth: project(... VERSION ...)).
+# PRIVATE so it reaches the library's own sources (model.cpp preamble) without
+# colliding with the generated version.h the CLI includes.
+target_compile_definitions(cptp PRIVATE CPTP_VERSION="${PROJECT_VERSION}")
 
 # ---------- CLI ----------
+# Regenerate version.h on every build so the embedded git hash tracks HEAD
+# without a reconfigure. configure_file is content-idempotent, so this avoids
+# spurious relinks when the hash hasn't changed.
+set(CPTP_VERSION_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h)
+add_custom_target(cptp_version ALL
+    BYPRODUCTS ${CPTP_VERSION_HEADER}
+    COMMAND ${CMAKE_COMMAND}
+        -DSRC_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+        -DCPTP_VERSION=${PROJECT_VERSION}
+        -DVERSION_IN=${CMAKE_CURRENT_SOURCE_DIR}/src/cli/version.h.in
+        -DVERSION_OUT=${CPTP_VERSION_HEADER}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_version.cmake
+    COMMENT "Generating cptp version.h"
+    VERBATIM)
+
 add_executable(cptp-solve src/cli/main.cpp)
+add_dependencies(cptp-solve cptp_version)
 target_link_libraries(cptp-solve PRIVATE cptp)
+target_include_directories(cptp-solve PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
 # ---------- Python bindings ----------
 option(CPTP_BUILD_PYTHON "Build Python bindings" OFF)

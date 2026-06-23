@@ -9,6 +9,7 @@
 #include "Highs.h"
 #include "core/io.h"
 #include "model/model.h"
+#include "version.h"
 
 static void print_usage(const char* prog) {
   // All parameter lines use a fixed 42-char left column so descriptions align.
@@ -154,7 +155,17 @@ static void print_usage(const char* prog) {
       << "  Presolve is always disabled (cptp requires stable column "
          "mapping).\n"
       << "  --highs_help                             Print all HiGHS options "
-         "and exit\n";
+         "and exit\n"
+      << "  --version                                Print cptp-solve and "
+         "HiGHS versions, then exit\n";
+}
+
+// Prints the cptp-solve version (with git describe) and the bundled HiGHS
+// version, to stdout — the same stream HiGHS itself logs to.
+static void print_version() {
+  std::cout << "cptp-solve " << CPTP_VERSION << " (" << CPTP_GIT_HASH << ")\n"
+            << "HiGHS " << highsVersion() << " (git hash: " << highsGithash()
+            << ")\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -171,6 +182,10 @@ int main(int argc, char* argv[]) {
   if (first_arg == "--highs_help") {
     Highs highs;
     highs.writeOptions("");
+    return 0;
+  }
+  if (first_arg == "--version") {
+    print_version();
     return 0;
   }
 
@@ -202,6 +217,9 @@ int main(int argc, char* argv[]) {
     } else if (arg == "--highs_help") {
       Highs highs;
       highs.writeOptions("");
+      return 0;
+    } else if (arg == "--version") {
+      print_version();
       return 0;
     } else if (arg.starts_with("--") && i + 1 < argc) {
       options.emplace_back(arg.substr(2), argv[++i]);

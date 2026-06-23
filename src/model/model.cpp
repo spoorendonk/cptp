@@ -335,7 +335,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
   }
   logger_.set_enabled(output_flag);
-  logger_.log("cptp v0.1");
+  logger_.log("cptp-solve {}", CPTP_VERSION);
 
   Highs highs;
   // Our defaults (user options can override)

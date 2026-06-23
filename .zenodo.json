@@ -1,0 +1,29 @@
+{
+  "upload_type": "software",
+  "title": "cptp: a C++23 branch-and-cut solver for the Capacitated Profitable Tour Problem",
+  "description": "Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP) following Jepsen et al. (2014), with a HiGHS MIP backend and custom callbacks for cut separation, domain propagation, and hyperplane branching. Also solves open s-t path variants.",
+  "license": "mit",
+  "creators": [
+    {
+      "name": "Spoorendonk, Simon",
+      "orcid": "0009-0007-4304-6956"
+    }
+  ],
+  "keywords": [
+    "capacitated profitable tour problem",
+    "CPTP",
+    "branch-and-cut",
+    "cutting planes",
+    "vehicle routing",
+    "prize-collecting",
+    "HiGHS",
+    "C++23"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.1016/j.disopt.2014.08.001",
+      "relation": "references",
+      "scheme": "doi"
+    }
+  ]
+}
