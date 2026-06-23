@@ -156,7 +156,7 @@ for cfg in $CONFIGS; do
         comb_stats="$(parse_sep Comb)"; spi_stats="$(parse_sep SPI)"
         ts="$(date -Iseconds)"
 
-        echo "${cfg},${name},${nodes_graph},${edges},${obj},${bound},${gap_pct},${time_s},${TIME_LIMIT},${bb_nodes},${total_cuts},${cut_rounds},${sec_stats},${rci_stats},${multistar_stats},${rglm_stats},${comb_stats},${spi_stats},${ts},${MACHINE}" >> "$OUTFILE"
+        echo "${cfg},${name},${nodes_graph},${edges},${obj},${bound},${gap_pct},${time_s},${TIME_LIMIT},${bb_nodes},${total_cuts},${cut_rounds},${sec_stats},${rci_stats},${multistar_stats},${rglm_stats},${comb_stats},${spi_stats},${ts},\"${MACHINE}\"" >> "$OUTFILE"
         printf "%-10s %-30s %12s %9s %8s\n" "$cfg" "$name" "${obj:-NA}" "${time_s:-NA}" "${bb_nodes:-NA}"
     done
 done
