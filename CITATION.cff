@@ -26,6 +26,7 @@ references:
       - family-names: Pisinger
         given-names: David
     journal: "Discrete Optimization"
+    issn: "1572-5286"
     volume: 14
     start: 78
     end: 96
