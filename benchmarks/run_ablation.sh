@@ -20,6 +20,8 @@
 # Config table (name : extra flags passed to cptp-solve):
 #   a_sec        SEC only                         --enable_rci false --enable_multistar false
 #   b_cap        + capacity cuts (default set)    (no extra flags: SEC+RCI+Multistar)
+#   b_cap_nofix  b_cap, fixing/propagation OFF    --rc_fixing off --edge_elimination false
+#                                                 --bounds_propagation false (no comb/rglm)
 #   c_combrglm   + comb + rounded GLM             --enable_comb true --enable_rglm true
 #   d_nofix      c, fixing/propagation OFF        --rc_fixing off --edge_elimination false
 #                                                 --bounds_propagation false (+ comb/rglm)
@@ -44,6 +46,7 @@ config_flags() {
     case "$1" in
         a_sec)      echo "--enable_rci false --enable_multistar false" ;;
         b_cap)      echo "" ;;
+        b_cap_nofix) echo "--rc_fixing off --edge_elimination false --bounds_propagation false" ;;
         c_combrglm) echo "--enable_comb true --enable_rglm true" ;;
         d_nofix)    echo "--enable_comb true --enable_rglm true --rc_fixing off --edge_elimination false --bounds_propagation false" ;;
         d_fix)      echo "--enable_comb true --enable_rglm true --rc_fixing adaptive" ;;
@@ -52,7 +55,7 @@ config_flags() {
         *)          echo "__UNKNOWN__" ;;
     esac
 }
-ALL_CONFIGS="a_sec b_cap c_combrglm d_nofix d_fix spi_off spi_on"
+ALL_CONFIGS="a_sec b_cap b_cap_nofix c_combrglm d_nofix d_fix spi_off spi_on"
 
 usage() { sed -n '2,/^$/s/^# \?//p' "${BASH_SOURCE[0]}"; exit "${1:-0}"; }
 
