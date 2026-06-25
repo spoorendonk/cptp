@@ -12,7 +12,7 @@ repository-code: "https://github.com/spoorendonk/cptp"
 url: "https://github.com/spoorendonk/cptp"
 date-released: "2026-06-23"
 license: MIT
-# doi: added after the first Zenodo release (concept DOI).
+doi: 10.5281/zenodo.20844234
 references:
   - type: article
     title: "A branch-and-cut algorithm for the capacitated profitable tour problem"

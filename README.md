@@ -3,8 +3,7 @@
 [![CI](https://github.com/spoorendonk/cptp/actions/workflows/ci.yml/badge.svg)](https://github.com/spoorendonk/cptp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
-<!-- DOI badge added in the post-release backfill commit:
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.XXXXXXX.svg)](https://doi.org/10.5281/zenodo.XXXXXXX) -->
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20844234.svg)](https://doi.org/10.5281/zenodo.20844234)
 
 Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP) following [Jepsen et al. (2014)](https://doi.org/10.1016/j.disopt.2014.08.001). Also solves open s–t path variants.
 
@@ -118,14 +117,11 @@ If you use this software, please cite the archived release via its Zenodo DOI.
 Machine-readable metadata lives in [`CITATION.cff`](CITATION.cff), from which
 GitHub renders a "Cite this repository" button.
 
-<!-- Filled in by the post-release backfill commit, once Zenodo has minted the DOI:
-     add the DOI badge to the header badge block above, then replace this comment
-     with the citation, e.g.:
+> Spoorendonk, S. (2026). *cptp* (v0.1.0). Zenodo. <https://doi.org/10.5281/zenodo.20844234>
 
-> Spoorendonk, S. (2026). *cptp* (v0.1.0). Zenodo. <https://doi.org/10.5281/zenodo.XXXXXXX>
-
-The concept DOI `10.5281/zenodo.XXXXXXX` always resolves to the latest release;
-the v0.1.0 version DOI is `10.5281/zenodo.YYYYYYY`. -->
+The concept DOI [`10.5281/zenodo.20844234`](https://doi.org/10.5281/zenodo.20844234)
+always resolves to the latest release; the v0.1.0 version DOI is
+[`10.5281/zenodo.20844235`](https://doi.org/10.5281/zenodo.20844235).
 
 ## License
 
