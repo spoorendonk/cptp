@@ -94,6 +94,8 @@ result = cptp.solve(
 
 See `benchmarks/` for full results and reproduction scripts.
 
+**Per-component ablation.** `benchmarks/run_ablation.sh` re-runs the solver over the benchmark sets under several cut/fixing configurations (SEC-only, capacity cuts, Comb/RGLM, reduced-cost fixing on/off, SPI on/off) and writes one row per (config, instance) to `benchmarks/ablation.csv`.
+
 ## Tests
 
 Tests use multiple threads by default (parallel separation is exercised).
