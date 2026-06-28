@@ -12,7 +12,7 @@ class gomory_hu_tree;
 namespace cptp::sep {
 
 /// Default fractional separation tolerance.
-/// Jepsen et al. (2008) found 0.4 optimal with CPLEX's built-in cuts.
+/// Jepsen et al. (2014) found 0.4 optimal with CPLEX's built-in cuts.
 /// HiGHS needs more custom cuts, so we use a lower threshold.
 inline constexpr double kDefaultFracTol = 0.1;
 

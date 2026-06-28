@@ -89,7 +89,7 @@ result = cptp.solve(
 | Set | Instances | Solved | Rate |
 |---|--:|--:|--:|
 | SPPRCLIB (45 instances, 45–262 nodes) | 45 | 45 | 100% |
-| Roberti Set 3 (31 instances, 76–200 nodes, 3600s) | 31 | 27 | 87% |
+| Roberti Set 3 (31 instances, 45–200 nodes, 3600s) | 31 | 27 | 87% |
 
 See `benchmarks/` for full results and reproduction scripts.
 
