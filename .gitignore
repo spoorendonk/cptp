@@ -5,6 +5,8 @@ __pycache__/
 benchmarks/__pycache__/
 benchmarks/.pathwyse/
 benchmarks/results/
+benchmarks/logs/
+benchmarks/*.bak
 .venv/
 .pytest_cache/
 *.egg-info/

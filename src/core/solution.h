@@ -40,6 +40,25 @@ struct SolveResult {
   int64_t total_cuts = 0;
   int64_t separation_rounds = 0;
 
+  /// Per-phase wall-clock times (seconds), accumulated on the callback thread.
+  /// Callbacks run single-threaded; their internal parallelism (parallel
+  /// separators, parallel labeling) is measured as one span per call, so these
+  /// credit the parallelism rather than summing concurrent work.
+  double separation_time_seconds = 0.0;
+  double propagator_time_seconds = 0.0;
+  double rc_time_seconds = 0.0;  // subset of propagator_time_seconds (runs inside it)
+  double heuristic_time_seconds = 0.0;  // LP-guided B&C callback only (not warm-start)
+
+  /// Domain-propagation fixings (edges from sweep/chain, plus node fixings).
+  int64_t sweep_fixings = 0;
+  int64_t chain_fixings = 0;
+  int64_t sweep_node_fixings = 0;
+  int64_t chain_node_fixings = 0;
+
+  /// Reduced-cost fixings: variables fixed to 0 and to 1.
+  int64_t rc_fix0_count = 0;
+  int64_t rc_fix1_count = 0;
+
   bool is_optimal() const { return status == Status::Optimal; }
   bool has_solution() const {
     return status == Status::Optimal || status == Status::Feasible ||

@@ -305,6 +305,21 @@ int main(int argc, char* argv[]) {
       }
     }
 
+    // Structured per-phase / fixing-frequency block for the benchmark pipeline.
+    // Fixed format (one metric per token) so a regex parser is trivial; printed
+    // unconditionally, whether or not the values are zero.
+    std::cout << std::fixed << std::setprecision(3);
+    std::cout << "Phases: separation " << result.separation_time_seconds
+              << "s  propagation " << result.propagator_time_seconds
+              << "s  heuristic " << result.heuristic_time_seconds
+              << "s  rc-fixing " << result.rc_time_seconds << "s\n";
+    std::cout << "Propagation: sweep " << result.sweep_fixings << "  chain "
+              << result.chain_fixings << "  node "
+              << (result.sweep_node_fixings + result.chain_node_fixings)
+              << "\n";
+    std::cout << "RC-fixing: fix0 " << result.rc_fix0_count << "  fix1 "
+              << result.rc_fix1_count << "\n";
+
     return result.has_solution() ? 0 : 1;
   } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << "\n";

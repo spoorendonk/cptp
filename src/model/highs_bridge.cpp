@@ -252,6 +252,11 @@ void HiGHSBridge::install_separators() {
         return;
     }
 
+    // Separation-phase wall-clock starts here: covers support-graph and
+    // Gomory-Hu construction plus the parallel separators and pooling. Only
+    // accumulated for the main MIP, at the end of the round.
+    const auto sep_t0 = std::chrono::steady_clock::now();
+
     const auto& sol = lpRelaxation.getSolution();
     const int32_t m = num_edges_;
     const int32_t n = num_nodes_;
@@ -446,6 +451,8 @@ void HiGHSBridge::install_separators() {
         total_cuts_++;
         round_added++;
       }
+      separation_time_seconds_ +=
+          std::chrono::duration<double>(clock::now() - sep_t0).count();
     }
     separation_rounds_++;
   });
@@ -1264,6 +1271,25 @@ SolveResult HiGHSBridge::extract_result() const {
   result.separator_stats = separator_stats_;
   result.total_cuts = total_cuts_;
   result.separation_rounds = separation_rounds_;
+
+  // Attach per-phase callback statistics for the CLI/benchmark pipeline.
+  {
+    const auto& s = *stats_;
+    // Separation phase wall-clock: one span per round around the parallel
+    // separators (see install_separators), so it credits the parallelism rather
+    // than summing concurrent per-family times. The per-family *_time columns
+    // still report each family's own (parallel) time.
+    result.separation_time_seconds = separation_time_seconds_;
+    result.propagator_time_seconds = s.propagator_time_seconds;
+    result.rc_time_seconds = s.rc_time_seconds;
+    result.heuristic_time_seconds = s.heuristic_time_seconds;
+    result.sweep_fixings = s.sweep_fixings;
+    result.chain_fixings = s.chain_fixings;
+    result.sweep_node_fixings = s.sweep_node_fixings;
+    result.chain_node_fixings = s.chain_node_fixings;
+    result.rc_fix0_count = s.rc_fix0_count;
+    result.rc_fix1_count = s.rc_fix1_count;
+  }
 
   return result;
 }

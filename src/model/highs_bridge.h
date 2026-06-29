@@ -228,6 +228,11 @@ class HiGHSBridge {
   mutable int64_t total_cuts_ = 0;
   mutable int64_t separation_rounds_ = 0;
   mutable int64_t separation_calls_ = 0;  // total callback invocations
+  // Wall-clock time of the separation phase: one span per round covering
+  // support-graph/Gomory-Hu construction, the parallel separators, and cut
+  // pooling (not the sum of per-family times, which would overcount the
+  // parallelism). Accumulated across rounds on the callback thread.
+  mutable double separation_time_seconds_ = 0.0;
 
   // Heuristic callback: LP-guided primal heuristic
   bool heuristic_callback_ = true;
