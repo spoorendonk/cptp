@@ -291,8 +291,12 @@ for inst in "${INSTANCES[@]}"; do
         warmstart_time="$(round3 "$(echo "$ws_line" | awk '{gsub(/s$/,"",$5); print $5}')")"
     fi
 
-    # lp_iters fields are not printed by cptp-solve stdout; leave blank
-    lp_iters="" lp_iters_strongbr="" lp_iters_sep="" lp_iters_heur=""
+    # LP iterations: total, plus the strong-branching / separation / heuristic
+    # split, printed by cptp-solve under the "LP iterations" summary line.
+    lp_iters="$(echo "$output" | grep -oP 'LP iterations\s+\K[0-9]+')" || lp_iters=""
+    lp_iters_strongbr="$(echo "$output" | grep -oP '[0-9]+(?= \(strong br\.\))')" || lp_iters_strongbr=""
+    lp_iters_sep="$(echo "$output" | grep -oP '[0-9]+(?= \(separation\))')" || lp_iters_sep=""
+    lp_iters_heur="$(echo "$output" | grep -oP '[0-9]+(?= \(heuristics\))')" || lp_iters_heur=""
 
     # Parse per-phase times and fixing frequencies from the structured block.
     phases="$(echo "$output" | grep -P '^Phases:')" || phases=""
