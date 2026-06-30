@@ -187,7 +187,7 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
        branch_hyper, rf_pairs = std::move(rf_pairs),
        clusters = std::move(clusters)](const HighsMipSolver& mipsolver)
           -> std::vector<HighsUserSeparator::HyperplaneCandidate> {
-        const auto& sol = mipsolver.mipdata_->lp.getSolution().col_value;
+        const auto& sol = mipsolver.mipdata_->getLp().getSolution().col_value;
         std::vector<HighsUserSeparator::HyperplaneCandidate> result;
 
         if (branch_hyper == "pairs" || branch_hyper == "all") {

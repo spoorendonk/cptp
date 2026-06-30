@@ -127,7 +127,7 @@ int HighsUserSeparator::evaluateCandidates(
     const HighsMipSolver& mipsolver,
     int depth) {
   const auto& cfg = strong_branch_config_;
-  const auto& sol = mipsolver.mipdata_->lp.getSolution().col_value;
+  const auto& sol = mipsolver.mipdata_->getLp().getSolution().col_value;
 
   // Compute LHS and fractionality for each candidate, filter fractional ones
   struct CandInfo {
@@ -139,7 +139,7 @@ int HighsUserSeparator::evaluateCandidates(
   std::vector<CandInfo> fractional;
 
   // Get reduced costs for dual pre-scoring
-  const auto& col_dual = mipsolver.mipdata_->lp.getLpSolver()
+  const auto& col_dual = mipsolver.mipdata_->getLp().getLpSolver()
                               .getSolution().col_dual;
 
   for (int c = 0; c < (int)candidates.size(); ++c) {
@@ -175,7 +175,7 @@ int HighsUserSeparator::evaluateCandidates(
   int best_idx = -1;
 
   bool do_sb = (cfg.max_depth > 0 && depth <= cfg.max_depth);
-  auto& lp = mipsolver.mipdata_->lp;
+  auto& lp = mipsolver.mipdata_->getLp();
   auto& lpsolver = lp.getLpSolver();
   double parentObj = lp.getObjective();
 
