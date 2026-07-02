@@ -117,9 +117,18 @@ if(_found2 EQUAL -1)
     # Original: while (... && !lp.getFractionalIntegers().empty() && ...)
     # New: while (... && (!lp.getFractionalIntegers().empty() || HighsUserSeparator::hasCallback()) && ...)
     string(REPLACE
-      "!lp.getFractionalIntegers().empty() &&\n         stall < 3"
-      "(!lp.getFractionalIntegers().empty() || HighsUserSeparator::hasCallback()) &&\n         stall < 3"
+      "!getLp().getFractionalIntegers().empty() && stall < 3"
+      "(!getLp().getFractionalIntegers().empty() || HighsUserSeparator::hasCallback()) && stall < 3"
       CONTENT2 "${CONTENT2}")
+
+    # Fail loudly if the root-separation anchor did not match: a silent no-op
+    # here drops lazy connectivity cuts at the root and yields wrong optima.
+    string(FIND "${CONTENT2}" "HighsUserSeparator::hasCallback" _rootsep_ok)
+    if(_rootsep_ok EQUAL -1)
+        message(FATAL_ERROR
+          "HighsMipSolverData.cpp: root-separation anchor did not match — "
+          "lazy constraints would be dropped at the root. Update the patch anchor.")
+    endif()
 
     # Patch addIncumbent(): reject solutions that fail user feasibility check.
     # For sub-MIPs (with presolve on), expand reduced solution to original space
@@ -163,12 +172,22 @@ if(_found3 EQUAL -1)
       "#include \"mip/HighsSearch.h\"\n#include \"mip/HighsUserPropagator.h\""
       CONTENT3 "${CONTENT3}")
 
-    # Insert propagator call after HighsRedcostFixing::propagateRedCost
-    # and before localdom.propagate()
+    # Insert propagator call after HighsRedcostFixing::propagateRedCost and
+    # before localdom.propagate(). The 1.15 call is multi-line (parallel-MIP
+    # signature), so anchor on its closing arguments to stay unique.
     string(REPLACE
-      "HighsRedcostFixing::propagateRedCost(mipsolver, localdom, *lp);\n            localdom.propagate();"
-      "HighsRedcostFixing::propagateRedCost(mipsolver, localdom, *lp);\n            HighsUserPropagator::propagate(localdom, mipsolver, *lp);\n            localdom.propagate();"
+      "mipworker.getPseudocost(), getUpperLimit());\n            localdom.propagate();"
+      "mipworker.getPseudocost(), getUpperLimit());\n            HighsUserPropagator::propagate(localdom, mipsolver, *lp);\n            localdom.propagate();"
       CONTENT3 "${CONTENT3}")
+
+    # Fail loudly if the anchor did not match: a silent no-op here disables the
+    # propagator entirely (calls=0), which is a correctness regression.
+    string(FIND "${CONTENT3}" "HighsUserPropagator::propagate(" _call_ok)
+    if(_call_ok EQUAL -1)
+        message(FATAL_ERROR
+          "HighsSearch.cpp: propagator call anchor did not match — "
+          "the user propagator would be disabled. Update the patch anchor.")
+    endif()
 
     file(WRITE "${MIP_DIR}/HighsSearch.cpp" "${CONTENT3}")
     message(STATUS "Applied HighsUserPropagator patch to HighsSearch.cpp")
