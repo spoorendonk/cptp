@@ -111,6 +111,14 @@ class HiGHSBridge {
   /// Set upper bound for edge elimination preprocessing.
   void set_upper_bound(double ub) { upper_bound_ = ub; }
 
+  /// Warm-start solution injected through the user-solution callback (on the
+  /// after-setup query) instead of HiGHS setSolution(). Routing it through the
+  /// callback avoids a HiGHS 1.15 setSolution()+MipUserSolution interaction
+  /// that corrupts the search and produces wrong proven optima.
+  void set_warm_start_solution(std::vector<double> sol) {
+    warm_start_solution_ = std::move(sol);
+  }
+
   /// Configure Lagrangian reduced-cost fixing in the propagator.
   void set_rc_fixing(RCFixingSettings settings) { rc_settings_ = settings; }
   void set_labeling_max_queue_pops(int64_t limit) {
@@ -197,6 +205,7 @@ class HiGHSBridge {
   std::unordered_map<std::string, int32_t> per_separator_max_cuts_;
   bool submip_separation_ = true;  // SEC separation at sub-MIP root node
   double upper_bound_ = std::numeric_limits<double>::infinity();
+  std::vector<double> warm_start_solution_;
   bool edge_elimination_enabled_ = true;
   bool edge_elimination_nodes_ = true;
   bool bounds_propagation_ = true;

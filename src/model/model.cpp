@@ -1237,14 +1237,22 @@ SolveResult Model::solve(const SolverOptions& options) {
   bridge.install_heuristic_callback();
 
   if (heu_ws && has_feasible_heuristic(warm_start)) {
-    // Pass heuristic solution to HiGHS (skip if heuristics disabled)
-    HighsSolution start;
-    start.value_valid = true;
-    start.col_value = std::move(warm_start.col_values);
+    std::vector<double> start_values = std::move(warm_start.col_values);
     HighsInt num_cols = highs.getNumCol();
-    while (static_cast<HighsInt>(start.col_value.size()) < num_cols)
-      start.col_value.push_back(0.0);
-    highs.setSolution(start);
+    while (static_cast<HighsInt>(start_values.size()) < num_cols)
+      start_values.push_back(0.0);
+    if (heu_lpg) {
+      // When the LP-guided heuristic is active it injects solutions through
+      // kCallbackMipUserSolution. Combining that with HiGHS setSolution()
+      // corrupts the 1.15 search (wrong proven optima), so route the
+      // warm-start through the same callback instead of setSolution().
+      bridge.set_warm_start_solution(std::move(start_values));
+    } else {
+      HighsSolution start;
+      start.value_valid = true;
+      start.col_value = std::move(start_values);
+      highs.setSolution(start);
+    }
   }
 
   const double pre_highs_seconds = timer.elapsed_seconds();

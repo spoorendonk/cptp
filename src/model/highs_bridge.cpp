@@ -1018,9 +1018,16 @@ void HiGHSBridge::install_heuristic_callback() {
           return;
         }
 
-        // Skip the initial query after setup (pre-solve heuristic already ran)
+        // On the after-setup query, inject the warm-start solution (if any)
+        // through this callback rather than via HiGHS setSolution(): the
+        // latter, combined with later kCallbackMipUserSolution injections,
+        // corrupts the 1.15 search and yields wrong proven optima.
         if (data_out->external_solution_query_origin ==
             kExternalMipSolutionQueryOriginAfterSetup) {
+          if (!warm_start_solution_.empty()) {
+            data_in->user_has_solution = true;
+            data_in->user_solution = warm_start_solution_;
+          }
           return;
         }
 
