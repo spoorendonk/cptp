@@ -432,6 +432,16 @@ if(_found_search EQUAL -1)
       "    if (nodestack.back().hp_data_idx < 0) {\n    assert(\n        (branchchg.boundtype == HighsBoundType::kLower &&\n         branchchg.boundval >= nodestack.back().branchingdecision.boundval) ||\n        (branchchg.boundtype == HighsBoundType::kUpper &&\n         branchchg.boundval <= nodestack.back().branchingdecision.boundval));\n    assert(branchchg.boundtype == nodestack.back().branchingdecision.boundtype);\n    assert(branchchg.column == nodestack.back().branchingdecision.column);\n    }"
       SEARCH_CONTENT "${SEARCH_CONTENT}")
 
+    # Fail loudly if the hyperplane-branching insertion did not match: 5a adds
+    # the NodeData fields, so a silent no-op of 5b still compiles but disables
+    # hyperplane branching (falls back to variable branching with no signal).
+    string(FIND "${SEARCH_CONTENT}" "HighsUserSeparator::evaluateCandidates" _hp_ok)
+    if(_hp_ok EQUAL -1)
+        message(FATAL_ERROR
+          "HighsSearch.cpp: hyperplane-branching anchor did not match — "
+          "the feature would be silently disabled. Update the patch anchor.")
+    endif()
+
     file(WRITE "${MIP_DIR}/HighsSearch.cpp" "${SEARCH_CONTENT}")
     message(STATUS "Applied hyperplane branching patch to HighsSearch.cpp")
 else()

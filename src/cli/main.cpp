@@ -307,7 +307,10 @@ int main(int argc, char* argv[]) {
 
     // Structured per-phase / fixing-frequency block for the benchmark pipeline.
     // Fixed format (one metric per token) so a regex parser is trivial; printed
-    // unconditionally, whether or not the values are zero.
+    // unconditionally, whether or not the values are zero. The prefixes
+    // ("Propagation:"/"RC-fixing:") intentionally differ from the logger's
+    // ("Propagator:"/"RC fixing:") so the ^-anchored benchmark parsers in
+    // benchmarks/run_*.sh match this block unambiguously — keep them distinct.
     std::cout << std::fixed << std::setprecision(3);
     std::cout << "Phases: separation " << result.separation_time_seconds
               << "s  propagation " << result.propagator_time_seconds

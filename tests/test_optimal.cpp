@@ -73,3 +73,14 @@ TEST_CASE("A-n69-k9-42 optimal", "[optimal][slow]") {
   REQUIRE(r.is_optimal());
   REQUIRE_THAT(r.objective, WithinAbs(-43290.0, 1.0));
 }
+
+// Regression guard for the HiGHS 1.15 warm-start reroute: feeding the
+// warm-start via setSolution() together with the LP-guided user-solution
+// callback corrupted branch-and-bound on this instance and proved a wrong
+// optimum (-30950 instead of -32628). Runs the default heu_ws + heu_lpg path.
+TEST_CASE("M-n101-k10-97 optimal (warm-start reroute)", "[optimal][slow]") {
+  auto r =
+      solve_instance("benchmarks/instances/spprclib/M-n101-k10-97.sppcc", 120);
+  REQUIRE(r.is_optimal());
+  REQUIRE_THAT(r.objective, WithinAbs(-32628.0, 1.0));
+}
