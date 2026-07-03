@@ -371,6 +371,34 @@ TEST_CASE("Model path: heu_ws=false still keeps optimal objective",
   }
 }
 
+// With heu_lpg=false the warm-start is fed via highs.setSolution() (not the
+// user-solution callback). Default-config tests now exercise the callback
+// route, so this keeps the setSolution fallback branch covered. Same instance
+// as the heu_ws=false case above (known optimum -13).
+TEST_CASE("Model path: heu_lpg=false warm-start (setSolution) stays optimal",
+          "[model][path][regression]") {
+  cptp::Model model;
+
+  std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3},
+                                   {1, 2}, {1, 3}, {2, 3}};
+  std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+
+  model.set_graph(4, edges, costs);
+  model.set_source(0);
+  model.set_target(3);
+  std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+  std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+  model.set_profits(profits);
+  model.add_capacity_resource(demands, 7.0);
+
+  auto opts = quiet;
+  opts.push_back({"heu_lpg", "false"});  // heu_ws defaults true -> setSolution
+  auto result = model.solve(opts);
+
+  REQUIRE(result.has_solution());
+  REQUIRE_THAT(result.objective, WithinAbs(-13.0, 1e-6));
+}
+
 TEST_CASE(
     "Model path: async incumbent proof handoff does not stop without solution",
     "[model][path][regression][async_interrupt]") {

@@ -84,3 +84,33 @@ TEST_CASE("M-n101-k10-97 optimal (warm-start reroute)", "[optimal][slow]") {
   REQUIRE(r.is_optimal());
   REQUIRE_THAT(r.objective, WithinAbs(-32628.0, 1.0));
 }
+
+// The benchmark pipeline reads per-phase timings and fixing counts from
+// SolveResult; verify they are wired and internally consistent. Runs with
+// fixing + propagation enabled so the propagator/rc-fixing paths are active.
+TEST_CASE("SolveResult per-phase stats are populated and consistent",
+          "[optimal][slow]") {
+  auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n45-k6-54.sppcc");
+  cptp::Model model;
+  model.set_problem(std::move(prob));
+  cptp::SolverOptions opts = {{"output_flag", "false"},
+                              {"time_limit", "60"},
+                              {"rc_fixing", "adaptive"},
+                              {"bounds_propagation", "true"}};
+  auto r = model.solve(opts);
+  REQUIRE(r.is_optimal());
+  // Wall-clock phase timers are non-negative.
+  REQUIRE(r.separation_time_seconds >= 0.0);
+  REQUIRE(r.propagator_time_seconds >= 0.0);
+  REQUIRE(r.heuristic_time_seconds >= 0.0);
+  REQUIRE(r.rc_time_seconds >= 0.0);
+  // Separation runs on every CPTP solve, so its timer must have advanced.
+  REQUIRE(r.separation_time_seconds > 0.0);
+  // rc-fixing runs inside the propagator, so its time is a subset of it.
+  REQUIRE(r.rc_time_seconds <= r.propagator_time_seconds + 1e-9);
+  // Fixing counters are counts (non-negative).
+  REQUIRE(r.sweep_fixings >= 0);
+  REQUIRE(r.chain_fixings >= 0);
+  REQUIRE(r.rc_fix0_count >= 0);
+  REQUIRE(r.rc_fix1_count >= 0);
+}
