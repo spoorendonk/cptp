@@ -7,10 +7,10 @@ authors:
     given-names: Simon
     orcid: "https://orcid.org/0009-0007-4304-6956"
 abstract: "Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP), with a HiGHS MIP backend and custom callbacks for cut separation, domain propagation, and hyperplane branching; also solves open s-t path variants."
-version: "0.1.0"
+version: "0.2.0"
 repository-code: "https://github.com/spoorendonk/cptp"
 url: "https://github.com/spoorendonk/cptp"
-date-released: "2026-06-23"
+date-released: "2026-07-05"
 license: MIT
 doi: 10.5281/zenodo.20844234
 references:
