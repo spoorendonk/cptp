@@ -137,10 +137,11 @@ rules actually carry the branch-and-cut, measured by ablation.
 }
 ```
 
-The archived code is on Zenodo. **v0.1.0 is [10.5281/zenodo.20844235](https://doi.org/10.5281/zenodo.20844235)**; the
+The archived code is on Zenodo. **v0.2.0 is [10.5281/zenodo.21205088](https://doi.org/10.5281/zenodo.21205088)**; the
 concept DOI [10.5281/zenodo.20844234](https://doi.org/10.5281/zenodo.20844234) always resolves to the latest version.
 Cite the version DOI when reproducibility matters — it pins one tree and one set
-of benchmark results:
+of benchmark results. The earlier v0.1.0 is
+[10.5281/zenodo.20844235](https://doi.org/10.5281/zenodo.20844235).
 
 ```bibtex
 @software{spoorendonk2026cptpsoftware,
@@ -148,9 +149,9 @@ of benchmark results:
                Profitable Tour Problem},
   author    = {Spoorendonk, Simon},
   year      = {2026},
-  version   = {0.1.0},
-  doi       = {10.5281/zenodo.20844235},
-  url       = {https://doi.org/10.5281/zenodo.20844235}
+  version   = {0.2.0},
+  doi       = {10.5281/zenodo.21205088},
+  url       = {https://doi.org/10.5281/zenodo.21205088}
 }
 ```
 

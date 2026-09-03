@@ -14,7 +14,15 @@ repository-code: "https://github.com/spoorendonk/cptp"
 url: "https://github.com/spoorendonk/cptp"
 date-released: "2026-07-05"
 license: MIT
-doi: 10.5281/zenodo.20844234
+# Version DOI: this exact release. Matches `version:` above, so it is the one to
+# cite for reproducibility.
+doi: 10.5281/zenodo.21205088
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.20844234
+    description: >-
+      Concept DOI, resolving to the latest version of the software. Cite this
+      when you mean "cptp" rather than one specific release.
 preferred-citation:
   type: article
   title: "An open, reproducible branch-and-cut for the capacitated profitable tour problem: a component study"
