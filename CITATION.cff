@@ -1,7 +1,9 @@
 cff-version: 1.2.0
 title: "cptp"
 type: software
-message: "If you use this software, please cite it as below."
+message: >-
+  If you use this software, please cite both the software (this file) and the
+  accompanying paper (listed under preferred-citation).
 authors:
   - family-names: Spoorendonk
     given-names: Simon
@@ -13,6 +15,17 @@ url: "https://github.com/spoorendonk/cptp"
 date-released: "2026-07-05"
 license: MIT
 doi: 10.5281/zenodo.20844234
+preferred-citation:
+  type: article
+  title: "An open, reproducible branch-and-cut for the capacitated profitable tour problem: a component study"
+  authors:
+    - family-names: Spoorendonk
+      given-names: Simon
+      orcid: "https://orcid.org/0009-0007-4304-6956"
+  year: 2026
+  journal: "arXiv preprint arXiv:2607.04497"
+  url: "https://arxiv.org/abs/2607.04497"
+  doi: 10.48550/arXiv.2607.04497
 references:
   - type: article
     title: "A branch-and-cut algorithm for the capacitated profitable tour problem"

@@ -3,9 +3,12 @@
 [![CI](https://github.com/spoorendonk/cptp/actions/workflows/ci.yml/badge.svg)](https://github.com/spoorendonk/cptp/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
+[![arXiv](https://img.shields.io/badge/arXiv-2607.04497-b31b1b.svg)](https://arxiv.org/abs/2607.04497)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20844234.svg)](https://doi.org/10.5281/zenodo.20844234)
 
 Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP) following [Jepsen et al. (2014)](https://doi.org/10.1016/j.disopt.2014.08.001). Also solves open s–t path variants.
+
+The implementation and the component study accompanying: S. Spoorendonk, [An open, reproducible branch-and-cut for the capacitated profitable tour problem: a component study](https://arxiv.org/abs/2607.04497), arXiv:2607.04497, 2026.
 
 ## Mathematical Model (Tour)
 
@@ -111,17 +114,47 @@ ctest --test-dir build --output-on-failure
 pytest tests/python/test_solver.py
 ```
 
-## Citation
+## Citing
 
-If you use this software, please cite the archived release via its Zenodo DOI.
-Machine-readable metadata lives in [`CITATION.cff`](CITATION.cff), from which
-GitHub renders a "Cite this repository" button.
+Cite the paper for the result and the archived release for the code.
+[`CITATION.cff`](CITATION.cff) carries both in machine-readable form — GitHub's
+"Cite this repository" button reads it.
 
-> Spoorendonk, S. (2026). *cptp* (v0.1.0). Zenodo. <https://doi.org/10.5281/zenodo.20844234>
+The paper is **arXiv:2607.04497**, <https://arxiv.org/abs/2607.04497> — a
+component study of this solver: which cuts, bounds, propagation and branching
+rules actually carry the branch-and-cut, measured by ablation.
 
-The concept DOI [`10.5281/zenodo.20844234`](https://doi.org/10.5281/zenodo.20844234)
-always resolves to the latest release; the v0.1.0 version DOI is
-[`10.5281/zenodo.20844235`](https://doi.org/10.5281/zenodo.20844235).
+```bibtex
+@misc{spoorendonk2026cptp,
+  title        = {An open, reproducible branch-and-cut for the capacitated
+                  profitable tour problem: a component study},
+  author       = {Spoorendonk, Simon},
+  year         = {2026},
+  eprint       = {2607.04497},
+  archivePrefix= {arXiv},
+  primaryClass = {math.OC},
+  url          = {https://arxiv.org/abs/2607.04497}
+}
+```
+
+The archived code is on Zenodo. **v0.1.0 is [10.5281/zenodo.20844235](https://doi.org/10.5281/zenodo.20844235)**; the
+concept DOI [10.5281/zenodo.20844234](https://doi.org/10.5281/zenodo.20844234) always resolves to the latest version.
+Cite the version DOI when reproducibility matters — it pins one tree and one set
+of benchmark results:
+
+```bibtex
+@software{spoorendonk2026cptpsoftware,
+  title     = {cptp: a C++23 branch-and-cut solver for the Capacitated
+               Profitable Tour Problem},
+  author    = {Spoorendonk, Simon},
+  year      = {2026},
+  version   = {0.1.0},
+  doi       = {10.5281/zenodo.20844235},
+  url       = {https://doi.org/10.5281/zenodo.20844235}
+}
+```
+
+Cite a tag or a DOI, never `main`: the benchmark tables move with the code.
 
 ## License
 
