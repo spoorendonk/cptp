@@ -23,7 +23,7 @@ rm -rf build
 ```
 
 ```build
-cmake -B build && cmake --build build -j$(nproc)
+cmake -B build $(command -v ninja >/dev/null && echo -G Ninja) && cmake --build build -j$(nproc)
 ```
 
 ```test
@@ -31,10 +31,14 @@ ctest --test-dir build --output-on-failure -j$(nproc)
 ```
 
 `pre-push` runs these three blocks as the local CI (`## Tooling and Gates`),
-so they must need nothing but the build's own dependencies. `test` is
-therefore C++ only: pytest is not a build dependency, and a fence ending in
-`pytest` exits 127 wherever it is absent, which blocks every push. Run the
-Python suite yourself on Python or binding changes (below).
+so they must need nothing but the build's own dependencies. The Python suite
+runs inside ctest as `python_tests` when configure finds a Python 3.10+ with
+pytest, numpy and its development headers (`.venv/bin` first, so `uv sync`
+is enough): the bindings are then built too, and the tests import the
+freshly built extension, not the venv's editable snapshot. Without one,
+configure warns and the gate skips them. The lint tests (label `lint`) are
+also ctest tests; `ctest --test-dir build -LE lint` skips them while
+iterating.
 
 Run a single C++ test by name:
 ```bash
@@ -44,10 +48,13 @@ Run a single C++ test by name:
 Python: each clone makes its own venv with `uv sync` (it compiles the
 extension, HiGHS included, so on a shared machine run it under the build
 budget, e.g. `CMAKE_BUILD_PARALLEL_LEVEL=4`). Never symlink another checkout's
-`.venv`. pytest is not a project dependency, so add it per run:
+`.venv`. pytest, ruff and mypy are in the `dev` dependency group, which
+`uv sync` installs. Any `uv run` re-syncs, and so recompiles the extension,
+after a change to `pyproject.toml`; the pre-commit hook runs `uv run` too, so
+run `uv sync` under the build budget before committing such a change.
 ```bash
-uv run --with pytest pytest tests/python
-uv run --with pytest pytest tests/python/test_solver.py::test_name -x
+uv run pytest tests/python
+uv run pytest tests/python/test_solver.py::test_name -x
 ```
 The editable install snapshots the compiled extension, and uv decides whether
 to rebuild from `pyproject.toml` alone, so after a change to C++ or
@@ -86,15 +93,16 @@ Git hooks live in `.githooks/` and are tracked; they came from
 no gates until `wcp init` (or `git config core.hooksPath .githooks`) is run in
 it**.
 
-- **pre-commit** — `clang-format --dry-run -Werror` over every tracked C++ file. It checks, it does not reformat: run the format command above and commit again. For the Python half it runs `uv run ruff` and `uv run mypy` over the tree, and skips each, saying so, when the venv does not have it (ruff and mypy are not project dependencies). Without a `.venv`, `uv run` first builds one, compiling the extension inside the hook: run `uv sync` once beforehand. No tests at commit.
+- **pre-commit** — `clang-format --dry-run -Werror` over every tracked C++ file. It checks, it does not reformat: run the format command above and commit again. For the Python half it runs `uv run ruff` and `uv run mypy` over the tree (both from the `dev` group), and skips each, saying so, when the venv does not have it. Without a `.venv`, `uv run` first builds one, compiling the extension inside the hook: run `uv sync` once beforehand. No tests at commit.
 - **commit-msg** — Conventional Commits, subject ≤72 chars. `fixup!`/`squash!`/`amend!` pass through so `git rebase --autosquash` works, and `type!:` marks a breaking change (both local edits to wcp's hook).
-- **pre-push** — refuses merge commits on the trunk and a HEAD without a review receipt (`## Self-Review`), then runs the clean/build/test blocks above in a fresh worktree of the pushed commit. That build fetches and compiles HiGHS from scratch, so a push takes minutes. A push changing only `*.md` files (except the root CLAUDE.md, whose blocks are the CI's commands), the root LICENSE or the root `.gitignore` skips the build.
+- **pre-push** — refuses merge commits and unsquashed `fixup!`/`squash!`/`amend!` commits on the trunk (the latter a local edit to wcp's hook) and a HEAD without a review receipt (`## Self-Review`), then runs the clean/build/test blocks above in a fresh worktree of the pushed commit. That build fetches and compiles HiGHS from scratch, so a push takes minutes. A push changing only `*.md` files (except the root CLAUDE.md, whose blocks are the CI's commands), the root LICENSE or the root `.gitignore` skips the build.
+- **Lint as ctest tests** (`cmake/Lint.cmake`, label `lint`) — `clang_format` checks every tracked C++ file, and `clang_tidy:<path>` tidies one translation unit with warnings as errors, one test per source the build compiles (library, CLI, every test program, and `python/bindings.cpp` when the bindings are built). `.clang-tidy`'s `HeaderFilterRegex` reports on this repository's headers only. `src/model/model.cpp` and `src/model/highs_bridge.cpp` are tidied as C++20, because a HiGHS header they include is ill-formed for clang under C++23 (`cmake/Lint.cmake`); the headers they reach therefore cannot use C++23-only library features such as `std::ranges::iota`. The lint tests need clang tools 18 or newer; a missing or older one is a configure warning that drops its tests. pre-push runs the suite without the `clang_tidy:` tests, then only those the push reaches, through its cached runner; the build block uses Ninja when it is installed, which gives the runner the dependency log it needs for that (without Ninja it runs every `clang_tidy:` test, uncached). A `build/` configured with another generator makes the build block abort with "generator does not match": run the `clean` block first. A changed header is tidied at push only through a one-line stub unit, not through its includers, and there is no scheduled full lint: **after a header change, run the whole lint yourself** (`ctest --test-dir build -L lint -j4`). PR CI (`ci.yml`) excludes the lint tests.
+- **CI** — `.github/workflows/receipt.yml` checks every push to main for its review receipt and for unsquashed fixups, so a `--no-verify` push is caught there. `ci.yml` builds and tests pull requests only.
 
 The old hooks also auto-formatted and re-staged (with shfmt and ruff too),
-applied safe clang-tidy fixes, ran the suite at commit, and ran clang-tidy,
-shellcheck, ruff complexity and mypy as push warnings. wcp's pre-push lints
-only through ctest tests named `clang_tidy:<path>`, which this repo does not
-register, so **run clang-tidy yourself on C++ changes**.
+applied safe clang-tidy fixes and ran the suite at commit, and ran shellcheck
+as a push warning; those are gone. ruff (its complexity rule included) and
+mypy run at commit.
 
 `.clang-format` asks for `Standard: Latest`: the earlier `Standard: c++23` is
 not a value clang-format accepts, so it refused to read the file and the tree

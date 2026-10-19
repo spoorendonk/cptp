@@ -1,5 +1,6 @@
 if(NOT SKBUILD)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
+    # FindPython, not FindPython3: nanobind builds against `Python::Module`.
+    find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
     include(FetchContent)
     FetchContent_Declare(nanobind
         GIT_REPOSITORY https://github.com/wjakob/nanobind.git

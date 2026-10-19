@@ -20,7 +20,9 @@ jobs:
         run: cmake --build build -j$(nproc)
 
       - name: C++ tests
-        run: ctest --test-dir build --output-on-failure
+        # The lint tests are the local gate's, run with the tools CLAUDE.md
+        # vouches for; the runner's unpinned clang tools are not those.
+        run: ctest --test-dir build --output-on-failure -LE lint
 
       - uses: actions/setup-python@v5
         with:

@@ -62,14 +62,44 @@ add_dependencies(cptp-solve cptp_version)
 target_link_libraries(cptp-solve PRIVATE cptp)
 target_include_directories(cptp-solve PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
 
-# ---------- Python bindings ----------
-option(CPTP_BUILD_PYTHON "Build Python bindings" OFF)
-if(CPTP_BUILD_PYTHON)
-    add_subdirectory(python)
-endif()
-
 # ---------- Tests ----------
 option(CPTP_BUILD_TESTS "Build tests" ON)
+
+# ---------- Python bindings ----------
+option(CPTP_BUILD_PYTHON "Build Python bindings" OFF)
+
+# The binding tests run in ctest (python_tests) when an interpreter with pytest
+# and numpy is found, `.venv/bin` first, and the bindings are then built here
+# too. Skipped with a warning otherwise: the C++ build must not depend on a
+# Python setup. NO_CACHE, so a .venv made after a first configure is picked up.
+# Top level only, and never inside a wheel build (SKBUILD).
+set(CPTP_PYTHON_TESTS OFF)
+if(CPTP_BUILD_TESTS AND PROJECT_IS_TOP_LEVEL AND NOT SKBUILD)
+    find_program(CPTP_TEST_PYTHON NAMES python3 python
+        HINTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin" NAMES_PER_DIR NO_CACHE)
+    if(CPTP_TEST_PYTHON)
+        # 3.10+: the package uses `X | None` annotations.
+        execute_process(COMMAND ${CPTP_TEST_PYTHON} -c
+            "import sys, numpy, pytest; sys.exit(sys.version_info < (3, 10))"
+            RESULT_VARIABLE CPTP_TEST_PYTHON_OK OUTPUT_QUIET ERROR_QUIET)
+    endif()
+    if(CPTP_TEST_PYTHON AND CPTP_TEST_PYTHON_OK EQUAL 0)
+        # The interpreter python/ builds the bindings for.
+        set(Python_EXECUTABLE ${CPTP_TEST_PYTHON})
+        find_package(Python COMPONENTS Interpreter Development.Module)
+    endif()
+    if(Python_FOUND)
+        set(CPTP_PYTHON_TESTS ON)
+    else()
+        message(WARNING "No Python 3.10+ with pytest, numpy and its development "
+                        "headers found: python_tests is not registered, so the "
+                        "gate skips the binding tests. Install with: uv sync")
+    endif()
+endif()
+
+if(CPTP_BUILD_PYTHON OR CPTP_PYTHON_TESTS)
+    add_subdirectory(python)
+endif()
 if(CPTP_BUILD_TESTS)
     # FetchHiGHS sets BUILD_TESTING=OFF in cache for third-party builds.
     # Re-enable testing in this directory scope without forcing global cache.
@@ -127,4 +157,38 @@ if(CPTP_BUILD_TESTS)
     add_executable(test_heuristic_stage_ub tests/test_heuristic_stage_ub.cpp)
     target_link_libraries(test_heuristic_stage_ub PRIVATE cptp Catch2::Catch2WithMain)
     cptp_set_compiler_flags(test_heuristic_stage_ub)
+
+    if(CPTP_PYTHON_TESTS)
+        add_test(NAME python_tests
+            COMMAND ${CMAKE_COMMAND}
+                -DPYTHON=${CPTP_TEST_PYTHON}
+                -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+                -DSTAGE_DIR=${CMAKE_CURRENT_BINARY_DIR}/python_stage
+                -DEXTENSION=$<TARGET_FILE:cptp_python>
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_pytest.cmake)
+    endif()
+endif()
+
+# Lint gates. Top level only: they read our compile_commands.json, which only a
+# top-level build writes, and a consumer's ctest is not ours to lint.
+if(CPTP_BUILD_TESTS AND PROJECT_IS_TOP_LEVEL)
+    # Every translation unit the build compiles; tidying them reaches every
+    # header. See cmake/Lint.cmake.
+    set(CPTP_LINT_UNITS)
+    foreach(target IN ITEMS cptp cptp-solve cptp_tests cptp_tests_extra
+            test_instances test_formulation test_heuristic_stage_ub cptp_python)
+        if(NOT TARGET ${target})
+            continue()
+        endif()
+        get_target_property(target_sources ${target} SOURCES)
+        get_target_property(target_dir ${target} SOURCE_DIR)
+        foreach(src IN LISTS target_sources)
+            if(src MATCHES "\\.cpp$")
+                cmake_path(ABSOLUTE_PATH src BASE_DIRECTORY ${target_dir})
+                cmake_path(RELATIVE_PATH src BASE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+                list(APPEND CPTP_LINT_UNITS ${src})
+            endif()
+        endforeach()
+    endforeach()
+    include(cmake/Lint.cmake)
 endif()
