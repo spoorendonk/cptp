@@ -6,7 +6,8 @@ Usage:
     python benchmarks/compare_pathwyse.py benchmarks/instances/spprclib/B-n45-k6-54.sppcc
 
     # Supply expected optimal explicitly:
-    python benchmarks/compare_pathwyse.py benchmarks/instances/spprclib/B-n45-k6-54.sppcc --expected -74278
+    python benchmarks/compare_pathwyse.py \
+        benchmarks/instances/spprclib/B-n45-k6-54.sppcc --expected -74278
 
     # Run all instances in a directory:
     python benchmarks/compare_pathwyse.py benchmarks/instances/spprclib/
@@ -28,6 +29,7 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 SCRIPT_DIR = Path(__file__).parent
 DEFAULT_PATHWYSE_BIN = SCRIPT_DIR / ".pathwyse" / "bin" / "pathwyse"
@@ -38,7 +40,7 @@ def _euc2d(x1: float, y1: float, x2: float, y2: float) -> int:
     return int(math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2) + 0.5)
 
 
-def parse_tsplib(filepath: Path) -> dict:
+def parse_tsplib(filepath: Path) -> dict[str, Any]:  # noqa: C901 - one linear pass per TSPLIB section
     """Parse a TSPLIB-format .sppcc or .vrp file.
 
     Handles two variants:
@@ -54,8 +56,12 @@ def parse_tsplib(filepath: Path) -> dict:
     current_section = None
 
     section_names = {
-        "NODE_COORD_SECTION", "DEMAND_SECTION", "DEPOT_SECTION",
-        "EDGE_WEIGHT_SECTION", "NODE_WEIGHT_SECTION", "PROFIT_SECTION",
+        "NODE_COORD_SECTION",
+        "DEMAND_SECTION",
+        "DEPOT_SECTION",
+        "EDGE_WEIGHT_SECTION",
+        "NODE_WEIGHT_SECTION",
+        "PROFIT_SECTION",
     }
 
     for raw_line in lines:
@@ -77,7 +83,7 @@ def parse_tsplib(filepath: Path) -> dict:
         if pos != -1:
             key_candidate = line[:pos].strip()
             if re.fullmatch(r"[A-Z][A-Z_0-9]*", key_candidate):
-                header[key_candidate] = line[pos + 1:].strip()
+                header[key_candidate] = line[pos + 1 :].strip()
                 current_section = None
                 continue
 
@@ -94,10 +100,10 @@ def parse_tsplib(filepath: Path) -> dict:
 
     if "EDGE_WEIGHT_SECTION" in sections:
         # Full matrix (SPPRCLIB .sppcc)
-        numbers = []
+        numbers: list[float] = []
         for line in sections["EDGE_WEIGHT_SECTION"]:
             numbers.extend(float(x) for x in line.split())
-        assert len(numbers) == n * n, f"Expected {n*n} edge weights, got {len(numbers)}"
+        assert len(numbers) == n * n, f"Expected {n * n} edge weights, got {len(numbers)}"
         for i in range(n):
             for j in range(n):
                 dist[i][j] = numbers[i * n + j]
@@ -110,8 +116,7 @@ def parse_tsplib(filepath: Path) -> dict:
         for i in range(n):
             for j in range(n):
                 if i != j:
-                    dist[i][j] = _euc2d(coords[i][0], coords[i][1],
-                                         coords[j][0], coords[j][1])
+                    dist[i][j] = _euc2d(coords[i][0], coords[i][1], coords[j][0], coords[j][1])
 
     # Node weights / profits (PathWyse node_cost = -profit)
     # SPPRCLIB: NODE_WEIGHT_SECTION has costs (positive = cost, negative = profit)
@@ -121,7 +126,7 @@ def parse_tsplib(filepath: Path) -> dict:
     node_costs: list[float] = [0.0] * n
 
     if "NODE_WEIGHT_SECTION" in sections:
-        values = []
+        values: list[float] = []
         for line in sections["NODE_WEIGHT_SECTION"]:
             values.extend(float(x) for x in line.split())
         for i in range(n):
@@ -168,7 +173,7 @@ def parse_tsplib(filepath: Path) -> dict:
     }
 
 
-def _needs_scaling(data: dict) -> int:
+def _needs_scaling(data: dict[str, Any]) -> int:
     """Determine scale factor for PathWyse (which uses integer arithmetic).
 
     Returns 1000 if fractional values are present, 1 otherwise.
@@ -183,7 +188,7 @@ def _needs_scaling(data: dict) -> int:
     return 1
 
 
-def convert_to_pathwyse(data: dict, output_path: Path) -> int:
+def convert_to_pathwyse(data: dict[str, Any], output_path: Path) -> int:
     """Write PathWyse native format from parsed TSPLIB data.
 
     Returns the scale factor applied (1 if none). PathWyse uses int costs,
@@ -258,13 +263,15 @@ def load_optimal_csv(instance_path: Path) -> float | None:
     return None
 
 
-def run_pathwyse(pw_bin: Path, instance_path: Path, time_limit: int) -> dict:
+def run_pathwyse(pw_bin: Path, instance_path: Path, time_limit: int) -> dict[str, Any]:
     """Run PathWyse on an instance and parse the result."""
-    result = {"status": "ERROR", "obj": None, "tour": [], "time": None}
+    result: dict[str, Any] = {"status": "ERROR", "obj": None, "tour": [], "time": None}
     try:
         proc = subprocess.run(
             [str(pw_bin), str(instance_path)],
-            capture_output=True, text=True, timeout=time_limit + 10,
+            capture_output=True,
+            text=True,
+            timeout=time_limit + 10,
             cwd=str(pw_bin.parent.parent),
         )
         output = proc.stdout + proc.stderr
@@ -300,8 +307,9 @@ def convert_instance(instance_path: Path, tmpdir: Path) -> tuple[Path, int]:
     return instance_path, 1
 
 
-def run_single(pw_bin: Path, instance_path: Path, expected: float | None,
-               time_limit: int, verbose: bool) -> dict:
+def run_single(
+    pw_bin: Path, instance_path: Path, expected: float | None, time_limit: int, verbose: bool
+) -> dict[str, Any]:
     """Run PathWyse on one instance, return result dict."""
     tmpdir = Path(tempfile.mkdtemp(prefix="cptp_pw_"))
     try:
@@ -309,6 +317,7 @@ def run_single(pw_bin: Path, instance_path: Path, expected: float | None,
         result = run_pathwyse(pw_bin, pw_instance, time_limit=time_limit)
     finally:
         import shutil
+
         shutil.rmtree(tmpdir, ignore_errors=True)
 
     # Unscale the objective
@@ -346,14 +355,21 @@ def run_single(pw_bin: Path, instance_path: Path, expected: float | None,
     return result
 
 
-def main():
+def main() -> None:  # noqa: C901 - argument handling and the report loop
     parser = argparse.ArgumentParser(
         description="Run PathWyse on instance(s) and verify against known optimal values."
     )
     parser.add_argument("instance", help="Instance file or directory of instances")
-    parser.add_argument("--expected", type=float, help="Expected optimal value (overrides optimal.csv lookup)")
+    parser.add_argument(
+        "--expected", type=float, help="Expected optimal value (overrides optimal.csv lookup)"
+    )
     parser.add_argument("--pathwyse-bin", help="Path to PathWyse binary")
-    parser.add_argument("--time-limit", type=int, default=120, help="Time limit per instance in seconds (default: 120)")
+    parser.add_argument(
+        "--time-limit",
+        type=int,
+        default=120,
+        help="Time limit per instance in seconds (default: 120)",
+    )
     parser.add_argument("--csv", help="Append results to CSV file")
     parser.add_argument("--machine", help="Machine description (e.g. 'AMD Ryzen 9 3950X 32T')")
     args = parser.parse_args()
@@ -419,7 +435,10 @@ def main():
 
     if batch:
         print("-" * 73)
-        print(f"{matches} match, {mismatches} mismatch, {errors} timeout/error out of {len(instances)}")
+        print(
+            f"{matches} match, {mismatches} mismatch, {errors} timeout/error "
+            f"out of {len(instances)}"
+        )
 
     # Write CSV if requested
     if args.csv:
@@ -437,7 +456,9 @@ def main():
         with open(csv_path, "a", newline="") as f:
             writer = csv.writer(f)
             if write_header:
-                writer.writerow(["instance", "set", "obj", "time_s", "status", "timestamp", "machine"])
+                writer.writerow(
+                    ["instance", "set", "obj", "time_s", "status", "timestamp", "machine"]
+                )
             for r in results:
                 # Infer set from path
                 inst_path = Path(args.instance)
@@ -447,15 +468,17 @@ def main():
                     inst_set = "spprclib"
                 else:
                     inst_set = "unknown"
-                writer.writerow([
-                    r["instance"],
-                    inst_set,
-                    f"{r['obj']:.6g}" if r["obj"] is not None else "",
-                    f"{r['time']:.3f}" if r["time"] is not None else "",
-                    r["status"],
-                    timestamp,
-                    machine,
-                ])
+                writer.writerow(
+                    [
+                        r["instance"],
+                        inst_set,
+                        f"{r['obj']:.6g}" if r["obj"] is not None else "",
+                        f"{r['time']:.3f}" if r["time"] is not None else "",
+                        r["status"],
+                        timestamp,
+                        machine,
+                    ]
+                )
 
     if mismatches > 0:
         sys.exit(1)

@@ -1,7 +1,9 @@
 """High-level convenience wrapper around the C++ CPTP solver."""
 
 import numpy as np
-from cptp._cptp import Model as _Model, SolveResult
+
+from cptp._cptp import Model as _Model
+from cptp._cptp import SolveResult
 
 
 def solve(

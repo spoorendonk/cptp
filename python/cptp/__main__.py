@@ -3,13 +3,13 @@
 import argparse
 import sys
 
-from cptp._cptp import Model, load as _load
+from cptp._cptp import Model, Problem
+from cptp._cptp import load as _load
 
 
-def _rebuild_with_endpoints(problem, source, target):
+def _rebuild_with_endpoints(problem: Problem, source: int, target: int) -> Problem:
     """Rebuild a Problem with overridden source/target."""
     import numpy as np
-    from cptp._cptp import Problem
 
     return Problem(
         num_nodes=problem.num_nodes,
@@ -24,7 +24,7 @@ def _rebuild_with_endpoints(problem, source, target):
     )
 
 
-def main(argv=None):
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cptp",
         description="Branch-and-cut solver for the Capacitated Profitable Tour Problem",
@@ -32,7 +32,9 @@ def main(argv=None):
     parser.add_argument("instance", help="Path to instance file (.txt, .sppcc, or .vrp)")
     parser.add_argument("--source", type=int, default=None, help="Override source node")
     parser.add_argument("--target", type=int, default=None, help="Override target node")
-    parser.add_argument("--time_limit", type=float, default=600.0, help="Time limit in seconds (default: 600)")
+    parser.add_argument(
+        "--time_limit", type=float, default=600.0, help="Time limit in seconds (default: 600)"
+    )
     parser.add_argument("--threads", type=int, default=1, help="Number of threads")
     parser.add_argument("--verbose", action="store_true", help="Show HiGHS output")
 
@@ -51,7 +53,9 @@ def main(argv=None):
         problem = _rebuild_with_endpoints(problem, src, tgt)
 
     mode = "tour" if problem.is_tour else f"path {problem.source} -> {problem.target}"
-    print(f"Instance: {problem.name} ({problem.num_nodes} nodes, {problem.num_edges} edges, {mode})")
+    print(
+        f"Instance: {problem.name} ({problem.num_nodes} nodes, {problem.num_edges} edges, {mode})"
+    )
 
     model = Model()
     model.set_problem(problem)
@@ -78,18 +82,25 @@ def main(argv=None):
         path_str = " -> ".join(str(n) for n in result.tour)
         label = "Tour" if problem.is_tour else "Path"
         print(f"\n{label}: {path_str}")
-        print(f"Objective: {result.objective}  Bound: {result.bound}  "
-              f"Gap: {result.gap * 100:.2f}%  Time: {result.time_seconds:.2f}s  Nodes: {result.nodes}")
+        print(
+            f"Objective: {result.objective}  Bound: {result.bound}  "
+            f"Gap: {result.gap * 100:.2f}%  Time: {result.time_seconds:.2f}s  Nodes: {result.nodes}"
+        )
 
         if result.total_cuts > 0:
             print(f"User cuts: {result.total_cuts} ({result.separation_rounds} rounds)")
             for name, stats in result.separator_stats.items():
-                print(f"  {name:<10} {stats.cuts_added:>6} cuts {stats.rounds_called:>6} rounds {stats.time_seconds:>8.3f}s")
+                print(
+                    f"  {name:<10} {stats.cuts_added:>6} cuts {stats.rounds_called:>6} rounds "
+                    f"{stats.time_seconds:>8.3f}s"
+                )
 
         return 0
     else:
-        print(f"\nNo feasible solution found (status: {result.status.name}, "
-              f"time: {result.time_seconds:.2f}s, nodes: {result.nodes})")
+        print(
+            f"\nNo feasible solution found (status: {result.status.name}, "
+            f"time: {result.time_seconds:.2f}s, nodes: {result.nodes})"
+        )
         return 1
 
 

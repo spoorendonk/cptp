@@ -76,8 +76,12 @@ result = model.solve([("time_limit", "60")])
 
 # Or build from arrays
 result = cptp.solve(
-    num_nodes=4, edges=edges, edge_costs=costs,
-    profits=profits, demands=demands, capacity=10.0,
+    num_nodes=4,
+    edges=edges,
+    edge_costs=costs,
+    profits=profits,
+    demands=demands,
+    capacity=10.0,
 )
 ```
 

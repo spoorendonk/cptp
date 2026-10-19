@@ -21,15 +21,12 @@ DATA_DIR = REPO_ROOT / "tests" / "data"
     os.environ.get("CPTP_RUN_LOCAL_INSTALL_TEST") != "1",
     reason="Set CPTP_RUN_LOCAL_INSTALL_TEST=1 to run local install smoke test.",
 )
-def test_local_editable_install_and_use(tmp_path: Path):
+def test_local_editable_install_and_use(tmp_path: Path) -> None:
     """Create a venv, pip install -e ., and run a tiny API smoke check."""
     venv_dir = tmp_path / "venv"
     subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True, timeout=120)
 
-    if os.name == "nt":
-        py_exe = venv_dir / "Scripts" / "python.exe"
-    else:
-        py_exe = venv_dir / "bin" / "python"
+    py_exe = venv_dir / "Scripts" / "python.exe" if os.name == "nt" else venv_dir / "bin" / "python"
 
     pip_env = dict(os.environ)
     pip_env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
@@ -50,7 +47,7 @@ def test_local_editable_install_and_use(tmp_path: Path):
     smoke = textwrap.dedent(
         f"""
         from cptp import load, Model, has_highs
-        prob = load(r"{DATA_DIR / 'tiny4.txt'}")
+        prob = load(r"{DATA_DIR / "tiny4.txt"}")
         model = Model()
         model.set_problem(prob)
         print("has_highs", has_highs)

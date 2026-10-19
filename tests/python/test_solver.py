@@ -6,9 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-
-import cptp
-from cptp import Model, Problem, SolveResult, Status, SeparatorStats, load, solve
+from cptp import Model, Problem, SeparatorStats, Status, load, solve
 
 DATA_DIR = Path(__file__).parent.parent / "data"
 BIN_PATH = Path(__file__).resolve().parents[2] / "build" / "cptp-solve"
@@ -17,7 +15,8 @@ OPTS = [("time_limit", "30"), ("output_flag", "false")]
 
 # ---------- Model.set_graph() API ----------
 
-def test_model_basic():
+
+def test_model_basic() -> None:
     """Tour with set_graph: 3 nodes, visits 2 profitable ones."""
     model = Model()
     edges = np.array([[0, 1], [1, 0], [0, 2], [2, 0], [1, 2], [2, 1]], dtype=np.int32)
@@ -35,7 +34,7 @@ def test_model_basic():
     assert result.objective <= 0.0
 
 
-def test_model_negative_costs():
+def test_model_negative_costs() -> None:
     """Tour with negative edge costs."""
     model = Model()
     edges = np.array([[0, 1], [1, 0], [0, 2], [2, 0], [1, 2], [2, 1]], dtype=np.int32)
@@ -51,7 +50,7 @@ def test_model_negative_costs():
     assert result.objective < 0.0
 
 
-def test_model_st_path():
+def test_model_st_path() -> None:
     """s-t path mode via set_source/set_target."""
     model = Model()
     edges = np.array([[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]], dtype=np.int32)
@@ -71,7 +70,8 @@ def test_model_st_path():
 
 # ---------- load() + set_problem() ----------
 
-def test_load_numeric_tour():
+
+def test_load_numeric_tour() -> None:
     """Load numeric tour instance and solve via set_problem."""
     prob = load(str(DATA_DIR / "tiny4.txt"))
     assert prob.num_nodes == 4
@@ -86,7 +86,7 @@ def test_load_numeric_tour():
     assert result.objective == pytest.approx(-11.0)
 
 
-def test_load_numeric_path():
+def test_load_numeric_path() -> None:
     """Load numeric s-t path instance and solve."""
     prob = load(str(DATA_DIR / "tiny4_path.txt"))
     assert not prob.is_tour
@@ -100,7 +100,7 @@ def test_load_numeric_path():
     assert result.tour[-1] == prob.target
 
 
-def test_load_tsplib():
+def test_load_tsplib() -> None:
     """Load TSPLIB .vrp instance."""
     prob = load(str(DATA_DIR / "tiny3.vrp"))
     assert prob.num_nodes > 0
@@ -114,7 +114,8 @@ def test_load_tsplib():
 
 # ---------- Problem class ----------
 
-def test_problem_numpy_accessors():
+
+def test_problem_numpy_accessors() -> None:
     """Problem vector accessors return numpy arrays (zero-copy views)."""
     prob = load(str(DATA_DIR / "tiny4.txt"))
 
@@ -136,7 +137,7 @@ def test_problem_numpy_accessors():
     assert edges.shape == (prob.num_edges, 2)
 
 
-def test_problem_constructor():
+def test_problem_constructor() -> None:
     """Build a Problem from Python and round-trip through the solver."""
     edges = np.array([[0, 1], [0, 2], [1, 2]], dtype=np.int32)
     costs = np.array([5.0, 3.0, 4.0])
@@ -144,9 +145,15 @@ def test_problem_constructor():
     demands = np.array([0.0, 2.0, 3.0])
 
     prob = Problem(
-        num_nodes=3, edges=edges, edge_costs=costs,
-        profits=profits, demands=demands,
-        capacity=5.0, source=0, target=0, name="test",
+        num_nodes=3,
+        edges=edges,
+        edge_costs=costs,
+        profits=profits,
+        demands=demands,
+        capacity=5.0,
+        source=0,
+        target=0,
+        name="test",
     )
     assert prob.num_nodes == 3
     assert prob.num_edges == 3
@@ -163,7 +170,8 @@ def test_problem_constructor():
 
 # ---------- SolveResult numpy + stats ----------
 
-def test_result_numpy_tour():
+
+def test_result_numpy_tour() -> None:
     """SolveResult.tour is a numpy int32 array."""
     prob = load(str(DATA_DIR / "tiny4.txt"))
     model = Model()
@@ -178,7 +186,7 @@ def test_result_numpy_tour():
     assert result.tour_arcs.dtype == np.int32
 
 
-def test_result_stats():
+def test_result_stats() -> None:
     """SolveResult exposes cut statistics."""
     prob = load(str(DATA_DIR / "tiny4.txt"))
     model = Model()
@@ -199,7 +207,7 @@ def test_result_stats():
         assert stats.time_seconds >= 0.0
 
 
-def test_status_enum():
+def test_status_enum() -> None:
     """Status enum values are accessible."""
     assert Status.Optimal != Status.Error
     assert Status.Feasible != Status.Infeasible
@@ -208,7 +216,8 @@ def test_status_enum():
 
 # ---------- solve() convenience wrapper ----------
 
-def test_solve_wrapper_tour():
+
+def test_solve_wrapper_tour() -> None:
     """High-level solve() function for a tour."""
     edges = np.array([[0, 1], [1, 0], [0, 2], [2, 0], [1, 2], [2, 1]], dtype=np.int32)
     result = solve(
@@ -226,7 +235,7 @@ def test_solve_wrapper_tour():
     assert isinstance(result.tour, np.ndarray)
 
 
-def test_solve_wrapper_path():
+def test_solve_wrapper_path() -> None:
     """High-level solve() with source != target."""
     edges = np.array([[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]], dtype=np.int32)
     result = solve(
@@ -247,37 +256,61 @@ def test_solve_wrapper_path():
 
 # ---------- CLI (__main__) ----------
 
-def test_cli_tour():
+
+def test_cli_tour() -> None:
     """python -m cptp on a tour instance."""
     result = subprocess.run(
         [sys.executable, "-m", "cptp", str(DATA_DIR / "tiny4.txt")],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0
     assert "Tour:" in result.stdout
 
 
-def test_cli_path_override():
+def test_cli_path_override() -> None:
     """python -m cptp with --source/--target override."""
     result = subprocess.run(
-        [sys.executable, "-m", "cptp", str(DATA_DIR / "tiny4.txt"),
-         "--source", "0", "--target", "3"],
-        capture_output=True, text=True, timeout=60,
+        [
+            sys.executable,
+            "-m",
+            "cptp",
+            str(DATA_DIR / "tiny4.txt"),
+            "--source",
+            "0",
+            "--target",
+            "3",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0
     assert "Path:" in result.stdout
 
 
-def test_binary_output_has_stage_headers():
+def test_binary_output_has_stage_headers() -> None:
     """cptp-solve prints the expected stage headers."""
     if not BIN_PATH.exists():
         pytest.skip("cptp-solve binary not built")
 
     result = subprocess.run(
-        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
-         "--time_limit", "10", "--threads", "1", "--random_seed", "0",
-         "--output_flag", "true"],
-        capture_output=True, text=True, timeout=60,
+        [
+            str(BIN_PATH),
+            str(DATA_DIR / "tiny4.txt"),
+            "--time_limit",
+            "10",
+            "--threads",
+            "1",
+            "--random_seed",
+            "0",
+            "--output_flag",
+            "true",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0
     assert "Running HiGHS " in result.stdout
@@ -291,31 +324,45 @@ def test_binary_output_has_stage_headers():
     assert "Preprocess restart:" in result.stdout
 
 
-def test_binary_version_flag():
+def test_binary_version_flag() -> None:
     """cptp-solve --version prints cptp and HiGHS versions, then exits 0."""
     if not BIN_PATH.exists():
         pytest.skip("cptp-solve binary not built")
 
     result = subprocess.run(
         [str(BIN_PATH), "--version"],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0
     assert "cptp-solve " in result.stdout
     assert "HiGHS " in result.stdout
 
 
-def test_binary_output_all_pairs_block_before_local_search():
+def test_binary_output_all_pairs_block_before_local_search() -> None:
     """all_pairs_bounds prints a dedicated block before local search."""
     if not BIN_PATH.exists():
         pytest.skip("cptp-solve binary not built")
 
     result = subprocess.run(
-        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
-         "--time_limit", "10", "--threads", "1", "--random_seed", "0",
-         "--all_pairs_bounds", "true",
-         "--output_flag", "true"],
-        capture_output=True, text=True, timeout=60,
+        [
+            str(BIN_PATH),
+            str(DATA_DIR / "tiny4.txt"),
+            "--time_limit",
+            "10",
+            "--threads",
+            "1",
+            "--random_seed",
+            "0",
+            "--all_pairs_bounds",
+            "true",
+            "--output_flag",
+            "true",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0
     assert "Preprocess:" in result.stdout
@@ -324,16 +371,27 @@ def test_binary_output_all_pairs_block_before_local_search():
     assert "Local search:" in result.stdout
 
 
-def test_binary_output_propagator_summary_format():
+def test_binary_output_propagator_summary_format() -> None:
     """Propagator summary uses sweep+chain fixings and no UB-improvements field."""
     if not BIN_PATH.exists():
         pytest.skip("cptp-solve binary not built")
 
     result = subprocess.run(
-        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
-         "--time_limit", "10", "--threads", "1", "--random_seed", "0",
-         "--output_flag", "true"],
-        capture_output=True, text=True, timeout=60,
+        [
+            str(BIN_PATH),
+            str(DATA_DIR / "tiny4.txt"),
+            "--time_limit",
+            "10",
+            "--threads",
+            "1",
+            "--random_seed",
+            "0",
+            "--output_flag",
+            "true",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0
     assert "Propagator:" in result.stdout
@@ -341,26 +399,45 @@ def test_binary_output_propagator_summary_format():
     assert "UB improvements" not in result.stdout
 
 
-def test_binary_legacy_aliases_rejected():
+def test_binary_legacy_aliases_rejected() -> None:
     """Removed legacy aliases are not silently accepted."""
     if not BIN_PATH.exists():
         pytest.skip("cptp-solve binary not built")
 
     legacy_flags = [
-        "--all_pairs_propagation", "--heuristic_callback",
-        "--heuristic_strategy", "--heuristic_budget_ms",
-        "--submip_separation", "--disable_heuristics",
+        "--all_pairs_propagation",
+        "--heuristic_callback",
+        "--heuristic_strategy",
+        "--heuristic_budget_ms",
+        "--submip_separation",
+        "--disable_heuristics",
         "--max_cuts_per_separator",
-        "--min_violation_sec", "--min_violation_rci",
-        "--min_violation_multistar", "--min_violation_comb",
-        "--min_violation_rglm", "--min_violation_spi",
+        "--min_violation_sec",
+        "--min_violation_rci",
+        "--min_violation_multistar",
+        "--min_violation_comb",
+        "--min_violation_rglm",
+        "--min_violation_spi",
     ]
     for flag in legacy_flags:
         result = subprocess.run(
-            [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
-             "--time_limit", "10", "--threads", "1", "--random_seed", "0",
-             "--output_flag", "true", flag, "1"],
-            capture_output=True, text=True, timeout=60,
+            [
+                str(BIN_PATH),
+                str(DATA_DIR / "tiny4.txt"),
+                "--time_limit",
+                "10",
+                "--threads",
+                "1",
+                "--random_seed",
+                "0",
+                "--output_flag",
+                "true",
+                flag,
+                "1",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         assert result.returncode == 0, f"{flag} caused non-zero exit"
         assert "HiGHS rejected option" in result.stdout, (
@@ -368,19 +445,39 @@ def test_binary_legacy_aliases_rejected():
         )
 
 
-def test_binary_settings_nondefault_params():
+def test_binary_settings_nondefault_params() -> None:
     """Settings line reports rc_fixing, cut families, and branching sub-params."""
     if not BIN_PATH.exists():
         pytest.skip("cptp-solve binary not built")
 
     result = subprocess.run(
-        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
-         "--time_limit", "10", "--threads", "1", "--random_seed", "42",
-         "--rc_fixing", "off", "--enable_rglm", "true",
-         "--enable_sec", "false", "--max_cuts_rci", "5",
-         "--branch_hyper", "sb", "--branch_hyper_sb_max_depth", "3",
-         "--output_flag", "true"],
-        capture_output=True, text=True, timeout=60,
+        [
+            str(BIN_PATH),
+            str(DATA_DIR / "tiny4.txt"),
+            "--time_limit",
+            "10",
+            "--threads",
+            "1",
+            "--random_seed",
+            "42",
+            "--rc_fixing",
+            "off",
+            "--enable_rglm",
+            "true",
+            "--enable_sec",
+            "false",
+            "--max_cuts_rci",
+            "5",
+            "--branch_hyper",
+            "sb",
+            "--branch_hyper_sb_max_depth",
+            "3",
+            "--output_flag",
+            "true",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0
     settings_line = ""
@@ -397,16 +494,27 @@ def test_binary_settings_nondefault_params():
     assert "branch_hyper_sb_max_depth=3" in settings_line
 
 
-def test_binary_output_flag_false_is_silent():
+def test_binary_output_flag_false_is_silent() -> None:
     """cptp-solve with output_flag=false prints no informational output."""
     if not BIN_PATH.exists():
         pytest.skip("cptp-solve binary not built")
 
     result = subprocess.run(
-        [str(BIN_PATH), str(DATA_DIR / "tiny4.txt"),
-         "--time_limit", "10", "--threads", "1", "--random_seed", "0",
-         "--output_flag", "false"],
-        capture_output=True, text=True, timeout=60,
+        [
+            str(BIN_PATH),
+            str(DATA_DIR / "tiny4.txt"),
+            "--time_limit",
+            "10",
+            "--threads",
+            "1",
+            "--random_seed",
+            "0",
+            "--output_flag",
+            "false",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
     )
     assert result.returncode == 0
     # output_flag=false suppresses HiGHS + solver internal logging

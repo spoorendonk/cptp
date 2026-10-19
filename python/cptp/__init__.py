@@ -1,13 +1,13 @@
 from cptp._cptp import (
+    # Solver API
+    Model,
     # Core types
     Problem,
     SeparatorStats,
     SolveResult,
     Status,
-    load,
-    # Solver API
-    Model,
     has_highs,
+    load,
 )
 from cptp.solver import solve
 
