@@ -1,5 +1,5 @@
 #!/bin/sh
-# wcp: pre-push base=c4f9e3c64b56
+# wcp: pre-push base=a8b7e8bb7b96
 # Linear history on the trunk, then the review receipt.
 #
 # A real file in this repository, not a shim — see the note in `commit-msg` for
@@ -330,7 +330,10 @@ fi
 # wherever that is) is what makes its build cheap, not a kept build directory.
 # Submodules are checked out, and `.venv/bin` (the pinned tools) of this
 # checkout, or of the main checkout from a linked worktree, is put first on
-# PATH.
+# PATH; the first of them holding a Python is the blocks' `Python3_ROOT_DIR`
+# (and `Python_ROOT_DIR`), with `VIRTUAL_ENV` and `CONDA_PREFIX` unset, so a
+# CMake build finds that interpreter rather than one the caller had active
+# (#228).
 #
 # **Lint only what the push changed.** A C++ project registers clang-tidy as
 # one ctest test per source, named `clang_tidy:<path from the repository
@@ -2117,12 +2120,25 @@ local_ci() {
 	# `pre-commit`: the worktree's own `.venv` may be missing, or hold only what
 	# `uv run` installed there.
 	tools=''
+	main_venv=''
 	if common=$(git rev-parse --git-common-dir 2>/dev/null) &&
 		common=$(CDPATH='' cd -- "$common" 2>/dev/null && pwd) &&
 		[ "${common%/.git}" != "$common" ] && [ -d "${common%/.git}/.venv/bin" ]; then
-		tools="${common%/.git}/.venv/bin:"
+		main_venv="${common%/.git}/.venv"
+		tools="$main_venv/bin:"
 	fi
 	[ ! -d "$top/.venv/bin" ] || tools="$top/.venv/bin:$tools"
+	# The interpreter a build binds to (#228): the first of those with a
+	# Python. CMake's FindPython prefers an active virtualenv or conda env to
+	# its hints and PATH, so one the caller happened to have active would
+	# otherwise win: those are unset and the venv is the hint. Not exported
+	# as VIRTUAL_ENV, which `uv pip` would install into from the worktree.
+	venv=''
+	if [ -x "$top/.venv/bin/python" ]; then
+		venv="$top/.venv"
+	elif [ -n "$main_venv" ] && [ -x "$main_venv/bin/python" ]; then
+		venv=$main_venv
+	fi
 	CI_SRC=$(cd "$src" && pwd -P)
 	CI_LOGICAL_SRC=$src
 	CI_TIMINGS="$work/timings"
@@ -2201,6 +2217,12 @@ local_ci() {
 			*) unset -f ctest ;;
 			esac
 			PATH="$tools$PATH"
+			if [ -n "$venv" ]; then
+				Python_ROOT_DIR=$venv
+				Python3_ROOT_DIR=$venv
+				export Python_ROOT_DIR Python3_ROOT_DIR
+				unset VIRTUAL_ENV CONDA_PREFIX
+			fi
 			cd "$src"
 			unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
 			eval "$block"
