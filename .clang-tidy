@@ -87,5 +87,6 @@ CheckOptions:
 WarningsAsErrors: ''
 # This repository's own headers only: FetchContent's (HiGHS, Catch2, nanobind)
 # sit under the build tree, and Catch2's own sources live in a `src/catch2/`.
+# A new directory under src/ must be added here, or its headers go unchecked.
 HeaderFilterRegex: '/(src/(cli|core|heuristic|model|parallel|preprocess|sep|util)|tests|python)/[^/]+$'
 FormatStyle: file

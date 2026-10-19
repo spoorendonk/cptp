@@ -2,7 +2,8 @@
 # ctest test (CMakeLists.txt). The package is staged from the sources and the
 # freshly built `_cptp` module, so the tests never see a stale extension.
 #
-# `python -S` with the interpreter's site-packages on PYTHONPATH: numpy and
+# `python -S` with the directories site.py would add on PYTHONPATH (a
+# Debian python's dist-packages and the user site among them): numpy and
 # pytest import as usual, but no `.pth` file runs, so the editable install
 # `uv sync` puts in .venv (whose import hook is consulted before PYTHONPATH,
 # and serves the checkout's snapshot of the extension) cannot shadow the
@@ -21,7 +22,7 @@ file(COPY "${EXTENSION}" DESTINATION "${STAGE_DIR}/cptp")
 
 execute_process(
     COMMAND "${PYTHON}" -c
-        "import sysconfig; print(sysconfig.get_path('purelib')); print(sysconfig.get_path('platlib'))"
+        "import site; print(*site.getsitepackages(), *([site.getusersitepackages()] if site.ENABLE_USER_SITE else []), sep='\\n')"
     OUTPUT_VARIABLE site_dirs
     OUTPUT_STRIP_TRAILING_WHITESPACE
     RESULT_VARIABLE rc)
