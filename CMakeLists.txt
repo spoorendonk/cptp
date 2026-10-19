@@ -165,6 +165,7 @@ if(CPTP_BUILD_TESTS)
                 -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
                 -DSTAGE_DIR=${CMAKE_CURRENT_BINARY_DIR}/python_stage
                 -DEXTENSION=$<TARGET_FILE:cptp_python>
+                -DSOLVE=$<TARGET_FILE:cptp-solve>
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_pytest.cmake)
     endif()
 endif()

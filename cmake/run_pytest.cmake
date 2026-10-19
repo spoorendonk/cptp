@@ -8,8 +8,11 @@
 # and serves the checkout's snapshot of the extension) cannot shadow the
 # staged package.
 #
+# The CLI tests run this build's cptp-solve (CPTP_SOLVE), and the
+# `python -m cptp` tests pass `-S` on to their child interpreter.
+#
 # Usage: cmake -DPYTHON=<exe> -DSOURCE_DIR=<root> -DSTAGE_DIR=<dir>
-#              -DEXTENSION=<_cptp module> -P run_pytest.cmake
+#              -DEXTENSION=<_cptp module> -DSOLVE=<cptp-solve> -P run_pytest.cmake
 
 file(REMOVE_RECURSE "${STAGE_DIR}/cptp")
 file(COPY "${SOURCE_DIR}/python/cptp" DESTINATION "${STAGE_DIR}"
@@ -28,7 +31,7 @@ endif()
 string(REPLACE "\n" ":" site_dirs "${site_dirs}")
 
 execute_process(
-    COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${STAGE_DIR}:${site_dirs}"
+    COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${STAGE_DIR}:${site_dirs}" "CPTP_SOLVE=${SOLVE}"
             "${PYTHON}" -S -m pytest -p no:cacheprovider "${SOURCE_DIR}/tests/python"
     WORKING_DIRECTORY "${SOURCE_DIR}"
     RESULT_VARIABLE rc)

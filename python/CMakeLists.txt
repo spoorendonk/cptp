@@ -25,4 +25,8 @@ target_include_directories(cptp_python PRIVATE
     ${highs_BINARY_DIR}
 )
 
-install(TARGETS cptp_python LIBRARY DESTINATION cptp)
+# Only when the bindings were asked for (a wheel build sets this): built just
+# for python_tests, they are not part of an install.
+if(CPTP_BUILD_PYTHON)
+    install(TARGETS cptp_python LIBRARY DESTINATION cptp)
+endif()

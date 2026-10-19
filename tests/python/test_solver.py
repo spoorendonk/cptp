@@ -1,5 +1,6 @@
 """Test the Python CPTP solver bindings."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -9,7 +10,13 @@ import pytest
 from cptp import Model, Problem, SeparatorStats, Status, load, solve
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-BIN_PATH = Path(__file__).resolve().parents[2] / "build" / "cptp-solve"
+# ctest's python_tests names the binary of the build under test.
+BIN_PATH = Path(
+    os.environ.get("CPTP_SOLVE", Path(__file__).resolve().parents[2] / "build" / "cptp-solve")
+)
+# A child interpreter keeps `-S` when this one has it: ctest's python_tests
+# runs without site so the venv's editable install cannot shadow the package.
+PYTHON = [sys.executable, *(["-S"] if sys.flags.no_site else [])]
 OPTS = [("time_limit", "30"), ("output_flag", "false")]
 
 
@@ -260,7 +267,7 @@ def test_solve_wrapper_path() -> None:
 def test_cli_tour() -> None:
     """python -m cptp on a tour instance."""
     result = subprocess.run(
-        [sys.executable, "-m", "cptp", str(DATA_DIR / "tiny4.txt")],
+        [*PYTHON, "-m", "cptp", str(DATA_DIR / "tiny4.txt")],
         capture_output=True,
         text=True,
         timeout=60,
@@ -273,7 +280,7 @@ def test_cli_path_override() -> None:
     """python -m cptp with --source/--target override."""
     result = subprocess.run(
         [
-            sys.executable,
+            *PYTHON,
             "-m",
             "cptp",
             str(DATA_DIR / "tiny4.txt"),
