@@ -31,7 +31,9 @@ struct SeparationContext {
 
     /// All-pairs shortest path bounds: flat n×n matrix, d(s,v) =
     /// all_pairs[s*n+v]. Empty when not available. Used by SPISeparator.
-    std::span<const double> all_pairs = {};
+    /// `= {}` keeps gcc's -Wmissing-field-initializers quiet for the
+    /// designated initializers that leave it out.
+    std::span<const double> all_pairs = {};  // NOLINT(readability-redundant-member-init)
 };
 
 }  // namespace cptp::sep

@@ -10,10 +10,12 @@ namespace cptp::parallel {
 /// hardware_concurrency.
 template <typename F>
 void parallel_for(int begin, int end, F&& f, int num_threads = 0) {
-    if (begin >= end)
+    if (begin >= end) {
         return;
-    if (num_threads <= 0)
+    }
+    if (num_threads <= 0) {
         num_threads = static_cast<int>(std::max(1u, std::thread::hardware_concurrency()));
+    }
     const int range = end - begin;
     num_threads = std::min(num_threads, range);
 
@@ -26,8 +28,9 @@ void parallel_for(int begin, int end, F&& f, int num_threads = 0) {
     for (int t = 0; t < num_threads; ++t) {
         int hi = lo + chunk + (t < remainder ? 1 : 0);
         threads.emplace_back([&f, lo, hi] {
-            for (int i = lo; i < hi; ++i)
+            for (int i = lo; i < hi; ++i) {
                 f(i);
+            }
         });
         lo = hi;
     }
@@ -46,8 +49,9 @@ public:
 
     void wait() {
         for (auto& t : threads_) {
-            if (t.joinable())
+            if (t.joinable()) {
                 t.join();
+            }
         }
         threads_.clear();
     }

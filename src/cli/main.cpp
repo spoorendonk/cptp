@@ -163,8 +163,9 @@ static void print_usage(const char* prog) {
 // version, to stdout — the same stream HiGHS itself logs to.
 static void print_version() {
     std::string highs_githash = highsGithash();
-    if (highs_githash.empty())
+    if (highs_githash.empty()) {
         highs_githash = "unknown";
+    }
     std::cout << "cptp-solve " << CPTP_VERSION << " (" << CPTP_GIT_HASH << ")\n"
               << "HiGHS " << highsVersion() << " (git hash: " << highs_githash << ")\n";
 }
@@ -242,8 +243,9 @@ int main(int argc, char* argv[]) {
             // Rebuild problem with new source/target
             std::vector<cptp::Edge> edges;
             const auto& g = problem.graph();
-            for (auto e : g.edges())
+            for (auto e : g.edges()) {
                 edges.push_back({g.edge_source(e), g.edge_target(e)});
+            }
             problem.build(problem.num_nodes(), edges, problem.edge_costs(), problem.profits(),
                           problem.demands(), problem.capacity(), src, tgt);
         }
@@ -265,8 +267,9 @@ int main(int argc, char* argv[]) {
         // Print solution
         std::cout << "\n" << (model.problem().is_tour() ? "Tour" : "Path") << ": ";
         for (size_t i = 0; i < result.tour.size(); ++i) {
-            if (i > 0)
+            if (i > 0) {
                 std::cout << " -> ";
+            }
             std::cout << result.tour[i];
         }
         std::cout << "\n";
@@ -295,7 +298,7 @@ int main(int argc, char* argv[]) {
                 }
             }
             for (const auto& [name, stats] : result.separator_stats) {
-                if (std::find(preferred.begin(), preferred.end(), name) == preferred.end()) {
+                if (std::ranges::find(preferred, name) == preferred.end()) {
                     print_sep_row(name, stats);
                 }
             }

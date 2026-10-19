@@ -40,10 +40,12 @@ struct TourCandidate {
 inline int32_t find_edge(const Graph& g, int32_t u, int32_t v,
                          const std::vector<bool>& edge_active = {}) {
     for (int32_t e : g.incident_edges(u)) {
-        if (!edge_active.empty() && !edge_active[e])
+        if (!edge_active.empty() && !edge_active[e]) {
             continue;
-        if (g.other_endpoint(e, u) == v)
+        }
+        if (g.other_endpoint(e, u) == v) {
             return e;
+        }
     }
     return -1;
 }
@@ -92,7 +94,7 @@ inline uint64_t mix64(uint64_t x) {
 
 inline uint64_t deterministic_kick_key(int32_t start_index, int32_t round_index, int32_t trial,
                                        uint64_t salt) {
-    uint64_t key = static_cast<uint64_t>(start_index + 1);
+    auto key = static_cast<uint64_t>(start_index) + 1;
     key ^= static_cast<uint64_t>(round_index + 1) * 0x9e3779b97f4a7c15ull;
     key ^= static_cast<uint64_t>(trial + 1) * 0xbf58476d1ce4e5b9ull;
     key ^= salt;
@@ -199,8 +201,9 @@ inline HeuristicResult best_construction_solution(const Problem& prob,
                                                   const ConstructionPool& pool) {
     if (pool.candidates.empty()) {
         auto fallback = detail::fallback_feasible(prob, pool.edge_active);
-        if (fallback.empty())
+        if (fallback.empty()) {
             return {{}, detail::kNoSolution};
+        }
         const double obj = detail::tour_objective(prob, fallback);
         return {detail::tour_to_solution(prob, fallback), obj};
     }

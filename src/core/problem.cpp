@@ -9,12 +9,15 @@ void Problem::build(int32_t num_nodes, std::span<const Edge> edges,
                     std::span<const double> edge_costs, std::span<const double> profits,
                     std::span<const double> demands, double capacity, int32_t source,
                     int32_t target) {
-    if (profits.size() != static_cast<size_t>(num_nodes))
+    if (profits.size() != static_cast<size_t>(num_nodes)) {
         throw std::invalid_argument("profits size must equal num_nodes");
-    if (demands.size() != static_cast<size_t>(num_nodes))
+    }
+    if (demands.size() != static_cast<size_t>(num_nodes)) {
         throw std::invalid_argument("demands size must equal num_nodes");
-    if (edge_costs.size() != edges.size())
+    }
+    if (edge_costs.size() != edges.size()) {
         throw std::invalid_argument("edge_costs size must equal edges size");
+    }
 
     num_nodes_ = num_nodes;
     source_ = source;
@@ -26,10 +29,12 @@ void Problem::build(int32_t num_nodes, std::span<const Edge> edges,
     for (size_t i = 0; i < edges.size(); ++i) {
         int32_t u = edges[i].tail;
         int32_t v = edges[i].head;
-        if (u > v)
+        if (u > v) {
             std::swap(u, v);
-        if (u == v)
+        }
+        if (u == v) {
             throw std::invalid_argument("self-loop edge not allowed");
+        }
         graph_edges[i] = {u, v};
     }
 
@@ -44,12 +49,15 @@ void Problem::build(int32_t num_nodes, std::span<const Edge> edges,
 void Problem::build(int32_t num_nodes, std::span<const Edge> edges, std::vector<double> edge_costs,
                     std::vector<double> profits, std::vector<double> demands, double capacity,
                     int32_t source, int32_t target) {
-    if (profits.size() != static_cast<size_t>(num_nodes))
+    if (profits.size() != static_cast<size_t>(num_nodes)) {
         throw std::invalid_argument("profits size must equal num_nodes");
-    if (demands.size() != static_cast<size_t>(num_nodes))
+    }
+    if (demands.size() != static_cast<size_t>(num_nodes)) {
         throw std::invalid_argument("demands size must equal num_nodes");
-    if (edge_costs.size() != edges.size())
+    }
+    if (edge_costs.size() != edges.size()) {
         throw std::invalid_argument("edge_costs size must equal edges size");
+    }
 
     num_nodes_ = num_nodes;
     source_ = source;
@@ -60,10 +68,12 @@ void Problem::build(int32_t num_nodes, std::span<const Edge> edges, std::vector<
     for (size_t i = 0; i < edges.size(); ++i) {
         int32_t u = edges[i].tail;
         int32_t v = edges[i].head;
-        if (u > v)
+        if (u > v) {
             std::swap(u, v);
-        if (u == v)
+        }
+        if (u == v) {
             throw std::invalid_argument("self-loop edge not allowed");
+        }
         graph_edges[i] = {u, v};
     }
 

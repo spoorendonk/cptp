@@ -34,8 +34,9 @@ std::filesystem::path find_instances_dir() {
              std::filesystem::path("../benchmarks/instances"),
              std::filesystem::path("../../benchmarks/instances"),
          }) {
-        if (std::filesystem::exists(candidate))
+        if (std::filesystem::exists(candidate)) {
             return candidate;
+        }
     }
     return "benchmarks/instances";
 }
@@ -101,12 +102,14 @@ void print_result(const std::string& instance_name, const Problem& prob,
     if (!result.tour.empty()) {
         std::cout << "  Tour (" << result.tour.size() - 1 << " stops): ";
         for (size_t i = 0; i < std::min(result.tour.size(), size_t(10)); ++i) {
-            if (i > 0)
+            if (i > 0) {
                 std::cout << " -> ";
+            }
             std::cout << result.tour[i];
         }
-        if (result.tour.size() > 10)
+        if (result.tour.size() > 10) {
             std::cout << " -> ...";
+        }
         std::cout << "\n";
     }
 }

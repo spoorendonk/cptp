@@ -10,7 +10,7 @@ namespace cptp::sep {
 /// where d(S) = sum of demands in S, Q = vehicle capacity.
 class RCISeparator : public Separator {
 public:
-    std::string name() const override { return "RCI"; }
+    [[nodiscard]] std::string name() const override { return "RCI"; }
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 };
 

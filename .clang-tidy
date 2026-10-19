@@ -1,5 +1,14 @@
 # wcp: config/.clang-tidy base=8fde61052c61
 ---
+# Disabled beyond wcp's set, as bucket-graph-spprc and mip-heuristics do, for
+# checks that fight this codebase's style rather than find defects: short
+# names and math without extra parentheses are the reference papers' notation
+# (i, j, u, v, x_e, a * b + c); adjacent same-typed parameters are what graph
+# and cut code takes (tail, head, cost); cognitive complexity flags the
+# separators, which follow published algorithms step by step; and the rest
+# are spelling preferences (literal suffixes, designated initializers,
+# std::print, enum widths, implicit bool, sign-comparison helpers, C arrays,
+# static members).
 Checks: >
   -*,
   bugprone-*,
@@ -7,24 +16,76 @@ Checks: >
   performance-*,
   readability-*,
   -modernize-use-trailing-return-type,
-  -readability-magic-numbers
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-math-missing-parentheses,
+  -bugprone-easily-swappable-parameters,
+  -readability-function-cognitive-complexity,
+  -readability-uppercase-literal-suffix,
+  -modernize-use-designated-initializers,
+  -modernize-use-std-print,
+  -performance-enum-size,
+  -readability-implicit-bool-conversion,
+  -modernize-use-integer-sign-comparison,
+  -modernize-avoid-c-arrays,
+  -readability-convert-member-functions-to-static
 
 CheckOptions:
-  - key: readability-function-cognitive-complexity.Threshold
-    value: 25
   - key: readability-identifier-naming.ClassCase
     value: CamelCase
+  # The graph primitives are container-like and spelled the STL way
+  # (`static_graph`, `digraph`, its `edge_range` and `iterator`), and
+  # `task_group` mirrors TBB's.
+  - key: readability-identifier-naming.ClassIgnoredRegexp
+    value: '^(digraph|digraph_builder|dinitz|edge_range|gomory_hu_tree|iterator|static_graph|task_group)$'
+  # NARROWED: wcp ships camelBack; this codebase is uniformly lower_case
+  # (`set_graph`, `add_capacity_resource`), and the Python API mirrors it.
   - key: readability-identifier-naming.FunctionCase
-    value: camelBack
+    value: lower_case
   - key: readability-identifier-naming.VariableCase
     value: lower_case
-  - key: readability-identifier-naming.ConstantCase
-    value: UPPER_CASE
+  # Paper notation: a segment of one capital and up to two more letters
+  # (Q, Q_r, z_LP, z_LR_minus, d_S, in_S, H_path, d_NmS). clang-tidy matches
+  # these against the whole name.
+  - key: readability-identifier-naming.VariableIgnoredRegexp
+    value: '([a-z0-9]+_)*[A-Z][A-Za-z]{0,2}(_[A-Za-z0-9]+)*'
+  - key: readability-identifier-naming.LocalConstantIgnoredRegexp
+    value: '([a-z0-9]+_)*[A-Z][A-Za-z]{0,2}(_[A-Za-z0-9]+)*'
+  - key: readability-identifier-naming.ConstantParameterIgnoredRegexp
+    value: '([a-z0-9]+_)*[A-Z][A-Za-z]{0,2}(_[A-Za-z0-9]+)*'
+  # NARROWED: wcp ships one ConstantCase of UPPER_CASE, which clang-tidy
+  # applies to every `const` local and parameter. Split by scope to match the
+  # code: `const` locals and parameters are ordinary lower_case; constexpr,
+  # file-scope and static constants are k-prefixed CamelCase (`kInf`,
+  # `kIlsRounds`, a local `constexpr double kBig`). ConstantMemberCase stays
+  # unset: it outranks PrivateMemberSuffix.
+  - key: readability-identifier-naming.ConstexprVariableCase
+    value: CamelCase
+  - key: readability-identifier-naming.ConstexprVariablePrefix
+    value: k
+  - key: readability-identifier-naming.LocalConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.LocalConstantPointerCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantPointerParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.GlobalConstantPrefix
+    value: k
+  - key: readability-identifier-naming.StaticConstantCase
+    value: CamelCase
+  - key: readability-identifier-naming.StaticConstantPrefix
+    value: k
   - key: readability-identifier-naming.PrivateMemberSuffix
     value: _
   - key: readability-identifier-naming.NamespaceCase
     value: lower_case
 
 WarningsAsErrors: ''
-HeaderFilterRegex: '.*'
+# This repository's own headers only: FetchContent's (HiGHS, Catch2, nanobind)
+# sit under the build tree, and Catch2's own sources live in a `src/catch2/`.
+HeaderFilterRegex: '/(src/(cli|core|heuristic|model|parallel|preprocess|sep|util)|tests|python)/[^/]+$'
 FormatStyle: file

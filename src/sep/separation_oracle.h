@@ -57,21 +57,24 @@ public:
     /// @param x_offset  Column offset for edge variables in the LP.
     /// @param y_offset  Column offset for node variables in the LP.
     /// @param tol       Violation tolerance (default: kDefaultFracTol).
-    std::vector<Cut> separate(std::span<const double> x_values, std::span<const double> y_values,
-                              int32_t x_offset, int32_t y_offset,
-                              double tol = kDefaultFracTol) const;
+    [[nodiscard]] std::vector<Cut> separate(std::span<const double> x_values,
+                                            std::span<const double> y_values, int32_t x_offset,
+                                            int32_t y_offset, double tol = kDefaultFracTol) const;
 
     /// Check whether an integer solution satisfies all SECs.
     /// Returns true if feasible (no violated lazy constraints).
-    bool is_feasible(std::span<const double> x_values, std::span<const double> y_values,
-                     int32_t x_offset, int32_t y_offset) const;
+    [[nodiscard]] bool is_feasible(std::span<const double> x_values,
+                                   std::span<const double> y_values, int32_t x_offset,
+                                   int32_t y_offset) const;
 
     /// Max cuts to keep per separator per round (0 = unlimited).
     void set_max_cuts_per_separator(int32_t max_cuts) { max_cuts_per_sep_ = max_cuts; }
-    int32_t max_cuts_per_separator() const { return max_cuts_per_sep_; }
+    [[nodiscard]] int32_t max_cuts_per_separator() const { return max_cuts_per_sep_; }
 
     /// Access the registered separators (e.g., for statistics).
-    const std::vector<std::unique_ptr<Separator>>& separators() const { return separators_; }
+    [[nodiscard]] const std::vector<std::unique_ptr<Separator>>& separators() const {
+        return separators_;
+    }
 
 private:
     const Problem& prob_;

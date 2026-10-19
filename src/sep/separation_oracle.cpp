@@ -34,11 +34,11 @@ std::vector<Cut> SeparationOracle::separate(std::span<const double> x_values,
     const int32_t n = prob_.num_nodes();
 
     // Build support graph from fractional LP values
-    constexpr double graph_tol = 1e-6;
+    constexpr double kGraphTol = 1e-6;
     digraph_builder builder(n);
     for (auto e : graph.edges()) {
         double xval = x_values[e];
-        if (xval > graph_tol) {
+        if (xval > kGraphTol) {
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);
             builder.add_arc(u, v, xval);
@@ -72,8 +72,8 @@ std::vector<Cut> SeparationOracle::separate(std::span<const double> x_values,
     std::vector<Cut> all_cuts;
     for (size_t i = 0; i < separators_.size(); ++i) {
         auto& cuts = results[i];
-        std::sort(cuts.begin(), cuts.end(),
-                  [](const Cut& a, const Cut& b) { return a.violation > b.violation; });
+        std::ranges::sort(cuts,
+                          [](const Cut& a, const Cut& b) { return a.violation > b.violation; });
         int32_t limit = (max_cuts_per_sep_ > 0)
                             ? std::min(static_cast<int32_t>(cuts.size()), max_cuts_per_sep_)
                             : static_cast<int32_t>(cuts.size());
@@ -83,8 +83,8 @@ std::vector<Cut> SeparationOracle::separate(std::span<const double> x_values,
     }
 
     // Sort combined results by violation
-    std::sort(all_cuts.begin(), all_cuts.end(),
-              [](const Cut& a, const Cut& b) { return a.violation > b.violation; });
+    std::ranges::sort(all_cuts,
+                      [](const Cut& a, const Cut& b) { return a.violation > b.violation; });
 
     return all_cuts;
 }
@@ -95,11 +95,11 @@ bool SeparationOracle::is_feasible(std::span<const double> x_values,
     const auto& graph = prob_.graph();
     const int32_t n = prob_.num_nodes();
 
-    constexpr double graph_tol = 1e-6;
+    constexpr double kGraphTol = 1e-6;
     digraph_builder builder(n);
     for (auto e : graph.edges()) {
         double xval = x_values[e];
-        if (xval > graph_tol) {
+        if (xval > kGraphTol) {
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);
             builder.add_arc(u, v, xval);

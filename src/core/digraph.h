@@ -16,19 +16,19 @@ class digraph {
 public:
     digraph() = default;
 
-    int32_t num_nodes() const { return num_nodes_; }
-    int32_t num_arcs() const { return num_arcs_; }
+    [[nodiscard]] int32_t num_nodes() const { return num_nodes_; }
+    [[nodiscard]] int32_t num_arcs() const { return num_arcs_; }
 
-    std::span<const int32_t> out_arcs(int32_t v) const {
+    [[nodiscard]] std::span<const int32_t> out_arcs(int32_t v) const {
         return {out_arcs_.data() + out_begin_[v], out_arcs_.data() + out_begin_[v + 1]};
     }
 
-    std::span<const int32_t> in_arcs(int32_t v) const {
+    [[nodiscard]] std::span<const int32_t> in_arcs(int32_t v) const {
         return {in_arcs_.data() + in_begin_[v], in_arcs_.data() + in_begin_[v + 1]};
     }
 
-    int32_t arc_source(int32_t a) const { return sources_[a]; }
-    int32_t arc_target(int32_t a) const { return targets_[a]; }
+    [[nodiscard]] int32_t arc_source(int32_t a) const { return sources_[a]; }
+    [[nodiscard]] int32_t arc_target(int32_t a) const { return targets_[a]; }
 
 private:
     friend class digraph_builder;
@@ -62,15 +62,18 @@ public:
 
         // Sort arcs by source to build out-CSR
         std::vector<int32_t> perm(g.num_arcs_);
-        std::iota(perm.begin(), perm.end(), 0);
-        std::sort(perm.begin(), perm.end(),
-                  [&](int32_t a, int32_t b) { return g.sources_[a] < g.sources_[b]; });
+        // Not std::ranges::iota: model.cpp and highs_bridge.cpp are tidied as
+        // C++20 (cmake/Lint.cmake), which lacks it.
+        std::iota(perm.begin(), perm.end(), 0);  // NOLINT(modernize-use-ranges)
+        std::ranges::sort(perm,
+                          [&](int32_t a, int32_t b) { return g.sources_[a] < g.sources_[b]; });
 
         // Apply permutation
         auto permute = [&](auto& vec) {
             auto tmp = vec;
-            for (int32_t i = 0; i < g.num_arcs_; ++i)
+            for (int32_t i = 0; i < g.num_arcs_; ++i) {
                 vec[i] = tmp[perm[i]];
+            }
         };
         permute(g.sources_);
         permute(g.targets_);
@@ -85,7 +88,7 @@ public:
             g.out_begin_[i + 1] += g.out_begin_[i];
         }
         g.out_arcs_.resize(g.num_arcs_);
-        std::iota(g.out_arcs_.begin(), g.out_arcs_.end(), 0);
+        std::iota(g.out_arcs_.begin(), g.out_arcs_.end(), 0);  // NOLINT(modernize-use-ranges)
 
         // Build in-CSR
         g.in_begin_.assign(num_nodes_ + 1, 0);

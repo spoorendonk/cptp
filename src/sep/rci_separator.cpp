@@ -25,12 +25,14 @@ struct RCICandidate {
 /// Returns violation (positive = violated).
 double compute_violation(const RCICandidate& c, double Q, double tol) {
     double Q_r = std::fmod(c.d_S, Q);
-    if (Q_r <= tol)
+    if (Q_r <= tol) {
         return -1.0;
+    }
 
     double k = std::ceil(c.d_S / Q);
-    if (k <= 1.0)
+    if (k <= 1.0) {
         return -1.0;
+    }
 
     double rhs = 2.0 * (k - c.d_S / Q_r);
     double lhs = c.cut_flow - (2.0 * c.served_demand) / Q_r;
@@ -146,8 +148,9 @@ double add_drop_search(RCICandidate& c, const Problem& prob, const SeparationCon
             double best_drop_viol = best_viol;
 
             for (int32_t i = 0; i < n; ++i) {
-                if (!c.in_S[i] || i == depot || (!is_tour && i == path_target))
+                if (!c.in_S[i] || i == depot || (!is_tour && i == path_target)) {
                     continue;
+                }
 
                 remove_node(c, i, prob, ctx);
                 double v = compute_violation(c, Q, tol);
@@ -174,8 +177,9 @@ double add_drop_search(RCICandidate& c, const Problem& prob, const SeparationCon
             double best_add_viol = best_viol;
 
             for (int32_t i = 0; i < n; ++i) {
-                if (c.in_S[i] || i == depot || (!is_tour && i == path_target))
+                if (c.in_S[i] || i == depot || (!is_tour && i == path_target)) {
                     continue;
+                }
 
                 bool adjacent = false;
                 for (int32_t e : graph.incident_edges(i)) {
@@ -185,8 +189,9 @@ double add_drop_search(RCICandidate& c, const Problem& prob, const SeparationCon
                         break;
                     }
                 }
-                if (!adjacent)
+                if (!adjacent) {
                     continue;
+                }
 
                 add_node(c, i, prob, ctx);
                 double v = compute_violation(c, Q, tol);
@@ -226,10 +231,11 @@ Cut build_cut(const RCICandidate& c, const Problem& prob, const SeparationContex
         int32_t v = graph.edge_target(e);
         bool u_in = c.in_S[u];
         bool v_in = c.in_S[v];
-        if (u_in && v_in)
+        if (u_in && v_in) {
             n_inside++;
-        else if (u_in != v_in)
+        } else if (u_in != v_in) {
             n_delta++;
+        }
     }
 
     bool use_inside_form = (n_inside < n_delta);
@@ -250,8 +256,9 @@ Cut build_cut(const RCICandidate& c, const Problem& prob, const SeparationContex
         }
 
         for (int32_t i = 0; i < n; ++i) {
-            if (!c.in_S[i])
+            if (!c.in_S[i]) {
                 continue;
+            }
             double q_i = prob.demand(i);
             double coeff = -(1.0 - q_i / Q_r);
             if (std::abs(coeff) > tol) {
@@ -273,11 +280,13 @@ Cut build_cut(const RCICandidate& c, const Problem& prob, const SeparationContex
         }
 
         for (int32_t i = 0; i < n; ++i) {
-            if (!c.in_S[i])
+            if (!c.in_S[i]) {
                 continue;
+            }
             double q_i = prob.demand(i);
-            if (q_i <= 0)
+            if (q_i <= 0) {
                 continue;
+            }
 
             double coeff = 2.0 * q_i / Q_r;
             cut.indices.push_back(ctx.y_offset + i);
@@ -301,8 +310,9 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     const bool is_tour = prob.is_tour();
     const int32_t path_target = prob.target();
 
-    if (Q <= 0 || !ctx.flow_tree)
+    if (Q <= 0 || !ctx.flow_tree) {
         return {};
+    }
 
     const auto& tree = *ctx.flow_tree;
 
@@ -324,8 +334,9 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
         }
     }
 
-    if (candidates.empty())
+    if (candidates.empty()) {
         return {};
+    }
 
     // Step 2: Parallel evaluation and add/drop local search.
     // Each candidate produces at most one cut.
@@ -341,11 +352,13 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
         auto c = make_candidate(tree, cr.node, prob, ctx);
 
         double Q_r = std::fmod(c.d_S, Q);
-        if (Q_r <= tol)
+        if (Q_r <= tol) {
             return;
+        }
         double k = std::ceil(c.d_S / Q);
-        if (k <= 1.0)
+        if (k <= 1.0) {
             return;
+        }
 
         double viol = compute_violation(c, Q, tol);
 
@@ -371,9 +384,8 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
 
     // Sort by violation descending — most violated first.
     // stable_sort preserves deterministic input order for equal violations.
-    std::stable_sort(results.begin(), results.end(), [](const CutResult& a, const CutResult& b) {
-        return a.violation > b.violation;
-    });
+    std::ranges::stable_sort(
+        results, [](const CutResult& a, const CutResult& b) { return a.violation > b.violation; });
 
     // Cap output: keep at most max_cuts per round. This avoids flooding
     // the LP with weak cuts that slow down the simplex.

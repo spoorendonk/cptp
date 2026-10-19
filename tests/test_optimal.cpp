@@ -6,7 +6,7 @@
 
 using Catch::Matchers::WithinAbs;
 
-static const cptp::SolverOptions quiet = {
+static const cptp::SolverOptions kQuiet = {
     {"output_flag", "false"},
 };
 
@@ -14,8 +14,8 @@ static cptp::SolveResult solve_instance(const char* path, int time_limit = 120) 
     auto prob = cptp::io::load(path);
     cptp::Model model;
     model.set_problem(std::move(prob));
-    auto opts = quiet;
-    opts.push_back({"time_limit", std::to_string(time_limit)});
+    auto opts = kQuiet;
+    opts.emplace_back("time_limit", std::to_string(time_limit));
     return model.solve(opts);
 }
 

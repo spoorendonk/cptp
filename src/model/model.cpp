@@ -45,20 +45,23 @@ bool has_feasible_heuristic(const heuristic::HeuristicResult& r) {
 unsigned detect_physical_cores() {
 #ifdef __linux__
     long n = sysconf(_SC_NPROCESSORS_ONLN);
-    if (n > 0)
+    if (n > 0) {
         return static_cast<unsigned>(n);
+    }
 #endif
     unsigned logical = std::thread::hardware_concurrency();
     return (logical > 0) ? logical : 1u;
 }
 
 std::string join_tokens(const std::vector<std::string>& tokens, std::string_view delim = " ") {
-    if (tokens.empty())
+    if (tokens.empty()) {
         return {};
+    }
     std::ostringstream oss;
     for (size_t i = 0; i < tokens.size(); ++i) {
-        if (i)
+        if (i) {
             oss << delim;
+        }
         oss << tokens[i];
     }
     return oss.str();
@@ -71,10 +74,9 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
                                     int32_t hyper_sb_iter_limit, int32_t hyper_sb_min_reliable,
                                     int32_t hyper_sb_max_candidates) {
     // Hyperplane branching: dynamic constraint branching
-    static constexpr std::string_view valid_modes[] = {"off",    "pairs",       "clusters",
+    static constexpr std::string_view kValidModes[] = {"off",    "pairs",       "clusters",
                                                        "demand", "cardinality", "all"};
-    if (std::find(std::begin(valid_modes), std::end(valid_modes), branch_hyper) ==
-        std::end(valid_modes)) {
+    if (std::ranges::find(kValidModes, branch_hyper) == std::end(kValidModes)) {
         logger.log("Warning: unknown branch_hyper mode '{}', using 'off'", branch_hyper);
         branch_hyper = "off";
     }
@@ -97,8 +99,9 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
     const auto& graph = problem.graph();
 
     std::vector<double> demands(n, 0.0);
-    for (int32_t i = 0; i < n; ++i)
+    for (int32_t i = 0; i < n; ++i) {
         demands[i] = problem.demand(i);
+    }
 
     // Ryan-Foster pairs: for each non-depot node, pair with nearest neighbor.
     struct Pair {
@@ -108,16 +111,18 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
     if (branch_hyper == "pairs" || branch_hyper == "all") {
         std::vector<bool> paired(n, false);
         for (int32_t i = 0; i < n; ++i) {
-            if (i == problem.source())
+            if (i == problem.source()) {
                 continue;
+            }
             double best_cost = std::numeric_limits<double>::infinity();
             int32_t best_j = -1;
             for (auto e : graph.incident_edges(i)) {
                 int32_t u = graph.edge_source(e);
                 int32_t v = graph.edge_target(e);
                 int32_t nb = (u == i) ? v : u;
-                if (nb == problem.source())
+                if (nb == problem.source()) {
                     continue;
+                }
                 double c = problem.edge_cost(e);
                 if (c < best_cost) {
                     best_cost = c;
@@ -140,27 +145,29 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
     // Greedy nearest-neighbor clusters of size ~4.
     std::vector<std::vector<int32_t>> clusters;
     if (branch_hyper == "clusters" || branch_hyper == "all") {
-        constexpr int32_t CLUSTER_SIZE = 4;
+        constexpr int32_t kClusterSize = 4;
         std::vector<bool> assigned(n, false);
         assigned[problem.source()] = true;
 
         // Sort nodes by demand (descending) to seed clusters.
         std::vector<int32_t> nodes_by_demand;
         for (int32_t i = 0; i < n; ++i) {
-            if (i != problem.source())
+            if (i != problem.source()) {
                 nodes_by_demand.push_back(i);
+            }
         }
-        std::sort(nodes_by_demand.begin(), nodes_by_demand.end(),
-                  [&](int32_t a, int32_t b) { return demands[a] > demands[b]; });
+        std::ranges::sort(nodes_by_demand,
+                          [&](int32_t a, int32_t b) { return demands[a] > demands[b]; });
 
         for (int32_t seed : nodes_by_demand) {
-            if (assigned[seed])
+            if (assigned[seed]) {
                 continue;
+            }
             std::vector<int32_t> cluster = {seed};
             assigned[seed] = true;
 
             // Add nearest unassigned neighbors.
-            while (static_cast<int32_t>(cluster.size()) < CLUSTER_SIZE) {
+            while (static_cast<int32_t>(cluster.size()) < kClusterSize) {
                 double best_cost = std::numeric_limits<double>::infinity();
                 int32_t best_nb = -1;
                 for (int32_t ci : cluster) {
@@ -168,8 +175,9 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
                         int32_t u = graph.edge_source(e);
                         int32_t v = graph.edge_target(e);
                         int32_t nb = (u == ci) ? v : u;
-                        if (assigned[nb])
+                        if (assigned[nb]) {
                             continue;
+                        }
                         double c = problem.edge_cost(e);
                         if (c < best_cost) {
                             best_cost = c;
@@ -177,8 +185,9 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
                         }
                     }
                 }
-                if (best_nb < 0)
+                if (best_nb < 0) {
                     break;
+                }
                 cluster.push_back(best_nb);
                 assigned[best_nb] = true;
             }
@@ -197,11 +206,13 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
             std::vector<HighsUserSeparator::HyperplaneCandidate> result;
 
             if (branch_hyper == "pairs" || branch_hyper == "all") {
-                for (auto& [pi, pj] : rf_pairs) {
-                    double yi = sol[y_off + pi], yj = sol[y_off + pj];
+                for (const auto& [pi, pj] : rf_pairs) {
+                    double yi = sol[y_off + pi];
+                    double yj = sol[y_off + pj];
                     // Skip if either variable is near-integer.
-                    if (yi < 0.05 || yi > 0.95 || yj < 0.05 || yj > 0.95)
+                    if (yi < 0.05 || yi > 0.95 || yj < 0.05 || yj > 0.95) {
                         continue;
+                    }
                     HighsUserSeparator::HyperplaneCandidate c;
                     c.indices = {static_cast<HighsInt>(y_off + pi),
                                  static_cast<HighsInt>(y_off + pj)};
@@ -212,7 +223,7 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
             }
             if (branch_hyper == "clusters" || branch_hyper == "all") {
                 for (size_t k = 0; k < clusters.size(); ++k) {
-                    auto& cluster = clusters[k];
+                    const auto& cluster = clusters[k];
                     // Cluster demand hyperplane: sum(demand_i * y_i) for i in cluster.
                     HighsUserSeparator::HyperplaneCandidate c;
                     c.name = "cluster_" + std::to_string(k);
@@ -226,8 +237,9 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
                     }
                     if (!c.indices.empty()) {
                         double frac = total_demand - std::floor(total_demand);
-                        if (frac > 0.01 && frac < 0.99)
+                        if (frac > 0.01 && frac < 0.99) {
                             result.push_back(std::move(c));
+                        }
                     }
                 }
             }
@@ -235,22 +247,25 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
                 HighsUserSeparator::HyperplaneCandidate c;
                 c.name = "demand";
                 for (int32_t i = 0; i < n; ++i) {
-                    if (i == source)
+                    if (i == source) {
                         continue;  // skip depot
+                    }
                     if (demands[i] > 0) {
                         c.indices.push_back(y_off + i);
                         c.values.push_back(demands[i]);
                     }
                 }
-                if (!c.indices.empty())
+                if (!c.indices.empty()) {
                     result.push_back(std::move(c));
+                }
             }
             if (branch_hyper == "cardinality" || branch_hyper == "all") {
                 HighsUserSeparator::HyperplaneCandidate c;
                 c.name = "cardinality";
                 for (int32_t i = 0; i < n; ++i) {
-                    if (i == source)
+                    if (i == source) {
                         continue;  // skip depot
+                    }
                     c.indices.push_back(y_off + i);
                     c.values.push_back(1.0);
                 }
@@ -308,8 +323,9 @@ void Model::add_capacity_resource(std::span<const double> demands, double limit)
 }
 
 void Model::build_problem() {
-    if (built_)
+    if (built_) {
         return;
+    }
 
     // Use demands/capacity from first capacity resource, or defaults
     std::vector<double> demands(num_nodes_, 0.0);
@@ -533,16 +549,17 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         // --- RC fixing ---
         if (key == "rc_fixing") {
-            if (value == "root_only")
+            if (value == "root_only") {
                 rc_settings.strategy = RCFixingStrategy::root_only;
-            else if (value == "on_ub_improvement")
+            } else if (value == "on_ub_improvement") {
                 rc_settings.strategy = RCFixingStrategy::on_ub_improvement;
-            else if (value == "periodic")
+            } else if (value == "periodic") {
                 rc_settings.strategy = RCFixingStrategy::periodic;
-            else if (value == "adaptive")
+            } else if (value == "adaptive") {
                 rc_settings.strategy = RCFixingStrategy::adaptive;
-            else
+            } else {
                 rc_settings.strategy = RCFixingStrategy::off;
+            }
             continue;
         }
         if (key == "rc_fixing_interval") {
@@ -657,8 +674,9 @@ SolveResult Model::solve(const SolverOptions& options) {
             logger_.log("Warning: HiGHS rejected option {} = {}", key, value);
         } else {
             accepted_highs_options[key] = value;
-            if (key == "threads")
+            if (key == "threads") {
                 threads_option_explicit = true;
+            }
         }
     }
 
@@ -730,8 +748,9 @@ SolveResult Model::solve(const SolverOptions& options) {
         "";
 #endif
     std::string highs_githash = highs.githash();
-    if (highs_githash.empty())
+    if (highs_githash.empty()) {
         highs_githash = "unknown";
+    }
     logger_.log("Running HiGHS {} (git hash: {})", highs.version(), highs_githash);
     logger_.log(
         "Thread count: {} physical cores, {} logical processors, using up to {} "
@@ -742,33 +761,41 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (random_seed != 0) {
         nondefault_settings.push_back("random_seed=" + std::to_string(random_seed));
     }
-    nondefault_settings.push_back("presolve=off");
-    if (!labeling_elim_bounds)
-        nondefault_settings.push_back("labeling_elim_bounds=off");
-    if (labeling_max_queue_pops != 1'000'000)
+    nondefault_settings.emplace_back("presolve=off");
+    if (!labeling_elim_bounds) {
+        nondefault_settings.emplace_back("labeling_elim_bounds=off");
+    }
+    if (labeling_max_queue_pops != 1'000'000) {
         nondefault_settings.push_back("labeling_max_queue_pops=" +
                                       std::to_string(labeling_max_queue_pops));
-    if (all_pairs_bounds)
-        nondefault_settings.push_back("all_pairs_bounds=on");
-    if (!edge_elimination)
-        nondefault_settings.push_back("edge_elimination=off");
-    if (!edge_elimination_nodes)
-        nondefault_settings.push_back("edge_elimination_nodes=off");
-    if (!bounds_propagation)
-        nondefault_settings.push_back("bounds_propagation=off");
+    }
+    if (all_pairs_bounds) {
+        nondefault_settings.emplace_back("all_pairs_bounds=on");
+    }
+    if (!edge_elimination) {
+        nondefault_settings.emplace_back("edge_elimination=off");
+    }
+    if (!edge_elimination_nodes) {
+        nondefault_settings.emplace_back("edge_elimination_nodes=off");
+    }
+    if (!bounds_propagation) {
+        nondefault_settings.emplace_back("bounds_propagation=off");
+    }
     if (separation_interval != 1) {
         nondefault_settings.push_back("separation_interval=" + std::to_string(separation_interval));
     }
     if (max_cuts_per_round != 10) {
         nondefault_settings.push_back("max_cuts_per_round=" + std::to_string(max_cuts_per_round));
     }
-    if (!heu_ws)
-        nondefault_settings.push_back("heu_ws=off");
+    if (!heu_ws) {
+        nondefault_settings.emplace_back("heu_ws=off");
+    }
     if (heu_ws_ls_max_iter != 1000) {
         nondefault_settings.push_back("heu_ws_ls_max_iter=" + std::to_string(heu_ws_ls_max_iter));
     }
-    if (!heu_lpg)
-        nondefault_settings.push_back("heu_lpg=off");
+    if (!heu_lpg) {
+        nondefault_settings.emplace_back("heu_lpg=off");
+    }
     if (heu_lpg_strategy != 0) {
         nondefault_settings.push_back("heu_lpg_strategy=" + std::to_string(heu_lpg_strategy));
     }
@@ -780,29 +807,38 @@ SolveResult Model::solve(const SolverOptions& options) {
         nondefault_settings.push_back("heu_lpg_deterministic_restarts=" +
                                       std::to_string(heu_lpg_deterministic_restarts));
     }
-    if (heu_lpg_edge_threshold != 0.1)
+    if (heu_lpg_edge_threshold != 0.1) {
         nondefault_settings.push_back("heu_lpg_edge_threshold=" +
                                       std::to_string(heu_lpg_edge_threshold));
-    if (heu_lpg_node_threshold != 0.5)
+    }
+    if (heu_lpg_node_threshold != 0.5) {
         nondefault_settings.push_back("heu_lpg_node_threshold=" +
                                       std::to_string(heu_lpg_node_threshold));
-    if (heu_lpg_lp_threshold != 0.1)
+    }
+    if (heu_lpg_lp_threshold != 0.1) {
         nondefault_settings.push_back("heu_lpg_lp_threshold=" +
                                       std::to_string(heu_lpg_lp_threshold));
-    if (heu_lpg_seed_threshold != 0.3)
+    }
+    if (heu_lpg_seed_threshold != 0.3) {
         nondefault_settings.push_back("heu_lpg_seed_threshold=" +
                                       std::to_string(heu_lpg_seed_threshold));
-    if (!heu_highs_submip_sec)
-        nondefault_settings.push_back("heu_highs_submip_sec=off");
-    if (spi_max_dp_size != 15)
+    }
+    if (!heu_highs_submip_sec) {
+        nondefault_settings.emplace_back("heu_highs_submip_sec=off");
+    }
+    if (spi_max_dp_size != 15) {
         nondefault_settings.push_back("spi_max_dp_size=" + std::to_string(spi_max_dp_size));
-    if (spi_max_seeds != 50)
+    }
+    if (spi_max_seeds != 50) {
         nondefault_settings.push_back("spi_max_seeds=" + std::to_string(spi_max_seeds));
-    if (spi_max_grow_candidates != 40)
+    }
+    if (spi_max_grow_candidates != 40) {
         nondefault_settings.push_back("spi_max_grow_candidates=" +
                                       std::to_string(spi_max_grow_candidates));
-    if (branch_hyper != "off")
+    }
+    if (branch_hyper != "off") {
         nondefault_settings.push_back("branch_hyper=" + branch_hyper);
+    }
     if (preproc_fast_restarts != 12) {
         nondefault_settings.push_back("preproc_fast_restarts=" +
                                       std::to_string(preproc_fast_restarts));
@@ -837,49 +873,65 @@ SolveResult Model::solve(const SolverOptions& options) {
                                           std::to_string(rc_settings.periodic_interval));
         }
         if (rc_settings.fix_to_one) {
-            nondefault_settings.push_back("rc_fixing_to_one=on");
+            nondefault_settings.emplace_back("rc_fixing_to_one=on");
         }
     }
-    if (!enable_sec)
-        nondefault_settings.push_back("enable_sec=off");
-    if (!enable_rci)
-        nondefault_settings.push_back("enable_rci=off");
-    if (!enable_multistar)
-        nondefault_settings.push_back("enable_multistar=off");
-    if (enable_comb)
-        nondefault_settings.push_back("enable_comb=on");
-    if (enable_spi)
-        nondefault_settings.push_back("enable_spi=on");
-    if (enable_rglm)
-        nondefault_settings.push_back("enable_rglm=on");
-    if (max_cuts_sec != -1)
+    if (!enable_sec) {
+        nondefault_settings.emplace_back("enable_sec=off");
+    }
+    if (!enable_rci) {
+        nondefault_settings.emplace_back("enable_rci=off");
+    }
+    if (!enable_multistar) {
+        nondefault_settings.emplace_back("enable_multistar=off");
+    }
+    if (enable_comb) {
+        nondefault_settings.emplace_back("enable_comb=on");
+    }
+    if (enable_spi) {
+        nondefault_settings.emplace_back("enable_spi=on");
+    }
+    if (enable_rglm) {
+        nondefault_settings.emplace_back("enable_rglm=on");
+    }
+    if (max_cuts_sec != -1) {
         nondefault_settings.push_back("max_cuts_sec=" + std::to_string(max_cuts_sec));
-    if (max_cuts_rci != -1)
+    }
+    if (max_cuts_rci != -1) {
         nondefault_settings.push_back("max_cuts_rci=" + std::to_string(max_cuts_rci));
-    if (max_cuts_multistar != -1)
+    }
+    if (max_cuts_multistar != -1) {
         nondefault_settings.push_back("max_cuts_multistar=" + std::to_string(max_cuts_multistar));
-    if (max_cuts_comb != -1)
+    }
+    if (max_cuts_comb != -1) {
         nondefault_settings.push_back("max_cuts_comb=" + std::to_string(max_cuts_comb));
-    if (max_cuts_rglm != -1)
+    }
+    if (max_cuts_rglm != -1) {
         nondefault_settings.push_back("max_cuts_rglm=" + std::to_string(max_cuts_rglm));
-    if (max_cuts_spi != -1)
+    }
+    if (max_cuts_spi != -1) {
         nondefault_settings.push_back("max_cuts_spi=" + std::to_string(max_cuts_spi));
+    }
     if (branch_hyper != "off") {
-        if (hyper_sb_max_depth != 0)
+        if (hyper_sb_max_depth != 0) {
             nondefault_settings.push_back("branch_hyper_sb_max_depth=" +
                                           std::to_string(hyper_sb_max_depth));
-        if (hyper_sb_iter_limit != 100)
+        }
+        if (hyper_sb_iter_limit != 100) {
             nondefault_settings.push_back("branch_hyper_sb_iter_limit=" +
                                           std::to_string(hyper_sb_iter_limit));
-        if (hyper_sb_min_reliable != 4)
+        }
+        if (hyper_sb_min_reliable != 4) {
             nondefault_settings.push_back("branch_hyper_sb_min_reliable=" +
                                           std::to_string(hyper_sb_min_reliable));
-        if (hyper_sb_max_candidates != 3)
+        }
+        if (hyper_sb_max_candidates != 3) {
             nondefault_settings.push_back("branch_hyper_sb_max_candidates=" +
                                           std::to_string(hyper_sb_max_candidates));
+        }
     }
     for (const auto& [k, v] : accepted_highs_options) {
-        nondefault_settings.push_back(k + "=" + v);
+        nondefault_settings.push_back(std::string(k).append("=").append(v));
     }
 
     const int32_t source = problem_.source();
@@ -933,7 +985,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     // double-subtracted)
     double correction = problem_.is_tour() ? problem_.profit(source) : 0.0;
 
-    std::vector<double> fwd_bounds, bwd_bounds;
+    std::vector<double> fwd_bounds;
+    std::vector<double> bwd_bounds;
     std::vector<double> all_pairs;
     heuristic::HeuristicResult warm_start{{}, std::numeric_limits<double>::infinity()};
     double warm_start_ub = std::numeric_limits<double>::infinity();
@@ -1055,14 +1108,13 @@ SolveResult Model::solve(const SolverOptions& options) {
             logger_.log("Lower bounds all pairs calculation:");
             Timer all_pairs_timer;
             {
-                constexpr double inf = std::numeric_limits<double>::infinity();
-                all_pairs.assign(static_cast<size_t>(n) * n, inf);
+                constexpr double kInf = std::numeric_limits<double>::infinity();
+                all_pairs.assign(static_cast<size_t>(n) * n, kInf);
                 parallel::parallel_for(
                     0, n,
                     [&](int s) {
                         auto row = preprocess::forward_labeling(problem_, s);
-                        std::copy(row.begin(), row.end(),
-                                  all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
+                        std::ranges::copy(row, all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
                     },
                     preproc_thread_limit);
             }
@@ -1161,18 +1213,24 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_heuristic_node_interval(heu_lpg_node_interval);
     bridge.set_heuristic_deterministic_restarts(heu_lpg_deterministic_restarts);
     bridge.set_fixed_y(fixed_y);
-    if (max_cuts_sec >= 0)
+    if (max_cuts_sec >= 0) {
         bridge.set_separator_max_cuts("SEC", max_cuts_sec);
-    if (max_cuts_rci >= 0)
+    }
+    if (max_cuts_rci >= 0) {
         bridge.set_separator_max_cuts("RCI", max_cuts_rci);
-    if (max_cuts_multistar >= 0)
+    }
+    if (max_cuts_multistar >= 0) {
         bridge.set_separator_max_cuts("Multistar", max_cuts_multistar);
-    if (max_cuts_comb >= 0)
+    }
+    if (max_cuts_comb >= 0) {
         bridge.set_separator_max_cuts("Comb", max_cuts_comb);
-    if (max_cuts_rglm >= 0)
+    }
+    if (max_cuts_rglm >= 0) {
         bridge.set_separator_max_cuts("RGLM", max_cuts_rglm);
-    if (max_cuts_spi >= 0)
+    }
+    if (max_cuts_spi >= 0) {
         bridge.set_separator_max_cuts("SPI", max_cuts_spi);
+    }
 
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
     if (all_pairs_bounds) {
@@ -1180,16 +1238,21 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     // Add separators (same default families for tour and s-t path).
-    if (enable_sec)
+    if (enable_sec) {
         bridge.add_separator(std::make_unique<sep::SECSeparator>());
-    if (enable_rci)
+    }
+    if (enable_rci) {
         bridge.add_separator(std::make_unique<sep::RCISeparator>());
-    if (enable_multistar)
+    }
+    if (enable_multistar) {
         bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
-    if (enable_rglm)
+    }
+    if (enable_rglm) {
         bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
-    if (enable_comb)
+    }
+    if (enable_comb) {
         bridge.add_separator(std::make_unique<sep::CombSeparator>());
+    }
     if (all_pairs_bounds && enable_spi) {
         auto spi = std::make_unique<sep::SPISeparator>();
         spi->set_max_dp_size(spi_max_dp_size);
@@ -1219,8 +1282,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (heu_ws && has_feasible_heuristic(warm_start)) {
         std::vector<double> start_values = std::move(warm_start.col_values);
         HighsInt num_cols = highs.getNumCol();
-        while (static_cast<HighsInt>(start_values.size()) < num_cols)
+        while (static_cast<HighsInt>(start_values.size()) < num_cols) {
             start_values.push_back(0.0);
+        }
         if (heu_lpg) {
             // When the LP-guided heuristic is active it injects solutions through
             // kCallbackMipUserSolution. Combining that with HiGHS setSolution()
@@ -1239,8 +1303,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     // Adjust time_limit to account for preprocessing time already spent.
     if (user_time_limit > 0.0) {
         double remaining = user_time_limit - pre_highs_seconds;
-        if (remaining < 0.1)
-            remaining = 0.1;  // give HiGHS at least 0.1s
+        remaining = std::max(remaining, 0.1);  // give HiGHS at least 0.1s
         highs.setOptionValue("time_limit", remaining);
     }
     logger_.log("HiGHS start offset (preprocessing): {:.3f}s", pre_highs_seconds);

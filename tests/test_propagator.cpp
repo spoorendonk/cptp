@@ -25,9 +25,9 @@ TEST_CASE("forward_labeling from depot gives finite bounds for reachable nodes",
     REQUIRE(bounds[prob.depot()] <= -prob.profit(prob.depot()) + 1e-6);
 
     // All nodes should be reachable in a small complete-ish graph
-    constexpr double inf = std::numeric_limits<double>::infinity();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
     for (int32_t i = 0; i < prob.num_nodes(); ++i) {
-        REQUIRE(bounds[i] < inf);
+        REQUIRE(bounds[i] < kInf);
     }
 }
 
@@ -56,7 +56,7 @@ TEST_CASE("forward_labeling from non-depot source", "[labeling]") {
 TEST_CASE("edge_elimination with infinite UB eliminates nothing", "[elimination]") {
     auto prob = cptp::io::load("tests/data/tiny4.txt");
     auto fwd = cptp::preprocess::forward_labeling(prob, prob.depot());
-    auto bwd = fwd;
+    const auto& bwd = fwd;
     double correction = prob.profit(prob.depot());
 
     auto eliminated = cptp::preprocess::edge_elimination(
@@ -70,7 +70,7 @@ TEST_CASE("edge_elimination with infinite UB eliminates nothing", "[elimination]
 TEST_CASE("edge_elimination with very tight UB eliminates edges", "[elimination]") {
     auto prob = cptp::io::load("tests/data/tiny4.txt");
     auto fwd = cptp::preprocess::forward_labeling(prob, prob.depot());
-    auto bwd = fwd;
+    const auto& bwd = fwd;
     double correction = prob.profit(prob.depot());
 
     // Use a very tight upper bound — should eliminate some edges
@@ -81,8 +81,9 @@ TEST_CASE("edge_elimination with very tight UB eliminates edges", "[elimination]
     // At least some edges should be eliminated with a tight bound
     int count = 0;
     for (int32_t e = 0; e < prob.num_edges(); ++e) {
-        if (eliminated[e])
+        if (eliminated[e]) {
             count++;
+        }
     }
     // On tiny4 with tight bound, some high-cost edges should be eliminated
     // (exact count depends on instance, just verify it runs without error)
@@ -100,7 +101,7 @@ TEST_CASE("edge_elimination preserves optimal tour edges", "[elimination]") {
     REQUIRE(result.is_optimal());
 
     auto fwd = cptp::preprocess::forward_labeling(prob, prob.depot());
-    auto bwd = fwd;
+    const auto& bwd = fwd;
     double correction = prob.profit(prob.depot());
 
     auto eliminated =
@@ -167,10 +168,12 @@ TEST_CASE("labeling_from with scaled costs gives scaled bounds", "[labeling]") {
     // Double all costs and profits → bounds should double
     std::vector<double> scaled_costs(m);
     std::vector<double> scaled_profits(n);
-    for (int32_t e = 0; e < m; ++e)
+    for (int32_t e = 0; e < m; ++e) {
         scaled_costs[e] = prob.edge_cost(e) * 2.0;
-    for (int32_t i = 0; i < n; ++i)
+    }
+    for (int32_t i = 0; i < n; ++i) {
         scaled_profits[i] = prob.profit(i) * 2.0;
+    }
 
     auto original =
         cptp::preprocess::labeling_from(prob, prob.depot(), prob.edge_costs(), prob.profits());
@@ -201,8 +204,9 @@ TEST_CASE("labeling_from with forbidden node gives higher bound", "[labeling]") 
     // Non-forbidden, non-depot nodes should have bounds >= the normal bounds
     // (fewer profitable paths available when a node is forbidden)
     for (int32_t i = 0; i < n; ++i) {
-        if (i == forbidden || i == prob.depot())
+        if (i == forbidden || i == prob.depot()) {
             continue;
+        }
         REQUIRE(bounds[i] >= normal[i] - 1e-6);
     }
 }
@@ -240,8 +244,9 @@ TEST_CASE("labeling_from with negative costs finds shorter paths", "[labeling]")
 
     // Halve all edge costs — bounds should decrease (cheaper paths)
     std::vector<double> cheap_costs(m);
-    for (int32_t e = 0; e < m; ++e)
+    for (int32_t e = 0; e < m; ++e) {
         cheap_costs[e] = prob.edge_cost(e) * 0.5;
+    }
 
     auto cheaper = cptp::preprocess::labeling_from(prob, prob.depot(), cheap_costs, prob.profits());
 
@@ -304,7 +309,7 @@ TEST_CASE("solver handles labeling budget exhaustion", "[labeling]") {
 
 // ─── Propagator integration tests ───
 
-static const cptp::SolverOptions quiet = {
+static const cptp::SolverOptions kQuiet = {
     {"time_limit", "30"},
     {"output_flag", "false"},
 };
@@ -313,9 +318,10 @@ static cptp::SolveResult solve_instance(const char* path, const cptp::SolverOpti
     auto prob = cptp::io::load(path);
     cptp::Model model;
     model.set_problem(std::move(prob));
-    auto opts = quiet;
-    for (const auto& kv : extra)
+    auto opts = kQuiet;
+    for (const auto& kv : extra) {
         opts.push_back(kv);
+    }
     return model.solve(opts);
 }
 

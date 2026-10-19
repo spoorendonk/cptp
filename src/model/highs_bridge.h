@@ -169,8 +169,8 @@ private:
     Logger& logger_;
     int32_t num_edges_;
     int32_t num_nodes_;
-    double frac_tol_;  // violation tolerance for fractional separation
-    double int_tol_;   // violation tolerance for integral feasibility check
+    double frac_tol_;       // violation tolerance for fractional separation
+    double int_tol_{1e-6};  // violation tolerance for integral feasibility check
     std::vector<std::unique_ptr<sep::Separator>> separators_;
 
     // Amortized separation: skip rounds to reduce overhead

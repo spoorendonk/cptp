@@ -31,8 +31,9 @@ public:
         // For each arc (u,v), find the arc (v,u) as its reverse
         // Build a map: (u,v) -> arc index
         for (int32_t a = 0; a < m; ++a) {
-            if (rev_[a] >= 0)
+            if (rev_[a] >= 0) {
                 continue;
+            }
             int32_t u = g.arc_source(a);
             int32_t v = g.arc_target(a);
             // Find reverse arc (v,u)
@@ -48,10 +49,10 @@ public:
 
     dinitz& run() {
         flow_value_ = 0.0;
-        std::fill(flow_.begin(), flow_.end(), 0.0);
+        std::ranges::fill(flow_, 0.0);
 
         while (bfs()) {
-            std::fill(iter_.begin(), iter_.end(), 0);
+            std::ranges::fill(iter_, 0);
             double f;
             while ((f = dfs(source_, std::numeric_limits<double>::infinity())) > 0) {
                 flow_value_ += f;
@@ -60,14 +61,14 @@ public:
         return *this;
     }
 
-    double flow_value() const { return flow_value_; }
+    [[nodiscard]] double flow_value() const { return flow_value_; }
 
     /// Returns true if v is on the source side of the min-cut.
-    bool on_source_side(int32_t v) const { return level_[v] >= 0; }
+    [[nodiscard]] bool on_source_side(int32_t v) const { return level_[v] >= 0; }
 
 private:
     bool bfs() {
-        std::fill(level_.begin(), level_.end(), -1);
+        std::ranges::fill(level_, -1);
         std::queue<int32_t> q;
         level_[source_] = 0;
         q.push(source_);
@@ -96,13 +97,14 @@ private:
     }
 
     double dfs(int32_t v, double pushed) {
-        if (v == target_)
+        if (v == target_) {
             return pushed;
+        }
 
         // Try forward arcs
         auto out = g_.out_arcs(v);
         auto in = g_.in_arcs(v);
-        int32_t total = static_cast<int32_t>(out.size() + in.size());
+        auto total = static_cast<int32_t>(out.size() + in.size());
 
         for (int32_t& i = iter_[v]; i < total; ++i) {
             if (i < static_cast<int32_t>(out.size())) {
@@ -134,7 +136,7 @@ private:
         return 0.0;
     }
 
-    double residual(int32_t a) const { return cap_[a] - flow_[a]; }
+    [[nodiscard]] double residual(int32_t a) const { return cap_[a] - flow_[a]; }
 
     const digraph& g_;
     const std::vector<double>& cap_;

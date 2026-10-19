@@ -17,8 +17,9 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
     const bool is_tour = prob.is_tour();
     const int32_t path_target = prob.target();
 
-    if (Q <= 0 || Q >= kInfiniteCapacity)
+    if (Q <= 0 || Q >= kInfiniteCapacity) {
         return {};
+    }
 
     std::vector<Cut> all_cuts;
 
@@ -45,8 +46,9 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
             int32_t v = graph.edge_target(e);
             bool u_in_S = !reachable[u] && (is_tour || u != path_target);
             bool v_in_S = !reachable[v] && (is_tour || v != path_target);
-            if (u_in_S == v_in_S)
+            if (u_in_S == v_in_S) {
                 continue;
+            }
 
             int32_t outside = u_in_S ? v : u;
             double q_outside = prob.demand(outside);
@@ -58,11 +60,13 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
         }
 
         for (int32_t i = 0; i < n; ++i) {
-            if (reachable[i] || (!is_tour && i == path_target))
+            if (reachable[i] || (!is_tour && i == path_target)) {
                 continue;
+            }
             double q_i = prob.demand(i);
-            if (q_i <= 0)
+            if (q_i <= 0) {
                 continue;
+            }
 
             double coeff = 2.0 * q_i / Q;
             lhs += coeff * ctx.y_values[i];

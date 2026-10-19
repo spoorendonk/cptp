@@ -52,7 +52,7 @@ HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger, doub
       num_edges_(prob.num_edges()),
       num_nodes_(prob.num_nodes()),
       frac_tol_(frac_tol),
-      int_tol_(1e-6),
+
       cached_x_lp_(std::make_shared<std::vector<double>>()),
       cached_y_lp_(std::make_shared<std::vector<double>>()),
       lp_cache_mutex_(std::make_shared<std::mutex>()),
@@ -68,8 +68,9 @@ HiGHSBridge::~HiGHSBridge() {
 }
 
 void HiGHSBridge::add_separator(std::unique_ptr<sep::Separator> sep) {
-    if (sep)
+    if (sep) {
         separator_stats_.try_emplace(sep->name(), SeparatorStats{});
+    }
     separators_.push_back(std::move(sep));
 }
 
@@ -101,8 +102,9 @@ void HiGHSBridge::build_formulation() {
         for (int32_t i = 0; i < n; ++i) {
             if (!reachable[i] && i != prob_.source() && i != prob_.target()) {
                 col_upper[m + i] = 0.0;
-                for (auto e : graph.incident_edges(i))
+                for (auto e : graph.incident_edges(i)) {
                     col_upper[e] = 0.0;
+                }
             }
         }
     }
@@ -110,8 +112,9 @@ void HiGHSBridge::build_formulation() {
     // Optional fixed-y assignments supplied by the caller.
     if (!fixed_y_.empty() && fixed_y_.size() == static_cast<size_t>(n)) {
         for (int32_t i = 0; i < n; ++i) {
-            if (i == prob_.source() || i == prob_.target())
+            if (i == prob_.source() || i == prob_.target()) {
                 continue;
+            }
             const int8_t fix = fixed_y_[static_cast<size_t>(i)];
             if (fix == 0) {
                 col_upper[m + i] = 0.0;
@@ -140,8 +143,9 @@ void HiGHSBridge::build_formulation() {
         int32_t node_elim_count = 0;
         if (edge_elimination_nodes_) {
             for (int32_t i = 0; i < n; ++i) {
-                if (i == prob_.source() || i == prob_.target() || col_upper[m + i] == 0.0)
+                if (i == prob_.source() || i == prob_.target() || col_upper[m + i] == 0.0) {
                     continue;
+                }
                 bool all_eliminated = true;
                 for (auto e : graph.incident_edges(i)) {
                     if (col_upper[e] > 0.0) {
@@ -171,8 +175,8 @@ void HiGHSBridge::build_formulation() {
     }
 
     // Check if all objective coefficients are integer-valued.
-    obj_is_integer_ = std::all_of(col_cost.begin(), col_cost.end(),
-                                  [](double c) { return std::abs(c - std::round(c)) < 1e-9; });
+    obj_is_integer_ =
+        std::ranges::all_of(col_cost, [](double c) { return std::abs(c - std::round(c)) < 1e-9; });
 
     // Add columns with costs
     for (int i = 0; i < total_vars; ++i) {
@@ -194,7 +198,7 @@ void HiGHSBridge::build_formulation() {
         std::vector<int> indices;
         std::vector<double> values;
         for (auto e : graph.incident_edges(i)) {
-            indices.push_back(static_cast<int>(e));
+            indices.push_back(e);
             values.push_back(1.0);
         }
         bool is_terminal = !prob_.is_tour() && (i == prob_.source() || i == prob_.target());
@@ -223,8 +227,7 @@ void HiGHSBridge::build_formulation() {
 
 void HiGHSBridge::install_separators() {
     const bool sec_enabled_for_callbacks =
-        std::any_of(separators_.begin(), separators_.end(),
-                    [](const auto& s) { return s && s->name() == "SEC"; });
+        std::ranges::any_of(separators_, [](const auto& s) { return s && s->name() == "SEC"; });
     // Capture what the callback needs by pointer/reference.
     // The bridge must outlive the highs.run() call.
     HighsUserSeparator::setCallback([this, sec_enabled_for_callbacks](
@@ -235,18 +238,21 @@ void HiGHSBridge::install_separators() {
         // cuts back to reduced space. Only run at the sub-MIP root node
         // to tighten the LP without per-node overhead.
         if (mipsolver.submip) {
-            if (!submip_separation_)
+            if (!submip_separation_) {
                 return;
-            if (mipsolver.mipdata_->num_nodes > 0)
+            }
+            if (mipsolver.mipdata_->num_nodes > 0) {
                 return;  // root only
+            }
         }
 
         // Amortized separation: skip rounds to reduce overhead
         // (not applied for sub-MIPs — they are short-lived)
         if (!mipsolver.submip) {
             int64_t call = separation_calls_++;
-            if (separation_interval_ > 1 && (call % separation_interval_) != 0)
+            if (separation_interval_ > 1 && (call % separation_interval_) != 0) {
                 return;
+            }
         }
 
         // Separation-phase wall-clock starts here: covers support-graph and
@@ -265,16 +271,16 @@ void HiGHSBridge::install_separators() {
         if (mipsolver.submip) {
             // Sub-MIP: LP solution is in reduced (presolved) column space.
             // Expand to original space so separators see the full model.
-            auto& postSolveStack =
-                const_cast<presolve::HighsPostsolveStack&>(mipsolver.mipdata_->postSolveStack);
+            auto& post_solve_stack = mipsolver.mipdata_->postSolveStack;
 
             HighsSolution temp_sol;
             temp_sol.col_value = sol.col_value;
             temp_sol.value_valid = true;
-            postSolveStack.undoPrimal(*mipsolver.options_mip_, temp_sol);
+            post_solve_stack.undoPrimal(*mipsolver.options_mip_, temp_sol);
 
-            if (static_cast<int32_t>(temp_sol.col_value.size()) < m + n)
+            if (static_cast<int32_t>(temp_sol.col_value.size()) < m + n) {
                 return;
+            }
 
             std::copy_n(temp_sol.col_value.begin(), m, x_vals.begin());
             std::copy_n(temp_sol.col_value.begin() + m, n, y_vals.begin());
@@ -293,7 +299,7 @@ void HiGHSBridge::install_separators() {
 
             // Cache LP values for heuristic callback
             {
-                std::lock_guard lock(*lp_cache_mutex_);
+                std::scoped_lock lock(*lp_cache_mutex_);
                 *cached_x_lp_ = x_vals;
                 *cached_y_lp_ = y_vals;
             }
@@ -332,8 +338,9 @@ void HiGHSBridge::install_separators() {
 
         const bool is_submip = !orig_to_reduced.empty();
         if (is_submip) {
-            if (!sec_enabled_for_callbacks)
+            if (!sec_enabled_for_callbacks) {
                 return;
+            }
             // Sub-MIP: only run SEC (lazy constraint) to keep overhead low.
             // Other separators (RCI, Multistar, etc.) add tightening cuts
             // but aren't needed for feasibility in short-lived sub-MIPs.
@@ -343,16 +350,17 @@ void HiGHSBridge::install_separators() {
             const int32_t max_cuts =
                 (it_cap != per_separator_max_cuts_.end()) ? it_cap->second : max_cuts_per_sep_;
 
-            std::stable_sort(cuts.begin(), cuts.end(), [](const sep::Cut& a, const sep::Cut& b) {
+            std::ranges::stable_sort(cuts, [](const sep::Cut& a, const sep::Cut& b) {
                 return a.violation > b.violation;
             });
             int32_t added = 0;
-            if (max_cuts == 0)
+            if (max_cuts == 0) {
                 return;
-            for (int32_t j = 0; j < static_cast<int32_t>(cuts.size()); ++j) {
-                if (max_cuts >= 0 && added >= max_cuts)
+            }
+            for (auto& cut : cuts) {
+                if (max_cuts >= 0 && added >= max_cuts) {
                     break;
-                auto& cut = cuts[j];
+                }
                 // Translate cut indices from original to reduced space
                 std::vector<HighsInt> red_idx;
                 std::vector<double> red_val;
@@ -404,8 +412,9 @@ void HiGHSBridge::install_separators() {
                 const std::string sep_name = separators_[i]->name();
                 auto& stats = separator_stats_[sep_name];
                 stats.time_seconds += elapsed[i];
-                if (!results[i].empty())
+                if (!results[i].empty()) {
                     stats.rounds_called++;
+                }
                 // Per-separator cap (optional pre-filter)
                 const auto it_cap = per_separator_max_cuts_.find(sep_name);
                 const int32_t sep_cap = (it_cap != per_separator_max_cuts_.end())
@@ -413,26 +422,28 @@ void HiGHSBridge::install_separators() {
                                             : 0;  // 0 = unlimited per separator
 
                 auto& cuts = results[i];
-                std::stable_sort(
-                    cuts.begin(), cuts.end(),
-                    [](const sep::Cut& a, const sep::Cut& b) { return a.violation > b.violation; });
+                std::ranges::stable_sort(cuts, [](const sep::Cut& a, const sep::Cut& b) {
+                    return a.violation > b.violation;
+                });
                 int32_t sep_added = 0;
                 for (size_t j = 0; j < cuts.size(); ++j) {
-                    if (sep_cap > 0 && sep_added >= sep_cap)
+                    if (sep_cap > 0 && sep_added >= sep_cap) {
                         break;
+                    }
                     pool.push_back({i, j, cuts[j].violation});
                     sep_added++;
                 }
             }
 
             // Sort entire pool by violation descending, add top max_cuts_per_round_
-            std::stable_sort(pool.begin(), pool.end(), [](const PooledCut& a, const PooledCut& b) {
+            std::ranges::stable_sort(pool, [](const PooledCut& a, const PooledCut& b) {
                 return a.violation > b.violation;
             });
             int32_t round_added = 0;
             for (const auto& pc : pool) {
-                if (max_cuts_per_round_ > 0 && round_added >= max_cuts_per_round_)
+                if (max_cuts_per_round_ > 0 && round_added >= max_cuts_per_round_) {
                     break;
+                }
                 auto& cut = results[pc.sep_idx][pc.cut_idx];
                 const std::string& sep_name = separators_[pc.sep_idx]->name();
                 auto& stats = separator_stats_[sep_name];
@@ -462,8 +473,9 @@ void HiGHSBridge::install_separators() {
     HighsUserSeparator::setFeasibilityCheck([this](const std::vector<double>& sol) -> bool {
         const int32_t m = num_edges_;
         const int32_t n = num_nodes_;
-        if (static_cast<int32_t>(sol.size()) < m + n)
+        if (static_cast<int32_t>(sol.size()) < m + n) {
             return true;
+        }
 
         // Always enforce SEC feasibility on integer incumbents, even when
         // SEC cut generation is disabled, to preserve route connectivity.
@@ -495,11 +507,11 @@ void HiGHSBridge::install_propagator() {
     const auto& graph = prob_.graph();
     const int32_t m = num_edges_;
     const int32_t n = num_nodes_;
-    constexpr double inf = std::numeric_limits<double>::infinity();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
 
     // Shared state for the propagator callback (captured by the lambda).
     // These are mutable across callback invocations.
-    auto last_ub = std::make_shared<double>(inf);
+    auto last_ub = std::make_shared<double>(kInf);
     auto processed_edge = std::make_shared<std::vector<bool>>(m, false);
     // Reset stats for this propagator installation.
     *stats_ = CallbackStats{};
@@ -545,16 +557,18 @@ void HiGHSBridge::install_propagator() {
                                                         const HighsMipSolver& mipsolver,
                                                         const HighsLpRelaxation& lp) {
         // Skip sub-MIPs: different column space
-        if (mipsolver.submip)
+        if (mipsolver.submip) {
             return;
+        }
 
         const auto& f = prop_fwd;
         const auto& b = prop_bwd;
         const double corr = prop_corr;
 
         double ub = mipsolver.mipdata_->upper_limit;
-        if (ub >= inf)
+        if (ub >= kInf) {
             return;
+        }
 
         stats->propagator_calls++;
         const auto propagator_t0 = std::chrono::steady_clock::now();
@@ -566,8 +580,9 @@ void HiGHSBridge::install_propagator() {
         auto fix_nodes_with_no_open_edges =
             [&](bool skip_terminals, bool count_toward_total_fixings, int64_t& node_fix_counter) {
                 for (int32_t i = 0; i < n; ++i) {
-                    if (domain.col_upper_[m + i] < 0.5)
+                    if (domain.col_upper_[m + i] < 0.5) {
                         continue;
+                    }
                     if (skip_terminals && (i == prob.source() || i == prob.target())) {
                         continue;
                     }
@@ -578,8 +593,9 @@ void HiGHSBridge::install_propagator() {
                             break;
                         }
                     }
-                    if (!all_fixed)
+                    if (!all_fixed) {
                         continue;
+                    }
                     domain.changeBound(HighsBoundType::kUpper, m + i, 0.0,
                                        HighsDomain::Reason::unspecified());
                     if (count_toward_total_fixings) {
@@ -599,11 +615,12 @@ void HiGHSBridge::install_propagator() {
         // (requires bounds-based propagation)
         if (bounds_prop && ub_improved) {
             // Reset processed edges — tighter UB may enable new fixings
-            std::fill(proc.begin(), proc.end(), false);
+            proc.assign(proc.size(), false);
 
             for (int32_t e = 0; e < m; ++e) {
-                if (domain.col_upper_[e] < 0.5)
+                if (domain.col_upper_[e] < 0.5) {
                     continue;  // already fixed
+                }
 
                 // Try both orientations
                 int32_t u = prob.graph().edge_source(e);
@@ -633,10 +650,12 @@ void HiGHSBridge::install_propagator() {
             const int64_t chain_before = stats->chain_fixings;
 
             for (int32_t e = 0; e < m; ++e) {
-                if (proc[e])
+                if (proc[e]) {
                     continue;
-                if (domain.col_lower_[e] < 0.5)
+                }
+                if (domain.col_lower_[e] < 0.5) {
                     continue;  // not fixed to 1
+                }
                 proc[e] = true;
 
                 int32_t a = prob.graph().edge_source(e);
@@ -651,10 +670,12 @@ void HiGHSBridge::install_propagator() {
                     const double cost_ai = ec[e];
 
                     for (int32_t ej = 0; ej < m; ++ej) {
-                        if (ej == e)
+                        if (ej == e) {
                             continue;
-                        if (domain.col_upper_[ej] < 0.5)
+                        }
+                        if (domain.col_upper_[ej] < 0.5) {
                             continue;
+                        }
 
                         int32_t u = prob.graph().edge_source(ej);
                         int32_t v = prob.graph().edge_target(ej);
@@ -694,10 +715,12 @@ void HiGHSBridge::install_propagator() {
                     double cost_a_to_i = f[a] + ec[e] - pr[i];
 
                     for (const auto& [ej, j] : adjacency[i]) {
-                        if (ej == e)
+                        if (ej == e) {
                             continue;
-                        if (domain.col_upper_[ej] < 0.5)
+                        }
+                        if (domain.col_upper_[ej] < 0.5) {
                             continue;
+                        }
 
                         double lb = cost_a_to_i + ec[ej] + b[j] + corr;
                         if (lb > ub + 1e-6) {
@@ -711,10 +734,12 @@ void HiGHSBridge::install_propagator() {
                     double cost_via_i_return = ec[e] + b[i] - pr[a];
 
                     for (const auto& [ek, k] : adjacency[a]) {
-                        if (ek == e)
+                        if (ek == e) {
                             continue;
-                        if (domain.col_upper_[ek] < 0.5)
+                        }
+                        if (domain.col_upper_[ek] < 0.5) {
                             continue;
+                        }
 
                         double lb = f[k] + ec[ek] + cost_via_i_return + corr;
                         if (lb > ub + 1e-6) {
@@ -752,7 +777,7 @@ void HiGHSBridge::install_propagator() {
                         z_LP = c;
                     }
                 }
-                int32_t ncols = static_cast<int32_t>(lp_sol.col_dual.size());
+                auto ncols = static_cast<int32_t>(lp_sol.col_dual.size());
 
                 // Build reduced-cost edge weights and node profits.
                 // RC for variable j = c_j - dual info. For MIP columns at LP:
@@ -779,7 +804,8 @@ void HiGHSBridge::install_propagator() {
                     double rc_corr = prob.is_tour() ? rc_profits[prob.source()] : 0.0;
 
                     // Forward + backward labeling with RC costs (parallel)
-                    std::vector<double> rc_fwd, rc_bwd;
+                    std::vector<double> rc_fwd;
+                    std::vector<double> rc_bwd;
                     if (prob.is_tour()) {
                         rc_fwd = preprocess::labeling_from(prob, prob.source(), rc_edge_costs,
                                                            rc_profits, labeling_limit);
@@ -799,14 +825,14 @@ void HiGHSBridge::install_propagator() {
                     // If labeling was aborted due to budget, skip this RC round
                     if (!rc_fwd.empty() && !rc_bwd.empty()) {
                         // Compute z_LR: cheapest resource-feasible tour/path under RC costs
-                        double z_LR = inf;
+                        double z_LR = kInf;
                         if (prob.is_tour()) {
                             // Tour: z_LR = min over edges (rc_fwd[u] + rc_e + rc_fwd[v]) +
                             // rc_corr
                             for (int32_t e = 0; e < m; ++e) {
                                 int32_t u = prob.graph().edge_source(e);
                                 int32_t v = prob.graph().edge_target(e);
-                                if (rc_fwd[u] < inf && rc_fwd[v] < inf) {
+                                if (rc_fwd[u] < kInf && rc_fwd[v] < kInf) {
                                     double val = rc_fwd[u] + rc_edge_costs[e] + rc_fwd[v] + rc_corr;
                                     z_LR = std::min(z_LR, val);
                                 }
@@ -824,24 +850,25 @@ void HiGHSBridge::install_propagator() {
                         // the true per-edge penalty.
                         double lagrangian_gap = z_LP - z_LR;
                         double optimality_gap = ub - z_LP;
-                        if (z_LR < inf && lagrangian_gap >= 0.0 &&
+                        if (z_LR < kInf && lagrangian_gap >= 0.0 &&
                             lagrangian_gap < optimality_gap + 1e-6) {
                             // Trigger C: Fix edges to 0
                             for (int32_t e = 0; e < m; ++e) {
-                                if (domain.col_upper_[e] < 0.5 || domain.col_lower_[e] > 0.5)
+                                if (domain.col_upper_[e] < 0.5 || domain.col_lower_[e] > 0.5) {
                                     continue;
+                                }
 
                                 int32_t u = prob.graph().edge_source(e);
                                 int32_t v = prob.graph().edge_target(e);
 
                                 double lb1 =
-                                    (rc_fwd[u] < inf && rc_bwd[v] < inf)
+                                    (rc_fwd[u] < kInf && rc_bwd[v] < kInf)
                                         ? rc_fwd[u] + rc_edge_costs[e] + rc_bwd[v] + rc_corr
-                                        : inf;
+                                        : kInf;
                                 double lb2 =
-                                    (rc_fwd[v] < inf && rc_bwd[u] < inf)
+                                    (rc_fwd[v] < kInf && rc_bwd[u] < kInf)
                                         ? rc_fwd[v] + rc_edge_costs[e] + rc_bwd[u] + rc_corr
-                                        : inf;
+                                        : kInf;
                                 double edge_lb = std::min(lb1, lb2);
 
                                 double excess = edge_lb - z_LR;
@@ -854,10 +881,12 @@ void HiGHSBridge::install_propagator() {
 
                             // Fix nodes where all incident edges are now fixed to 0
                             for (int32_t i = 0; i < n; ++i) {
-                                if (domain.col_upper_[m + i] < 0.5)
+                                if (domain.col_upper_[m + i] < 0.5) {
                                     continue;
-                                if (i == prob.source() || i == prob.target())
+                                }
+                                if (i == prob.source() || i == prob.target()) {
                                     continue;
+                                }
                                 bool all_fixed = true;
                                 for (const auto& [e, nb] : adjacency[i]) {
                                     if (domain.col_upper_[e] > 0.5) {
@@ -876,17 +905,20 @@ void HiGHSBridge::install_propagator() {
                                 // For each unfixed node, run labeling with that node forbidden
                                 std::vector<int32_t> candidates;
                                 for (int32_t i = 0; i < n; ++i) {
-                                    if (i == prob.source() || i == prob.target())
+                                    if (i == prob.source() || i == prob.target()) {
                                         continue;
-                                    if (domain.col_lower_[m + i] > 0.5)
+                                    }
+                                    if (domain.col_lower_[m + i] > 0.5) {
                                         continue;  // already fixed to 1
-                                    if (domain.col_upper_[m + i] < 0.5)
+                                    }
+                                    if (domain.col_upper_[m + i] < 0.5) {
                                         continue;  // already fixed to 0
+                                    }
                                     candidates.push_back(i);
                                 }
 
                                 // Parallel labeling with each node forbidden
-                                std::vector<double> z_LR_minus(candidates.size(), inf);
+                                std::vector<double> z_LR_minus(candidates.size(), kInf);
                                 parallel::parallel_for(
                                     0, static_cast<int>(candidates.size()), [&](int idx) {
                                         int32_t node_i = candidates[idx];
@@ -898,15 +930,16 @@ void HiGHSBridge::install_propagator() {
                                             prob, prob.source(), rc_edge_costs, mod_profits,
                                             labeling_limit);
 
-                                        if (fwd_i.empty())
+                                        if (fwd_i.empty()) {
                                             return;  // budget exhausted
+                                        }
 
                                         if (prob.is_tour()) {
-                                            double best = inf;
+                                            double best = kInf;
                                             for (int32_t e = 0; e < m; ++e) {
                                                 int32_t u = prob.graph().edge_source(e);
                                                 int32_t v = prob.graph().edge_target(e);
-                                                if (fwd_i[u] < inf && fwd_i[v] < inf) {
+                                                if (fwd_i[u] < kInf && fwd_i[v] < kInf) {
                                                     double val = fwd_i[u] + rc_edge_costs[e] +
                                                                  fwd_i[v] + rc_corr;
                                                     best = std::min(best, val);
@@ -921,8 +954,9 @@ void HiGHSBridge::install_propagator() {
                                 stats->rc_label_runs += static_cast<int64_t>(candidates.size());
 
                                 for (size_t idx = 0; idx < candidates.size(); ++idx) {
-                                    if (z_LR_minus[idx] >= inf)
+                                    if (z_LR_minus[idx] >= kInf) {
                                         continue;
+                                    }
                                     double gap = z_LR_minus[idx] - z_LR;
                                     if (z_LP + gap > ub + 1e-6) {
                                         int32_t node_i = candidates[idx];
@@ -969,8 +1003,9 @@ void HiGHSBridge::install_heuristic_callback() {
     const bool heuristic_enabled = heuristic_callback_;
     const bool interrupt_enabled = static_cast<bool>(interrupt_flag_);
     const bool logging_enabled = logger_.enabled();
-    if (!heuristic_enabled && !interrupt_enabled && !logging_enabled)
+    if (!heuristic_enabled && !interrupt_enabled && !logging_enabled) {
         return;
+    }
 
     auto stats = stats_;
     int strategy = heuristic_strategy_;
@@ -993,8 +1028,9 @@ void HiGHSBridge::install_heuristic_callback() {
                                                const HighsCallbackOutput* data_out,
                                                HighsCallbackInput* data_in, void* /*user_data*/) {
             if (callback_type == static_cast<int>(HighsCallbackType::kCallbackLogging)) {
-                if (!logger_.enabled())
+                if (!logger_.enabled()) {
                     return;
+                }
                 logger_.log(std::string_view{message});
                 return;
             }
@@ -1004,8 +1040,9 @@ void HiGHSBridge::install_heuristic_callback() {
                     data_in->user_interrupt = true;
                     return;
                 }
-                if (!heuristic_enabled)
+                if (!heuristic_enabled) {
                     return;
+                }
 
                 // Only stop when HiGHS has already accepted an incumbent.
                 if (std::isfinite(data_out->mip_primal_bound) &&
@@ -1016,8 +1053,9 @@ void HiGHSBridge::install_heuristic_callback() {
                 return;
             }
 
-            if (!heuristic_enabled)
+            if (!heuristic_enabled) {
                 return;
+            }
 
             // Only handle kCallbackMipUserSolution below.
             if (callback_type != static_cast<int>(HighsCallbackType::kCallbackMipUserSolution)) {
@@ -1045,11 +1083,13 @@ void HiGHSBridge::install_heuristic_callback() {
             *last_node_count = current_nodes;
 
             // Read cached LP values from separator callback
-            std::vector<double> x_lp, y_lp;
+            std::vector<double> x_lp;
+            std::vector<double> y_lp;
             {
-                std::lock_guard lock(*cache_mtx);
-                if (cached_x->empty())
+                std::scoped_lock lock(*cache_mtx);
+                if (cached_x->empty()) {
                     return;
+                }
                 x_lp = *cached_x;
                 y_lp = *cached_y;
             }
@@ -1092,8 +1132,9 @@ void HiGHSBridge::install_heuristic_callback() {
 
 std::vector<int32_t> HiGHSBridge::order_path(const std::vector<int32_t>& visited_nodes,
                                              const std::vector<int32_t>& active_edges) const {
-    if (visited_nodes.empty())
+    if (visited_nodes.empty()) {
         return {};
+    }
 
     const auto& graph = prob_.graph();
     const int32_t start = prob_.source();
@@ -1167,8 +1208,6 @@ SolveResult HiGHSBridge::extract_result() const {
             break;
         case HighsModelStatus::kObjectiveBound:
         case HighsModelStatus::kObjectiveTarget:
-            result.status = SolveResult::Status::Feasible;
-            break;
         case HighsModelStatus::kInterrupt:
         case HighsModelStatus::kHighsInterrupt:
             result.status = SolveResult::Status::Feasible;

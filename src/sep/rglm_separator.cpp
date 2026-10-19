@@ -17,8 +17,9 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
     const bool is_tour = prob.is_tour();
     const int32_t path_target = prob.target();
 
-    if (Q <= 0 || Q >= kInfiniteCapacity)
+    if (Q <= 0 || Q >= kInfiniteCapacity) {
         return {};
+    }
 
     // Precompute total demand (constant across all targets).
     double d_total = 0.0;
@@ -49,12 +50,14 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
         // alpha = d_S + 2*(d_total - d_S) = 2*d_total - d_S
         double alpha = 2.0 * d_total - d_S;
         double r = std::fmod(alpha, Q);
-        if (r <= tol)
+        if (r <= tol) {
             continue;  // no rounding benefit
+        }
 
         double k = std::ceil(alpha / Q);
-        if (k <= 1.0)
+        if (k <= 1.0) {
             continue;  // no strengthening
+        }
 
         // Compute cut_flow and star_sum over crossing edges.
         double cut_flow = 0.0;
@@ -65,8 +68,9 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
             int32_t v = graph.edge_target(e);
             bool u_in_S = !reachable[u] && (is_tour || u != path_target);
             bool v_in_S = !reachable[v] && (is_tour || v != path_target);
-            if (u_in_S == v_in_S)
+            if (u_in_S == v_in_S) {
                 continue;
+            }
 
             int32_t outside = u_in_S ? v : u;
             double d_out = prob.demand(outside);
@@ -87,8 +91,9 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
 
         // Violation: (2k - 2*beta/r) - cut_flow > tol
         double violation = (2.0 * k - 2.0 * beta / r) - cut_flow;
-        if (violation <= tol)
+        if (violation <= tol) {
             continue;
+        }
 
         // Build cut in <= form:
         //   (2/r)*sum_{i in S} d_i*y_i
@@ -101,8 +106,9 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
             int32_t v = graph.edge_target(e);
             bool u_in_S = !reachable[u] && (is_tour || u != path_target);
             bool v_in_S = !reachable[v] && (is_tour || v != path_target);
-            if (u_in_S == v_in_S)
+            if (u_in_S == v_in_S) {
                 continue;
+            }
 
             int32_t outside = u_in_S ? v : u;
             double d_out = prob.demand(outside);
@@ -113,11 +119,13 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
         }
 
         for (int32_t i = 0; i < n; ++i) {
-            if (reachable[i] || (!is_tour && i == path_target))
+            if (reachable[i] || (!is_tour && i == path_target)) {
                 continue;
+            }
             double d_i = prob.demand(i);
-            if (d_i <= 0)
+            if (d_i <= 0) {
                 continue;
+            }
 
             double coeff = 2.0 * d_i / r;
             cut.indices.push_back(ctx.y_offset + i);

@@ -18,8 +18,9 @@ public:
         // Gusfield's algorithm: for each node i != root, compute
         // max-flow(i, parent[i]) and update tree edges.
         for (int32_t i = 0; i < n_; ++i) {
-            if (i == root)
+            if (i == root) {
                 continue;
+            }
 
             dinitz alg(g, cap, i, parent_[i]);
             alg.run();
@@ -34,8 +35,9 @@ public:
             // Update tree: for j > i where parent[j] == parent[i]
             // and j is on i's side, reparent j to i.
             for (int32_t j = i + 1; j < n_; ++j) {
-                if (j == root)
+                if (j == root) {
                     continue;
+                }
                 if (parent_[j] == parent_[i] && cut_side_[i][j]) {
                     parent_[j] = i;
                 }
@@ -60,7 +62,7 @@ public:
 
     /// Return the min-cut separating target from root.
     /// Walks the tree path from target to root, finds the bottleneck.
-    CutInfo min_cut(int32_t target) const {
+    [[nodiscard]] CutInfo min_cut(int32_t target) const {
         // Walk path from target to root, find minimum weight edge
         int32_t bottleneck = target;
         double min_weight = std::numeric_limits<double>::infinity();
@@ -92,7 +94,7 @@ public:
     /// Each CutRef identifies a GH tree node whose stored cut_side
     /// defines the partition. Returns O(depth) candidates with zero
     /// additional max-flow cost.
-    std::vector<CutRef> all_cuts_on_path(int32_t target) const {
+    [[nodiscard]] std::vector<CutRef> all_cuts_on_path(int32_t target) const {
         std::vector<CutRef> cuts;
         int32_t v = target;
         while (v != root_) {
@@ -105,11 +107,11 @@ public:
     /// Get the cut partition for a given GH tree node.
     /// Returns true for nodes on the root/depot side (i.e., NOT on
     /// the node's source side in the original max-flow).
-    bool on_root_side(int32_t cut_node, int32_t query_node) const {
+    [[nodiscard]] bool on_root_side(int32_t cut_node, int32_t query_node) const {
         return !cut_side_[cut_node][query_node];
     }
 
-    int32_t num_nodes() const { return n_; }
+    [[nodiscard]] int32_t num_nodes() const { return n_; }
 
 private:
     int32_t root_;

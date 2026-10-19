@@ -15,15 +15,17 @@ public:
 
     void set_enabled(bool enabled) { enabled_.store(enabled, std::memory_order_relaxed); }
 
-    bool enabled() const { return enabled_.load(std::memory_order_relaxed); }
+    [[nodiscard]] bool enabled() const { return enabled_.load(std::memory_order_relaxed); }
 
     void log(std::string_view msg) {
-        if (!enabled())
+        if (!enabled()) {
             return;
-        std::lock_guard lock(mu_);
+        }
+        std::scoped_lock lock(mu_);
         out_ << msg;
-        if (!msg.empty() && msg.back() != '\n')
+        if (!msg.empty() && msg.back() != '\n') {
             out_ << '\n';
+        }
         out_.flush();
     }
 

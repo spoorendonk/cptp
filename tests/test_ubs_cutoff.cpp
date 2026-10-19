@@ -6,7 +6,7 @@
 
 using Catch::Matchers::WithinAbs;
 
-static const cptp::SolverOptions quiet = {
+static const cptp::SolverOptions kQuiet = {
     {"output_flag", "false"},
 };
 
@@ -15,10 +15,10 @@ static cptp::SolveResult prove_instance(const char* path, double cutoff, int tim
     auto prob = cptp::io::load(path);
     cptp::Model model;
     model.set_problem(std::move(prob));
-    auto opts = quiet;
-    opts.push_back({"time_limit", std::to_string(time_limit)});
-    opts.push_back({"cutoff", std::to_string(cutoff)});
-    opts.push_back({"heu_ws", "false"});
+    auto opts = kQuiet;
+    opts.emplace_back("time_limit", std::to_string(time_limit));
+    opts.emplace_back("cutoff", std::to_string(cutoff));
+    opts.emplace_back("heu_ws", "false");
     return model.solve(opts);
 }
 
@@ -27,8 +27,8 @@ static cptp::SolveResult solve_instance(const char* path, int time_limit = 120) 
     auto prob = cptp::io::load(path);
     cptp::Model model;
     model.set_problem(std::move(prob));
-    auto opts = quiet;
-    opts.push_back({"time_limit", std::to_string(time_limit)});
+    auto opts = kQuiet;
+    opts.emplace_back("time_limit", std::to_string(time_limit));
     return model.solve(opts);
 }
 
@@ -98,13 +98,14 @@ static cptp::SolveResult prove_rc_fixing(const char* path, double cutoff,
     auto prob = cptp::io::load(path);
     cptp::Model model;
     model.set_problem(std::move(prob));
-    auto opts = quiet;
-    opts.push_back({"time_limit", std::to_string(time_limit)});
-    opts.push_back({"cutoff", std::to_string(cutoff)});
-    opts.push_back({"heu_ws", "false"});
-    opts.push_back({"rc_fixing", strategy});
-    if (fix_to_one)
-        opts.push_back({"rc_fixing_to_one", "true"});
+    auto opts = kQuiet;
+    opts.emplace_back("time_limit", std::to_string(time_limit));
+    opts.emplace_back("cutoff", std::to_string(cutoff));
+    opts.emplace_back("heu_ws", "false");
+    opts.emplace_back("rc_fixing", strategy);
+    if (fix_to_one) {
+        opts.emplace_back("rc_fixing_to_one", "true");
+    }
     return model.solve(opts);
 }
 
@@ -145,12 +146,12 @@ TEST_CASE("rc_fixing periodic: tiny4 tour optimal", "[prove][rc_fixing]") {
     auto prob = cptp::io::load("tests/data/tiny4.txt");
     cptp::Model model;
     model.set_problem(std::move(prob));
-    auto opts = quiet;
-    opts.push_back({"time_limit", "30"});
-    opts.push_back({"cutoff", "-11.0"});
-    opts.push_back({"heu_ws", "false"});
-    opts.push_back({"rc_fixing", "periodic"});
-    opts.push_back({"rc_fixing_interval", "10"});
+    auto opts = kQuiet;
+    opts.emplace_back("time_limit", "30");
+    opts.emplace_back("cutoff", "-11.0");
+    opts.emplace_back("heu_ws", "false");
+    opts.emplace_back("rc_fixing", "periodic");
+    opts.emplace_back("rc_fixing_interval", "10");
     auto r = model.solve(opts);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1.0));
@@ -199,7 +200,7 @@ TEST_CASE("rc_fixing default active in normal solve: tiny4 path", "[rc_fixing]")
     auto prob = cptp::io::load("tests/data/tiny4_path.txt");
     cptp::Model model;
     model.set_problem(std::move(prob));
-    auto r = model.solve(quiet);
+    auto r = model.solve(kQuiet);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-13.0, 1.0));
 }
@@ -208,12 +209,12 @@ TEST_CASE("rc_fixing periodic: tiny4 path optimal", "[prove][rc_fixing]") {
     auto prob = cptp::io::load("tests/data/tiny4_path.txt");
     cptp::Model model;
     model.set_problem(std::move(prob));
-    auto opts = quiet;
-    opts.push_back({"time_limit", "30"});
-    opts.push_back({"cutoff", "-13.0"});
-    opts.push_back({"heu_ws", "false"});
-    opts.push_back({"rc_fixing", "periodic"});
-    opts.push_back({"rc_fixing_interval", "10"});
+    auto opts = kQuiet;
+    opts.emplace_back("time_limit", "30");
+    opts.emplace_back("cutoff", "-13.0");
+    opts.emplace_back("heu_ws", "false");
+    opts.emplace_back("rc_fixing", "periodic");
+    opts.emplace_back("rc_fixing_interval", "10");
     auto r = model.solve(opts);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-13.0, 1.0));
@@ -223,13 +224,13 @@ TEST_CASE("rc_fixing periodic + fix_to_one: tiny4 tour", "[prove][rc_fixing]") {
     auto prob = cptp::io::load("tests/data/tiny4.txt");
     cptp::Model model;
     model.set_problem(std::move(prob));
-    auto opts = quiet;
-    opts.push_back({"time_limit", "30"});
-    opts.push_back({"cutoff", "-11.0"});
-    opts.push_back({"heu_ws", "false"});
-    opts.push_back({"rc_fixing", "periodic"});
-    opts.push_back({"rc_fixing_interval", "10"});
-    opts.push_back({"rc_fixing_to_one", "true"});
+    auto opts = kQuiet;
+    opts.emplace_back("time_limit", "30");
+    opts.emplace_back("cutoff", "-11.0");
+    opts.emplace_back("heu_ws", "false");
+    opts.emplace_back("rc_fixing", "periodic");
+    opts.emplace_back("rc_fixing_interval", "10");
+    opts.emplace_back("rc_fixing_to_one", "true");
     auto r = model.solve(opts);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1.0));

@@ -40,22 +40,22 @@ public:
                int32_t source = 0, int32_t target = 0);
 
     // --- Accessors ---
-    const Graph& graph() const { return graph_; }
-    int32_t num_nodes() const { return num_nodes_; }
-    int32_t num_edges() const { return num_edges_; }
-    int32_t source() const { return source_; }
-    int32_t target() const { return target_; }
-    int32_t depot() const { return source_; }  // backward compat alias
-    bool is_tour() const { return source_ == target_; }
-    double capacity() const { return capacity_; }
+    [[nodiscard]] const Graph& graph() const { return graph_; }
+    [[nodiscard]] int32_t num_nodes() const { return num_nodes_; }
+    [[nodiscard]] int32_t num_edges() const { return num_edges_; }
+    [[nodiscard]] int32_t source() const { return source_; }
+    [[nodiscard]] int32_t target() const { return target_; }
+    [[nodiscard]] int32_t depot() const { return source_; }  // backward compat alias
+    [[nodiscard]] bool is_tour() const { return source_ == target_; }
+    [[nodiscard]] double capacity() const { return capacity_; }
 
-    double edge_cost(int32_t e) const { return edge_costs_[e]; }
-    double profit(int32_t v) const { return profits_[v]; }
-    double demand(int32_t v) const { return demands_[v]; }
+    [[nodiscard]] double edge_cost(int32_t e) const { return edge_costs_[e]; }
+    [[nodiscard]] double profit(int32_t v) const { return profits_[v]; }
+    [[nodiscard]] double demand(int32_t v) const { return demands_[v]; }
 
-    const std::vector<double>& edge_costs() const { return edge_costs_; }
-    const std::vector<double>& profits() const { return profits_; }
-    const std::vector<double>& demands() const { return demands_; }
+    [[nodiscard]] const std::vector<double>& edge_costs() const { return edge_costs_; }
+    [[nodiscard]] const std::vector<double>& profits() const { return profits_; }
+    [[nodiscard]] const std::vector<double>& demands() const { return demands_; }
 
     std::string name;
 

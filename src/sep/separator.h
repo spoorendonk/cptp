@@ -17,7 +17,7 @@ constexpr double kInfiniteCapacity = 1e17;
 class Separator {
 public:
     virtual ~Separator() = default;
-    virtual std::string name() const = 0;
+    [[nodiscard]] virtual std::string name() const = 0;
     virtual std::vector<Cut> separate(const SeparationContext& ctx) = 0;
 };
 

@@ -13,6 +13,7 @@
 #include "sep/separation_context.h"
 #include "sep/spi_separator.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <memory>
@@ -428,8 +429,9 @@ TEST_CASE("SEC path: target_in_S=false gives rhs_coeff=2", "[sec][path]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 3)
+        if (u == 0 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -605,13 +607,15 @@ TEST_CASE("Primal heuristic: path produces valid open path", "[heuristic][path]"
     // Count active edges and visited nodes
     int active_edges = 0;
     for (int32_t e = 0; e < m; ++e) {
-        if (result.col_values[e] > 0.5)
+        if (result.col_values[e] > 0.5) {
             active_edges++;
+        }
     }
     int visited_nodes = 0;
     for (int32_t i = 0; i < prob.num_nodes(); ++i) {
-        if (result.col_values[m + i] > 0.5)
+        if (result.col_values[m + i] > 0.5) {
             visited_nodes++;
+        }
     }
     // Path: #edges = #visited_nodes - 1 (open path, no closing edge)
     REQUIRE(active_edges == visited_nodes - 1);
@@ -713,8 +717,9 @@ TEST_CASE("Multistar separator basic test", "[multistar]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if ((u == 0 && v == 1) || (u == 0 && v == 2) || (u == 1 && v == 2))
+        if ((u == 0 && v == 1) || (u == 0 && v == 2) || (u == 1 && v == 2)) {
             x_values[e] = 1.0;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -752,10 +757,12 @@ TEST_CASE("Comb separator basic test", "[comb]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 1)
+        if (u == 0 && v == 1) {
             x_values[e] = 1.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -792,10 +799,12 @@ TEST_CASE("RGLM separator basic test", "[rglm]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 1)
+        if (u == 0 && v == 1) {
             x_values[e] = 1.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -892,8 +901,9 @@ TEST_CASE("SEC separator path: multiple disconnected nodes", "[sec][path]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 3)
+        if (u == 0 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -973,13 +983,15 @@ TEST_CASE("Warm-start: tour degree consistency", "[heuristic]") {
 
     // For each visited node, count the degree (number of incident active edges)
     for (int32_t v = 0; v < n; ++v) {
-        if (result.col_values[m + v] < 0.5)
+        if (result.col_values[m + v] < 0.5) {
             continue;  // not visited
+        }
 
         int degree = 0;
         for (auto e : graph.incident_edges(v)) {
-            if (result.col_values[e] > 0.5)
+            if (result.col_values[e] > 0.5) {
                 degree++;
+            }
         }
         // In a tour, every visited node has exactly degree 2
         REQUIRE(degree == 2);
@@ -995,13 +1007,15 @@ TEST_CASE("Warm-start: path degree consistency", "[heuristic][path]") {
     const auto& graph = prob.graph();
 
     for (int32_t v = 0; v < n; ++v) {
-        if (result.col_values[m + v] < 0.5)
+        if (result.col_values[m + v] < 0.5) {
             continue;
+        }
 
         int degree = 0;
         for (auto e : graph.incident_edges(v)) {
-            if (result.col_values[e] > 0.5)
+            if (result.col_values[e] > 0.5) {
                 degree++;
+            }
         }
         // Source and target have degree 1, intermediates have degree 2
         if (v == prob.source() || v == prob.target()) {
@@ -1020,8 +1034,8 @@ TEST_CASE("Edge elimination: infinite UB eliminates nothing", "[preprocess]") {
     auto prob = make_small_problem();
     auto eliminated =
         cptp::preprocess::edge_elimination(prob, std::numeric_limits<double>::infinity());
-    for (size_t e = 0; e < eliminated.size(); ++e) {
-        REQUIRE_FALSE(eliminated[e]);
+    for (auto&& e : eliminated) {
+        REQUIRE_FALSE(e);
     }
 }
 
@@ -1095,11 +1109,11 @@ namespace {
 /// Compute all-pairs shortest path bounds for a problem.
 std::vector<double> compute_all_pairs(const cptp::Problem& prob) {
     const int32_t n = prob.num_nodes();
-    constexpr double inf = std::numeric_limits<double>::infinity();
-    std::vector<double> ap(static_cast<size_t>(n) * n, inf);
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    std::vector<double> ap(static_cast<size_t>(n) * n, kInf);
     for (int32_t s = 0; s < n; ++s) {
         auto row = cptp::preprocess::forward_labeling(prob, s);
-        std::copy(row.begin(), row.end(), ap.begin() + static_cast<ptrdiff_t>(s) * n);
+        std::ranges::copy(row, ap.begin() + static_cast<ptrdiff_t>(s) * n);
     }
     return ap;
 }
@@ -1180,16 +1194,18 @@ TEST_CASE("SPI separator: finds pair cuts on tour with tight UB", "[spi]") {
     std::vector<double> x_values(m, 0.0);
     std::vector<double> y_values(n, 0.0);
     y_values[0] = 1.0;
-    for (int i = 1; i < n; ++i)
+    for (int i = 1; i < n; ++i) {
         y_values[i] = 0.6;
+    }
 
     // Set some fractional edges to make it look like an LP solution
     const auto& graph = prob.graph();
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 || v == 0)
+        if (u == 0 || v == 0) {
             x_values[e] = 0.5;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -1252,15 +1268,17 @@ TEST_CASE("SPI separator: no cuts when UB is loose", "[spi]") {
     std::vector<double> x_values(m, 0.0);
     std::vector<double> y_values(n, 0.0);
     y_values[0] = 1.0;
-    for (int i = 1; i < n; ++i)
+    for (int i = 1; i < n; ++i) {
         y_values[i] = 0.6;
+    }
 
     const auto& graph = prob.graph();
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 || v == 0)
+        if (u == 0 || v == 0) {
             x_values[e] = 0.5;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -1295,8 +1313,9 @@ TEST_CASE("SPI separator: no cuts without all-pairs data", "[spi]") {
     std::vector<double> x_values(m, 0.0);
     std::vector<double> y_values(n, 0.0);
     y_values[0] = 1.0;
-    for (int i = 1; i < n; ++i)
+    for (int i = 1; i < n; ++i) {
         y_values[i] = 0.6;
+    }
 
     auto support = build_support(prob, x_values);
 
@@ -1331,15 +1350,17 @@ TEST_CASE("SPI separator: path problem pair cuts", "[spi][path]") {
     std::vector<double> y_values(n, 0.0);
     y_values[0] = 1.0;  // source
     y_values[4] = 1.0;  // target
-    for (int i = 1; i < 4; ++i)
+    for (int i = 1; i < 4; ++i) {
         y_values[i] = 0.7;
+    }
 
     const auto& graph = prob.graph();
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 || v == 4)
+        if (u == 0 || v == 4) {
             x_values[e] = 0.3;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -1409,15 +1430,17 @@ TEST_CASE("SPI separator: greedy extension finds set cuts", "[spi]") {
     std::vector<double> x_values(m, 0.0);
     std::vector<double> y_values(n, 0.0);
     y_values[0] = 1.0;
-    for (int i = 1; i < n; ++i)
+    for (int i = 1; i < n; ++i) {
         y_values[i] = 0.7;
+    }
 
     const auto& graph = prob.graph();
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 || v == 0)
+        if (u == 0 || v == 0) {
             x_values[e] = 0.4;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -1449,8 +1472,9 @@ TEST_CASE("SPI separator: greedy extension finds set cuts", "[spi]") {
         REQUIRE(cut.violation > 1e-6);
         REQUIRE(cut.rhs >= 1.0 - 1e-9);
         REQUIRE(cut.rhs < static_cast<double>(cut.size()));
-        if (cut.size() >= 3)
+        if (cut.size() >= 3) {
             found_set_cut = true;
+        }
     }
     // With 4 expensive nodes and tight UB, we should find triplet+ cuts
     REQUIRE(found_set_cut);
@@ -1486,15 +1510,17 @@ TEST_CASE("SPI separator: shrinking produces minimal sets", "[spi]") {
     std::vector<double> x_values(m, 0.0);
     std::vector<double> y_values(n, 0.0);
     y_values[0] = 1.0;
-    for (int i = 1; i < n; ++i)
+    for (int i = 1; i < n; ++i) {
         y_values[i] = 0.8;
+    }
 
     const auto& graph = prob.graph();
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 || v == 0)
+        if (u == 0 || v == 0) {
             x_values[e] = 0.5;
+        }
     }
 
     auto support = build_support(prob, x_values);

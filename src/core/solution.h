@@ -52,8 +52,8 @@ struct SolveResult {
     int64_t rc_fix0_count = 0;
     int64_t rc_fix1_count = 0;
 
-    bool is_optimal() const { return status == Status::Optimal; }
-    bool has_solution() const {
+    [[nodiscard]] bool is_optimal() const { return status == Status::Optimal; }
+    [[nodiscard]] bool has_solution() const {
         return status == Status::Optimal || status == Status::Feasible ||
                status == Status::TimeLimit;
     }

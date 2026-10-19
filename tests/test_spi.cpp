@@ -26,8 +26,9 @@ SupportData build_support(const cptp::Problem& prob, std::span<const double> x_v
     cptp::digraph_builder builder(prob.num_nodes());
     for (auto e : g.edges()) {
         const double xval = x_values[e];
-        if (xval <= tol)
+        if (xval <= tol) {
             continue;
+        }
         const int32_t u = g.edge_source(e);
         const int32_t v = g.edge_target(e);
         builder.add_arc(u, v, xval);
@@ -40,11 +41,11 @@ SupportData build_support(const cptp::Problem& prob, std::span<const double> x_v
 
 std::vector<double> compute_all_pairs(const cptp::Problem& prob) {
     const int32_t n = prob.num_nodes();
-    constexpr double inf = std::numeric_limits<double>::infinity();
-    std::vector<double> all_pairs(static_cast<size_t>(n) * n, inf);
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    std::vector<double> all_pairs(static_cast<size_t>(n) * n, kInf);
     for (int32_t s = 0; s < n; ++s) {
         auto row = cptp::preprocess::forward_labeling(prob, s);
-        std::copy(row.begin(), row.end(), all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
+        std::ranges::copy(row, all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
     }
     return all_pairs;
 }
@@ -82,15 +83,17 @@ TEST_CASE("SPI separator: path problem emits violated cuts with all-pairs", "[sp
     std::vector<double> y_values(n, 0.0);
     y_values[0] = 1.0;  // source
     y_values[4] = 1.0;  // target
-    for (int i = 1; i < 4; ++i)
+    for (int i = 1; i < 4; ++i) {
         y_values[i] = 0.7;
+    }
 
     const auto& graph = prob.graph();
     for (auto e : graph.edges()) {
         const int32_t u = graph.edge_source(e);
         const int32_t v = graph.edge_target(e);
-        if (u == 0 || v == 4)
+        if (u == 0 || v == 4) {
             x_values[e] = 0.3;
+        }
     }
 
     auto support = build_support(prob, x_values);
@@ -112,8 +115,9 @@ TEST_CASE("SPI separator: path problem emits violated cuts with all-pairs", "[sp
     for (const auto& cut : cuts) {
         REQUIRE(cut.violation > 1e-6);
         REQUIRE(cut.rhs >= 1.0 - 1e-9);
-        for (double coeff : cut.values)
+        for (double coeff : cut.values) {
             REQUIRE(coeff == 1.0);
+        }
     }
 }
 
@@ -126,8 +130,9 @@ TEST_CASE("SPI separator: path problem returns no cuts without all-pairs", "[spi
     std::vector<double> y_values(n, 0.0);
     y_values[0] = 1.0;
     y_values[4] = 1.0;
-    for (int i = 1; i < 4; ++i)
+    for (int i = 1; i < 4; ++i) {
         y_values[i] = 0.7;
+    }
 
     auto support = build_support(prob, x_values);
     cptp::sep::SeparationContext ctx{

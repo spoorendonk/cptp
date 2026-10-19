@@ -5,6 +5,7 @@
 #include "sep/separation_oracle.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <limits>
 #include <memory>
 
@@ -71,10 +72,12 @@ TEST_CASE("SeparationOracle: finds cuts on violated solution", "[oracle]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 1)
+        if (u == 0 && v == 1) {
             x_values[e] = 1.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     auto cuts = oracle.separate(x_values, y_values, 0, m);
@@ -105,8 +108,9 @@ TEST_CASE("SeparationOracle: no cuts on feasible solution", "[oracle]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if ((u == 0 && v == 1) || (u == 0 && v == 2) || (u == 1 && v == 2))
+        if ((u == 0 && v == 1) || (u == 0 && v == 2) || (u == 1 && v == 2)) {
             x_values[e] = 1.0;
+        }
     }
 
     auto cuts = oracle.separate(x_values, y_values, 0, m, 1e-6);
@@ -131,8 +135,9 @@ TEST_CASE("SeparationOracle: is_feasible works correctly", "[oracle]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if ((u == 0 && v == 1) || (u == 0 && v == 2) || (u == 1 && v == 2))
+        if ((u == 0 && v == 1) || (u == 0 && v == 2) || (u == 1 && v == 2)) {
             x_values[e] = 1.0;
+        }
     }
 
     REQUIRE(oracle.is_feasible(x_values, y_values, 0, m));
@@ -141,12 +146,15 @@ TEST_CASE("SeparationOracle: is_feasible works correctly", "[oracle]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 1 && v == 2)
+        if (u == 1 && v == 2) {
             x_values[e] = 0.0;
-        if (u == 0 && v == 2)
+        }
+        if (u == 0 && v == 2) {
             x_values[e] = 0.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
     y_values[3] = 1.0;
 
@@ -174,10 +182,12 @@ TEST_CASE("SeparationOracle: max_cuts_per_separator limits output", "[oracle]") 
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 1)
+        if (u == 0 && v == 1) {
             x_values[e] = 1.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     auto cuts = oracle.separate(x_values, y_values, 0, m);
@@ -206,8 +216,9 @@ TEST_CASE("SeparationOracle: path mode works", "[oracle][path]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if ((u == 0 && v == 3) || (u == 1 && v == 2))
+        if ((u == 0 && v == 3) || (u == 1 && v == 2)) {
             x_values[e] = 1.0;
+        }
     }
 
     auto cuts = oracle.separate(x_values, y_values, 0, m);
@@ -228,7 +239,7 @@ TEST_CASE("BoundPropagator: sweep fixes expensive edges", "[propagator]") {
     prob.build(3, edges, costs, profits, demands, 1e18, 0, 0);
 
     auto fwd = cptp::preprocess::forward_labeling(prob, 0);
-    auto bwd = fwd;  // tour: same
+    const auto& bwd = fwd;  // tour: same
     double correction = prob.profit(0);
 
     cptp::preprocess::BoundPropagator prop(prob, fwd, bwd, correction);
@@ -242,8 +253,9 @@ TEST_CASE("BoundPropagator: sweep fixes expensive edges", "[propagator]") {
     // Edge {1,2} with cost=100 should be fixed to 0
     bool fixes_edge_2 = false;
     for (int32_t e : fixings) {
-        if (e == 2)
+        if (e == 2) {
             fixes_edge_2 = true;
+        }
     }
     REQUIRE(fixes_edge_2);
 
@@ -251,10 +263,12 @@ TEST_CASE("BoundPropagator: sweep fixes expensive edges", "[propagator]") {
     bool fixes_edge_0 = false;
     bool fixes_edge_1 = false;
     for (int32_t e : fixings) {
-        if (e == 0)
+        if (e == 0) {
             fixes_edge_0 = true;
-        if (e == 1)
+        }
+        if (e == 1) {
             fixes_edge_1 = true;
+        }
     }
     REQUIRE_FALSE(fixes_edge_0);
     REQUIRE_FALSE(fixes_edge_1);
@@ -285,8 +299,9 @@ TEST_CASE("BoundPropagator: sweep_nodes fixes isolated nodes", "[propagator]") {
     // Node 1 (col index m+1) should be in fixings
     bool fixes_node_1 = false;
     for (int32_t idx : node_fixings) {
-        if (idx == m + 1)
+        if (idx == m + 1) {
             fixes_node_1 = true;
+        }
     }
     REQUIRE(fixes_node_1);
 }
@@ -316,8 +331,9 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge (neighbor-only)", "[propagator]
     // Edge {1,2} (index 3) costs 100 and should be eliminated
     bool fixes_expensive = false;
     for (int32_t e : fixings) {
-        if (e == 3)
+        if (e == 3) {
             fixes_expensive = true;
+        }
     }
     REQUIRE(fixes_expensive);
 }
@@ -341,7 +357,7 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge (all-pairs)", "[propagator]") {
     auto fwd = cptp::preprocess::forward_labeling(prob, 0);
 
     // Build all-pairs bounds: run forward labeling from each node
-    std::vector<double> all_pairs(n * n, std::numeric_limits<double>::max());
+    std::vector<double> all_pairs(static_cast<size_t>(n * n), std::numeric_limits<double>::max());
     for (int32_t s = 0; s < n; ++s) {
         auto bounds = cptp::preprocess::forward_labeling(prob, s);
         for (int32_t v = 0; v < n; ++v) {
@@ -363,8 +379,9 @@ TEST_CASE("BoundPropagator: propagate_fixed_edge (all-pairs)", "[propagator]") {
 
     bool fixes_expensive = false;
     for (int32_t e : fixings) {
-        if (e == 3)
+        if (e == 3) {
             fixes_expensive = true;  // edge {1,2}
+        }
     }
     REQUIRE(fixes_expensive);
 }
@@ -377,7 +394,7 @@ TEST_CASE("SeparationOracle: add_default_separators is cumulative", "[oracle]") 
     auto prob = make_small_problem();
 
     cptp::sep::SeparationOracle oracle(prob);
-    REQUIRE(oracle.separators().size() == 0);
+    REQUIRE(oracle.separators().empty());
 
     oracle.add_default_separators();
     REQUIRE(oracle.separators().size() == 4);
@@ -409,10 +426,12 @@ TEST_CASE("SeparationOracle: individual separator addition", "[oracle]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 1)
+        if (u == 0 && v == 1) {
             x_values[e] = 1.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     auto cuts = oracle.separate(x_values, y_values, 0, m);
@@ -440,10 +459,12 @@ TEST_CASE("SeparationOracle: no separators returns no cuts", "[oracle]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 1)
+        if (u == 0 && v == 1) {
             x_values[e] = 1.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     auto cuts = oracle.separate(x_values, y_values, 0, m);
@@ -469,10 +490,12 @@ TEST_CASE("SeparationOracle: cut struct has valid fields", "[oracle]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 1)
+        if (u == 0 && v == 1) {
             x_values[e] = 1.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     auto cuts = oracle.separate(x_values, y_values, 0, m);
@@ -512,8 +535,9 @@ TEST_CASE("SeparationOracle: is_feasible works in path mode", "[oracle][path]") 
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if ((u == 0 && v == 1) || (u == 1 && v == 3))
+        if ((u == 0 && v == 1) || (u == 1 && v == 3)) {
             x_values[e] = 1.0;
+        }
     }
 
     REQUIRE(oracle.is_feasible(x_values, y_values, 0, m));
@@ -522,10 +546,12 @@ TEST_CASE("SeparationOracle: is_feasible works in path mode", "[oracle][path]") 
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 1 && v == 3)
+        if (u == 1 && v == 3) {
             x_values[e] = 0.0;
-        if (u == 1 && v == 2)
+        }
+        if (u == 1 && v == 2) {
             x_values[e] = 1.0;
+        }
     }
     y_values[1] = 0.0;
     y_values[2] = 1.0;
@@ -553,10 +579,12 @@ TEST_CASE("SeparationOracle: separate with non-zero x_offset", "[oracle]") {
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 1)
+        if (u == 0 && v == 1) {
             x_values[e] = 1.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     // Use non-zero offsets
@@ -594,10 +622,12 @@ TEST_CASE("SeparationOracle: max_cuts_per_separator 0 means unlimited", "[oracle
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
-        if (u == 0 && v == 1)
+        if (u == 0 && v == 1) {
             x_values[e] = 1.0;
-        if (u == 2 && v == 3)
+        }
+        if (u == 2 && v == 3) {
             x_values[e] = 1.0;
+        }
     }
 
     // Should not crash, and may return more cuts than with limit=1
@@ -774,8 +804,9 @@ TEST_CASE("BoundPropagator: sweep on s-t path problem", "[propagator][path]") {
     // Edge {1,2} (index 3) with cost=100 should be fixed
     bool fixes_expensive = false;
     for (int32_t e : fixings) {
-        if (e == 3)
+        if (e == 3) {
             fixes_expensive = true;
+        }
     }
     REQUIRE(fixes_expensive);
 }

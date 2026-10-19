@@ -53,8 +53,9 @@ SupportData build_support(const cptp::Problem& prob, std::span<const double> x_v
     cptp::digraph_builder builder(prob.num_nodes());
     for (auto e : g.edges()) {
         const double xval = x_values[e];
-        if (xval <= tol)
+        if (xval <= tol) {
             continue;
+        }
         const int32_t u = g.edge_source(e);
         const int32_t v = g.edge_target(e);
         builder.add_arc(u, v, xval);
@@ -67,7 +68,7 @@ SupportData build_support(const cptp::Problem& prob, std::span<const double> x_v
 
 double evaluate_cut_lhs(const cptp::sep::Cut& cut, std::span<const double> x_values,
                         std::span<const double> y_values) {
-    const int32_t m = static_cast<int32_t>(x_values.size());
+    const auto m = static_cast<int32_t>(x_values.size());
     double lhs = 0.0;
     for (size_t k = 0; k < cut.indices.size(); ++k) {
         const int32_t idx = cut.indices[k];
@@ -90,9 +91,9 @@ std::vector<CutSignature> normalize_cut_signatures(const std::vector<cptp::sep::
         std::vector<std::pair<int32_t, int64_t>> terms;
         terms.reserve(cut.indices.size());
         for (size_t k = 0; k < cut.indices.size(); ++k) {
-            terms.push_back({cut.indices[k], quantize_coeff(cut.values[k])});
+            terms.emplace_back(cut.indices[k], quantize_coeff(cut.values[k]));
         }
-        std::sort(terms.begin(), terms.end());
+        std::ranges::sort(terms);
 
         // Merge duplicates if any separator emits repeated variable indices.
         std::vector<std::pair<int32_t, int64_t>> merged;
@@ -103,19 +104,21 @@ std::vector<CutSignature> normalize_cut_signatures(const std::vector<cptp::sep::
                 merged.push_back(t);
             }
         }
-        out.push_back({quantize_coeff(cut.rhs), std::move(merged)});
+        out.emplace_back(quantize_coeff(cut.rhs), std::move(merged));
     }
-    std::sort(out.begin(), out.end());
+    std::ranges::sort(out);
     return out;
 }
 
 int32_t edge_index(const cptp::Problem& prob, int32_t a, int32_t b) {
-    if (a > b)
+    if (a > b) {
         std::swap(a, b);
+    }
     const auto& g = prob.graph();
     for (int32_t e : g.incident_edges(a)) {
-        if (g.other_endpoint(e, a) == b)
+        if (g.other_endpoint(e, a) == b) {
             return e;
+        }
     }
     return -1;
 }
@@ -141,8 +144,8 @@ cptp::Problem make_validation_path_problem() {
 
     std::vector<double> profits = {0, 2, 2, 2, 2, 0};
     std::vector<double> demands = {0, 2, 2, 2, 2, 0};
-    constexpr double capacity = 6.0;
-    prob.build(6, edges, costs, profits, demands, capacity, 0, 5);
+    constexpr double kCapacity = 6.0;
+    prob.build(6, edges, costs, profits, demands, kCapacity, 0, 5);
     return prob;
 }
 
@@ -163,18 +166,22 @@ std::vector<IntegerPathSolution> enumerate_feasible_paths(const cptp::Problem& p
 
     auto push_solution = [&]() {
         double demand_sum = 0.0;
-        for (int32_t node : path_nodes)
+        for (int32_t node : path_nodes) {
             demand_sum += prob.demand(node);
-        if (demand_sum > cap + 1e-9)
+        }
+        if (demand_sum > cap + 1e-9) {
             return;
+        }
 
         IntegerPathSolution sol;
         sol.x_values.assign(m, 0.0);
         sol.y_values.assign(n, 0.0);
-        for (int32_t e : path_edges)
+        for (int32_t e : path_edges) {
             sol.x_values[e] = 1.0;
-        for (int32_t node : path_nodes)
+        }
+        for (int32_t node : path_nodes) {
             sol.y_values[node] = 1.0;
+        }
         out.push_back(std::move(sol));
     };
 
@@ -186,8 +193,9 @@ std::vector<IntegerPathSolution> enumerate_feasible_paths(const cptp::Problem& p
 
         for (int32_t e : g.incident_edges(u)) {
             const int32_t v = g.other_endpoint(e, u);
-            if (visited[v])
+            if (visited[v]) {
                 continue;
+            }
             visited[v] = true;
             path_nodes.push_back(v);
             path_edges.push_back(e);
@@ -352,7 +360,8 @@ std::vector<EquivalentSample> build_equivalent_samples(const EquivalentInstances
     const int32_t m_path = path.num_edges();
 
     std::vector<int32_t> idx_t_depot(5, -1);
-    std::vector<int32_t> idx_p_src(5, -1), idx_p_tgt(5, -1);
+    std::vector<int32_t> idx_p_src(5, -1);
+    std::vector<int32_t> idx_p_tgt(5, -1);
     int32_t idx_p_st = edge_index(path, 0, 5);
     int32_t idx_t_cc[5][5];
     int32_t idx_p_cc[5][5];
@@ -410,8 +419,9 @@ std::vector<EquivalentSample> build_equivalent_samples(const EquivalentInstances
                 sample.x_path[idx_p_cc[i][j]] = b;
             }
         }
-        if (idx_p_st >= 0)
+        if (idx_p_st >= 0) {
             sample.x_path[idx_p_st] = 1.0;
+        }
 
         out.push_back(std::move(sample));
     }
@@ -432,8 +442,9 @@ SetStats compute_set_stats(const cptp::Problem& prob, std::span<const double> x_
     const auto& g = prob.graph();
     const int32_t n = prob.num_nodes();
     for (int32_t i = 0; i < n; ++i) {
-        if (!in_S[i])
+        if (!in_S[i]) {
             continue;
+        }
         const double d = prob.demand(i);
         s.dS += d;
         s.served_demand += d * y_values[i];
@@ -444,8 +455,9 @@ SetStats compute_set_stats(const cptp::Problem& prob, std::span<const double> x_
         const int32_t v = g.edge_target(e);
         const bool u_in = in_S[u];
         const bool v_in = in_S[v];
-        if (u_in == v_in)
+        if (u_in == v_in) {
             continue;
+        }
         const int32_t outside = u_in ? v : u;
         const double x = x_values[e];
         s.cut_flow += x;
@@ -468,8 +480,9 @@ std::vector<std::pair<std::vector<double>, std::vector<double>>> build_fractiona
         std::vector<double> y(n, 0.0);
         y[source] = 1.0;
         y[target] = 1.0;
-        for (int32_t i = 1; i < n - 1; ++i)
+        for (int32_t i = 1; i < n - 1; ++i) {
             y[i] = 0.6;
+        }
 
         const auto& g = prob.graph();
         for (auto e : g.edges()) {
@@ -485,7 +498,7 @@ std::vector<std::pair<std::vector<double>, std::vector<double>>> build_fractiona
                 x[e] = 0.08;
             }
         }
-        samples.push_back({std::move(x), std::move(y)});
+        samples.emplace_back(std::move(x), std::move(y));
     }
 
     std::mt19937 rng(1234567);
@@ -493,8 +506,9 @@ std::vector<std::pair<std::vector<double>, std::vector<double>>> build_fractiona
     for (int sample = 0; sample < 120; ++sample) {
         std::vector<double> x(m, 0.0);
         std::vector<double> y(n, 0.0);
-        for (int32_t i = 0; i < n; ++i)
+        for (int32_t i = 0; i < n; ++i) {
             y[i] = 0.1 + 0.8 * u01(rng);
+        }
         y[source] = 1.0;
         y[target] = 1.0;
 
@@ -503,7 +517,7 @@ std::vector<std::pair<std::vector<double>, std::vector<double>>> build_fractiona
             const double p = u01(rng);
             x[e] = (p < 0.45) ? (0.55 + 0.45 * u01(rng)) : (0.03 * u01(rng));
         }
-        samples.push_back({std::move(x), std::move(y)});
+        samples.emplace_back(std::move(x), std::move(y));
     }
 
     return samples;
@@ -511,11 +525,11 @@ std::vector<std::pair<std::vector<double>, std::vector<double>>> build_fractiona
 
 std::vector<double> compute_all_pairs(const cptp::Problem& prob) {
     const int32_t n = prob.num_nodes();
-    constexpr double inf = std::numeric_limits<double>::infinity();
-    std::vector<double> all_pairs(static_cast<size_t>(n) * n, inf);
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    std::vector<double> all_pairs(static_cast<size_t>(n) * n, kInf);
     for (int32_t s = 0; s < n; ++s) {
         auto row = cptp::preprocess::forward_labeling(prob, s);
-        std::copy(row.begin(), row.end(), all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
+        std::ranges::copy(row, all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
     }
     return all_pairs;
 }
@@ -530,8 +544,9 @@ double compute_comb_lhs(const cptp::Problem& prob, std::span<const double> x,
     for (auto e : g.edges()) {
         const int32_t u = g.edge_source(e);
         const int32_t v = g.edge_target(e);
-        if (in_handle[u] && in_handle[v])
+        if (in_handle[u] && in_handle[v]) {
             lhs += x[e];
+        }
     }
     for (const auto& [a, b] : teeth) {
         const int32_t e = edge_index(prob, a, b);
@@ -539,8 +554,9 @@ double compute_comb_lhs(const cptp::Problem& prob, std::span<const double> x,
         lhs += x[e];
     }
     for (int32_t i = 0; i < n; ++i) {
-        if (in_handle[i])
+        if (in_handle[i]) {
             lhs -= y[i];
+        }
     }
     for (const auto& [a, b] : teeth) {
         const bool a_in = in_handle[a] != 0;
@@ -564,10 +580,12 @@ double compute_comb_lhs_path_split(const cptp::Problem& prob, std::span<const do
     for (auto e : g.edges()) {
         const int32_t u = g.edge_source(e);
         const int32_t v = g.edge_target(e);
-        if (!in_handle[u] || !in_handle[v])
+        if (!in_handle[u] || !in_handle[v]) {
             continue;
-        if ((u == source && v == target) || (u == target && v == source))
+        }
+        if ((u == source && v == target) || (u == target && v == source)) {
             continue;
+        }
         lhs += x[e];
     }
     for (const auto& [a, b] : teeth) {
@@ -576,8 +594,9 @@ double compute_comb_lhs_path_split(const cptp::Problem& prob, std::span<const do
         lhs += x[e];
     }
     for (int32_t i = 0; i < n; ++i) {
-        if (i == target || !in_handle[i])
+        if (i == target || !in_handle[i]) {
             continue;
+        }
         lhs -= y[i];
     }
     for (const auto& [a, b] : teeth) {
@@ -656,12 +675,13 @@ TEST_CASE("Path cut families generate only valid cuts on all feasible s-t paths"
 TEST_CASE("Equivalent tour and s-t path trigger same cut families", "[separators][path][equiv]") {
     const auto inst = make_equivalent_instances();
     const auto samples = build_equivalent_samples(inst, 80);
-    constexpr double tol = 1e-9;
+    constexpr double kTol = 1e-9;
     const double Q = inst.tour.capacity();
     double d_total = 0.0;
     for (int32_t i = 0; i < inst.tour.num_nodes(); ++i) {
-        if (i != inst.tour.source())
+        if (i != inst.tour.source()) {
             d_total += inst.tour.demand(i);
+        }
     }
 
     // Customer subsets over {1,2,3,4}. In path model, 0=source and 5=target are
@@ -684,24 +704,25 @@ TEST_CASE("Equivalent tour and s-t path trigger same cut families", "[separators
                 compute_set_stats(inst.path, sample.x_path, sample.y_path, in_path);
 
             // Basic mapped quantities should match exactly.
-            REQUIRE(std::abs(st_tour.dS - st_path.dS) <= tol);
-            REQUIRE(std::abs(st_tour.served_demand - st_path.served_demand) <= tol);
-            REQUIRE(std::abs(st_tour.cut_flow - st_path.cut_flow) <= tol);
-            REQUIRE(std::abs(st_tour.star_sum - st_path.star_sum) <= tol);
+            REQUIRE(std::abs(st_tour.dS - st_path.dS) <= kTol);
+            REQUIRE(std::abs(st_tour.served_demand - st_path.served_demand) <= kTol);
+            REQUIRE(std::abs(st_tour.cut_flow - st_path.cut_flow) <= kTol);
+            REQUIRE(std::abs(st_tour.star_sum - st_path.star_sum) <= kTol);
 
             // SEC (for any target customer t in S): 2*y_t - x(delta(S))
             for (int b = 0; b < 4; ++b) {
-                if (!(mask & (1 << b)))
+                if (!(mask & (1 << b))) {
                     continue;
+                }
                 const int32_t t = b + 1;
                 const double sec_tour = 2.0 * sample.y_tour[t] - st_tour.cut_flow;
                 const double sec_path = 2.0 * sample.y_path[t] - st_path.cut_flow;
-                REQUIRE(std::abs(sec_tour - sec_path) <= tol);
+                REQUIRE(std::abs(sec_tour - sec_path) <= kTol);
             }
 
             // RCI violation
             const double Q_r = std::fmod(st_tour.dS, Q);
-            if (Q_r > tol) {
+            if (Q_r > kTol) {
                 const double k = std::ceil(st_tour.dS / Q);
                 if (k > 1.0) {
                     const double rci_tour =
@@ -710,7 +731,7 @@ TEST_CASE("Equivalent tour and s-t path trigger same cut families", "[separators
                     const double rci_path =
                         2.0 * (k - st_path.dS / Q_r) -
                         (st_path.cut_flow - (2.0 * st_path.served_demand) / Q_r);
-                    REQUIRE(std::abs(rci_tour - rci_path) <= tol);
+                    REQUIRE(std::abs(rci_tour - rci_path) <= kTol);
                 }
             }
 
@@ -719,12 +740,12 @@ TEST_CASE("Equivalent tour and s-t path trigger same cut families", "[separators
                                     (st_tour.cut_flow - (2.0 / Q) * st_tour.star_sum);
             const double glm_path = (2.0 / Q) * st_path.served_demand -
                                     (st_path.cut_flow - (2.0 / Q) * st_path.star_sum);
-            REQUIRE(std::abs(glm_tour - glm_path) <= tol);
+            REQUIRE(std::abs(glm_tour - glm_path) <= kTol);
 
             // RGLM violation
             const double alpha = 2.0 * d_total - st_tour.dS;
             const double r = std::fmod(alpha, Q);
-            if (r > tol) {
+            if (r > kTol) {
                 const double k = std::ceil(alpha / Q);
                 if (k > 1.0) {
                     const double beta_tour = (st_tour.dS - st_tour.served_demand) +
@@ -733,7 +754,7 @@ TEST_CASE("Equivalent tour and s-t path trigger same cut families", "[separators
                                              2.0 * (d_total - st_path.dS) - st_path.star_sum;
                     const double rglm_tour = (2.0 * k - 2.0 * beta_tour / r) - st_tour.cut_flow;
                     const double rglm_path = (2.0 * k - 2.0 * beta_path / r) - st_path.cut_flow;
-                    REQUIRE(std::abs(rglm_tour - rglm_path) <= tol);
+                    REQUIRE(std::abs(rglm_tour - rglm_path) <= kTol);
                 }
             }
         }
@@ -745,8 +766,8 @@ TEST_CASE("Equivalent tour and s-t path emit matching SPI customer cuts", "[spi]
     const auto samples = build_equivalent_samples(inst, 80);
     const auto ap_tour = compute_all_pairs(inst.tour);
     const auto ap_path = compute_all_pairs(inst.path);
-    constexpr double ub = 90.0;
-    constexpr double tol = 1e-6;
+    constexpr double kUb = 90.0;
+    constexpr double kTol = 1e-6;
 
     auto normalize_spi = [](const std::vector<cptp::sep::Cut>& cuts, int32_t y_offset) {
         std::set<uint32_t> keys;
@@ -776,9 +797,9 @@ TEST_CASE("Equivalent tour and s-t path emit matching SPI customer cuts", "[spi]
             .y_values = sample.y_tour,
             .x_offset = 0,
             .y_offset = inst.tour.num_edges(),
-            .tol = tol,
+            .tol = kTol,
             .flow_tree = support_tour.tree.get(),
-            .upper_bound = ub,
+            .upper_bound = kUb,
             .all_pairs = ap_tour,
         };
         cptp::sep::SeparationContext ctx_path{
@@ -787,9 +808,9 @@ TEST_CASE("Equivalent tour and s-t path emit matching SPI customer cuts", "[spi]
             .y_values = sample.y_path,
             .x_offset = 0,
             .y_offset = inst.path.num_edges(),
-            .tol = tol,
+            .tol = kTol,
             .flow_tree = support_path.tree.get(),
-            .upper_bound = ub,
+            .upper_bound = kUb,
             .all_pairs = ap_path,
         };
 
@@ -912,8 +933,9 @@ TEST_CASE("Comb expression and separator behavior match across equivalent tour/p
 
     auto max_violation = [](const std::vector<cptp::sep::Cut>& cuts) {
         double best = -std::numeric_limits<double>::infinity();
-        for (const auto& c : cuts)
+        for (const auto& c : cuts) {
             best = std::max(best, c.violation);
+        }
         return best;
     };
     REQUIRE(std::abs(max_violation(cuts_tour) - max_violation(cuts_path)) <= 1e-6);

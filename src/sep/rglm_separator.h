@@ -8,7 +8,7 @@ namespace cptp::sep {
 /// Strengthens GLM/multistar cuts using ceiling-based rounding.
 class RGLMSeparator : public Separator {
 public:
-    std::string name() const override { return "RGLM"; }
+    [[nodiscard]] std::string name() const override { return "RGLM"; }
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 };
 

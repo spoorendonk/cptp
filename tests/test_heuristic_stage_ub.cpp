@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <charconv>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -18,11 +19,13 @@ namespace {
 std::vector<std::filesystem::path> collect_heuristic_gate_instances() {
     std::vector<std::filesystem::path> paths;
     auto collect = [&](const std::filesystem::path& dir, const char* ext) {
-        if (!std::filesystem::exists(dir))
+        if (!std::filesystem::exists(dir)) {
             return;
+        }
         for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-            if (!entry.is_regular_file())
+            if (!entry.is_regular_file()) {
                 continue;
+            }
             if (entry.path().extension() == ext) {
                 paths.push_back(entry.path());
             }
@@ -31,7 +34,7 @@ std::vector<std::filesystem::path> collect_heuristic_gate_instances() {
 
     collect("benchmarks/instances/spprclib", ".sppcc");
     collect("benchmarks/instances/roberti", ".vrp");
-    std::sort(paths.begin(), paths.end());
+    std::ranges::sort(paths);
     return paths;
 }
 
@@ -41,8 +44,9 @@ std::filesystem::path find_snapshot_csv() {
              std::filesystem::path("../tests/data/heuristic_stage_ub_ils.csv"),
              std::filesystem::path("../../tests/data/heuristic_stage_ub_ils.csv"),
          }) {
-        if (std::filesystem::exists(candidate))
+        if (std::filesystem::exists(candidate)) {
             return candidate;
+        }
     }
     return "tests/data/heuristic_stage_ub_ils.csv";
 }
@@ -50,15 +54,17 @@ std::filesystem::path find_snapshot_csv() {
 std::map<std::string, double> load_expected_snapshot() {
     const auto csv_path = find_snapshot_csv();
     std::ifstream in(csv_path);
-    if (!in)
+    if (!in) {
         return {};
+    }
 
     std::map<std::string, double> snapshot;
     std::string line;
     bool first = true;
     while (std::getline(in, line)) {
-        if (line.empty())
+        if (line.empty()) {
             continue;
+        }
         if (first) {
             first = false;
             continue;
@@ -70,10 +76,11 @@ std::map<std::string, double> load_expected_snapshot() {
 
         const std::string instance = line.substr(0, comma);
         const std::string value = line.substr(comma + 1);
-        try {
-            snapshot[instance] = std::stod(value);
-        } catch (...) {
-            // Ignore malformed values; test will fail on missing entries.
+        // A malformed value is skipped; the test fails on the missing entry.
+        double ub = 0.0;
+        const auto [end, ec] = std::from_chars(value.data(), value.data() + value.size(), ub);
+        if (ec == std::errc{}) {
+            snapshot[instance] = ub;
         }
     }
     return snapshot;

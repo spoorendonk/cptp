@@ -42,9 +42,10 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
             }
         }
 
-        int32_t handle_size = static_cast<int32_t>(queue.size());
-        if (handle_size < 2 || handle_size >= n)
+        auto handle_size = static_cast<int32_t>(queue.size());
+        if (handle_size < 2 || handle_size >= n) {
             continue;
+        }
 
         // Find candidate teeth: edges crossing the handle boundary.
         // Each tooth T_i = {u_i, v_i} with u_i in H, v_i not in H.
@@ -59,13 +60,15 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
 
         for (auto e : graph.edges()) {
             double xval = ctx.x_values[e];
-            if (xval < tol)
+            if (xval < tol) {
                 continue;
+            }
 
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);
 
-            int32_t ins = -1, out = -1;
+            int32_t ins = -1;
+            int32_t out = -1;
             if (in_handle[u] && !in_handle[v]) {
                 ins = u;
                 out = v;
@@ -75,8 +78,9 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
             } else {
                 continue;
             }
-            if (!is_tour && out == path_target)
+            if (!is_tour && out == path_target) {
                 continue;
+            }
 
             teeth.push_back({ins, out, e, xval - ctx.y_values[out]});
         }
@@ -84,8 +88,8 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
         // Sort by contribution descending (most violating first).
         // stable_sort preserves deterministic edge-iteration order for equal
         // contributions.
-        std::stable_sort(teeth.begin(), teeth.end(),
-                         [](const Tooth& a, const Tooth& b) { return a.contrib > b.contrib; });
+        std::ranges::stable_sort(
+            teeth, [](const Tooth& a, const Tooth& b) { return a.contrib > b.contrib; });
 
         // Greedy selection: no shared inside or outside nodes.
         std::vector<bool> used_inside(n, false);
@@ -93,26 +97,30 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
         std::vector<Tooth> selected;
 
         auto inside_key = [&](int32_t node) {
-            if (!is_tour && node == path_target)
+            if (!is_tour && node == path_target) {
                 return depot;
+            }
             return node;
         };
 
         for (const auto& tooth : teeth) {
             const int32_t in_key = inside_key(tooth.inside);
-            if (used_inside[in_key] || used_outside[tooth.outside])
+            if (used_inside[in_key] || used_outside[tooth.outside]) {
                 continue;
+            }
             selected.push_back(tooth);
             used_inside[in_key] = true;
             used_outside[tooth.outside] = true;
         }
 
         // Need >= 3 teeth, odd count.
-        if (selected.size() < 3)
+        if (selected.size() < 3) {
             continue;
+        }
         size_t t = selected.size();
-        if (t % 2 == 0)
+        if (t % 2 == 0) {
             t--;
+        }
         selected.resize(t);
 
         // Evaluate: x(E(H)) + Σ x_{tooth_i} - Σ_{j∈H} y_j - Σ y_{outside_i}
@@ -135,10 +143,12 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
         }
 
         for (int32_t i = 0; i < n; ++i) {
-            if (!is_tour && i == path_target)
+            if (!is_tour && i == path_target) {
                 continue;
-            if (in_handle[i])
+            }
+            if (in_handle[i]) {
                 lhs -= ctx.y_values[i];
+            }
         }
 
         for (const auto& tooth : selected) {
@@ -147,8 +157,9 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
 
         double rhs = static_cast<double>(t - 1) / 2.0;
 
-        if (lhs - rhs <= tol)
+        if (lhs - rhs <= tol) {
             continue;
+        }
 
         // Emit cut: a^T x <= rhs.
         Cut cut;
@@ -176,8 +187,9 @@ std::vector<Cut> CombSeparator::separate(const SeparationContext& ctx) {
 
         // y_j for j in H: coeff -1.
         for (int32_t i = 0; i < n; ++i) {
-            if (!is_tour && i == path_target)
+            if (!is_tour && i == path_target) {
                 continue;
+            }
             if (in_handle[i]) {
                 cut.indices.push_back(ctx.y_offset + i);
                 cut.values.push_back(-1.0);

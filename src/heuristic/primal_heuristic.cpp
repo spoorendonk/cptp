@@ -19,10 +19,12 @@ namespace detail {
 
 double tour_objective(const Problem& prob, const std::vector<int32_t>& tour) {
     double cost = 0.0;
-    for (size_t i = 0; i + 1 < tour.size(); ++i)
+    for (size_t i = 0; i + 1 < tour.size(); ++i) {
         cost += edge_cost(prob, tour[i], tour[i + 1]);
-    for (size_t i = 1; i + 1 < tour.size(); ++i)
+    }
+    for (size_t i = 1; i + 1 < tour.size(); ++i) {
         cost -= prob.profit(tour[i]);
+    }
     if (prob.is_tour()) {
         // Tour: depot profit counted once (depot is first and last element)
         cost -= prob.profit(prob.source());
@@ -38,10 +40,12 @@ void greedy_insert(const Problem& prob, std::vector<int32_t>& tour, std::vector<
                    double& remaining_cap, const std::vector<int32_t>& order,
                    const std::vector<bool>& edge_active) {
     for (int32_t c : order) {
-        if (in_tour[c])
+        if (in_tour[c]) {
             continue;
-        if (prob.demand(c) > remaining_cap)
+        }
+        if (prob.demand(c) > remaining_cap) {
             continue;
+        }
 
         double best_delta = std::numeric_limits<double>::max();
         size_t best_pos = 0;
@@ -52,12 +56,14 @@ void greedy_insert(const Problem& prob, std::vector<int32_t>& tour, std::vector<
 
             double cost_pc = edge_cost(prob, prev, c, edge_active);
             double cost_cn = edge_cost(prob, c, next, edge_active);
-            if (cost_pc > kBigEdgeCost || cost_cn > kBigEdgeCost)
+            if (cost_pc > kBigEdgeCost || cost_cn > kBigEdgeCost) {
                 continue;
+            }
 
             double cost_pn = edge_cost(prob, prev, next, edge_active);
-            if (cost_pn > kBigEdgeCost)
+            if (cost_pn > kBigEdgeCost) {
                 cost_pn = 0.0;
+            }
 
             double delta = cost_pc + cost_cn - cost_pn;
             if (delta < best_delta) {
@@ -81,13 +87,13 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
     // Minimum size before allowing node drop:
     // tours keep at least [depot, customer, depot] (size 3),
     // paths keep at least [source, target] plus one optional customer (size 3).
-    const int32_t min_drop_size = prob.is_tour() ? 4 : 4;
+    const int32_t min_drop_size = 4;
 
     int iterations = 0;
     for (int iter = 0; iter < max_iter_per_start; ++iter) {
         iterations++;
         bool improved = false;
-        int32_t len = static_cast<int32_t>(tour.size());
+        auto len = static_cast<int32_t>(tour.size());
 
         // --- 2-opt ---
         for (int32_t i = 0; i < len - 2 && !improved; ++i) {
@@ -103,8 +109,9 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
                 }
             }
         }
-        if (improved)
+        if (improved) {
             continue;
+        }
 
         // --- Or-opt (chains of 1, 2, 3) ---
         for (int cl = 1; cl <= 3 && !improved; ++cl) {
@@ -115,8 +122,9 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
                                      edge_cost(prob, tour[i - 1], tour[se + 1], edge_active);
 
                 for (int32_t j = 1; j < len - 1 && !improved; ++j) {
-                    if (j >= i - 1 && j <= se + 1)
+                    if (j >= i - 1 && j <= se + 1) {
                         continue;
+                    }
                     double insert_add = edge_cost(prob, tour[j - 1], tour[i], edge_active) +
                                         edge_cost(prob, tour[se], tour[j], edge_active) -
                                         edge_cost(prob, tour[j - 1], tour[j], edge_active);
@@ -130,25 +138,30 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
                 }
             }
         }
-        if (improved)
+        if (improved) {
             continue;
+        }
 
         // --- Swap (1,1): exchange one visited customer with one unvisited customer
         // ---
         for (int32_t i = 1; i < len - 1 && !improved; ++i) {
             const int32_t out = tour[i];
-            if (out == prob.source() || out == prob.target())
+            if (out == prob.source() || out == prob.target()) {
                 continue;
+            }
 
             for (int32_t in = 0; in < n && !improved; ++in) {
-                if (in_tour[in])
+                if (in_tour[in]) {
                     continue;
-                if (in == prob.source() || in == prob.target())
+                }
+                if (in == prob.source() || in == prob.target()) {
                     continue;
+                }
 
                 const double new_remaining = remaining_cap + prob.demand(out) - prob.demand(in);
-                if (new_remaining < -kLsEpsImprove)
+                if (new_remaining < -kLsEpsImprove) {
                     continue;
+                }
 
                 const double old_prev = edge_cost(prob, tour[i - 1], out, edge_active);
                 const double old_next = edge_cost(prob, out, tour[i + 1], edge_active);
@@ -170,8 +183,9 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
                 }
             }
         }
-        if (improved)
+        if (improved) {
             continue;
+        }
 
         // --- Node drop ---
         for (int32_t i = 1; i < len - 1 && len >= min_drop_size && !improved; ++i) {
@@ -186,15 +200,18 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
                 improved = true;
             }
         }
-        if (improved)
+        if (improved) {
             continue;
+        }
 
         // --- Node add ---
         for (int32_t c = 0; c < n && !improved; ++c) {
-            if (in_tour[c])
+            if (in_tour[c]) {
                 continue;
-            if (prob.demand(c) > remaining_cap)
+            }
+            if (prob.demand(c) > remaining_cap) {
                 continue;
+            }
 
             double best_delta = kLsEpsImprove;
             size_t best_pos = 0;
@@ -202,11 +219,13 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
             for (size_t pos = 1; pos < tour.size(); ++pos) {
                 double cost_pc = edge_cost(prob, tour[pos - 1], c, edge_active);
                 double cost_cn = edge_cost(prob, c, tour[pos], edge_active);
-                if (cost_pc > kBigEdgeCost || cost_cn > kBigEdgeCost)
+                if (cost_pc > kBigEdgeCost || cost_cn > kBigEdgeCost) {
                     continue;
+                }
                 double cost_pn = edge_cost(prob, tour[pos - 1], tour[pos], edge_active);
-                if (cost_pn > kBigEdgeCost)
+                if (cost_pn > kBigEdgeCost) {
                     cost_pn = 0.0;
+                }
 
                 double delta = cost_pc + cost_cn - cost_pn - prob.profit(c);
                 if (delta < best_delta) {
@@ -223,8 +242,9 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
             }
         }
 
-        if (!improved)
+        if (!improved) {
             break;
+        }
     }
     return iterations;
 }
@@ -236,21 +256,25 @@ bool init_seed_state(const Problem& prob, std::span<const int32_t> tour, std::ve
     const int32_t target = prob.target();
     in_tour.assign(static_cast<size_t>(n), false);
     for (int32_t v : tour) {
-        if (v < 0 || v >= n)
+        if (v < 0 || v >= n) {
             return false;
+        }
         in_tour[v] = true;
     }
 
     remaining_cap = prob.capacity() - prob.demand(source);
-    if (!prob.is_tour())
+    if (!prob.is_tour()) {
         remaining_cap -= prob.demand(target);
-    if (remaining_cap < -kLsEpsImprove)
+    }
+    if (remaining_cap < -kLsEpsImprove) {
         return false;
+    }
 
     for (size_t i = 1; i + 1 < tour.size(); ++i) {
         const int32_t v = tour[i];
-        if (v != source && v != target)
+        if (v != source && v != target) {
             remaining_cap -= prob.demand(v);
+        }
     }
     return remaining_cap >= -kLsEpsImprove;
 }
@@ -261,30 +285,35 @@ bool perturb_swap_kick(const Problem& prob, std::vector<int32_t>& tour, std::vec
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
-    const int32_t len = static_cast<int32_t>(tour.size());
+    const auto len = static_cast<int32_t>(tour.size());
 
     std::vector<int32_t> in_positions;
     in_positions.reserve(tour.size());
     for (int32_t pos = 1; pos + 1 < len; ++pos) {
         const int32_t v = tour[pos];
-        if (v == source || v == target)
+        if (v == source || v == target) {
             continue;
+        }
         in_positions.push_back(pos);
     }
-    if (in_positions.empty())
+    if (in_positions.empty()) {
         return false;
+    }
 
     std::vector<int32_t> out_nodes;
     out_nodes.reserve(static_cast<size_t>(n));
     for (int32_t c = 0; c < n; ++c) {
-        if (in_tour[c])
+        if (in_tour[c]) {
             continue;
-        if (c == source || c == target)
+        }
+        if (c == source || c == target) {
             continue;
+        }
         out_nodes.push_back(c);
     }
-    if (out_nodes.empty())
+    if (out_nodes.empty()) {
         return false;
+    }
 
     for (int32_t trial = 0; trial < kKickTrials; ++trial) {
         const uint64_t key =
@@ -296,13 +325,15 @@ bool perturb_swap_kick(const Problem& prob, std::vector<int32_t>& tour, std::vec
         const int32_t out = tour[pos];
 
         const double new_remaining = remaining_cap + prob.demand(out) - prob.demand(in);
-        if (new_remaining < -kLsEpsImprove)
+        if (new_remaining < -kLsEpsImprove) {
             continue;
+        }
 
         const double c1 = edge_cost(prob, tour[pos - 1], in, edge_active);
         const double c2 = edge_cost(prob, in, tour[pos + 1], edge_active);
-        if (c1 > kBigEdgeCost || c2 > kBigEdgeCost)
+        if (c1 > kBigEdgeCost || c2 > kBigEdgeCost) {
             continue;
+        }
 
         tour[pos] = in;
         in_tour[out] = false;
@@ -316,9 +347,10 @@ bool perturb_swap_kick(const Problem& prob, std::vector<int32_t>& tour, std::vec
 bool perturb_relocate_kick(const Problem& prob, std::vector<int32_t>& tour,
                            const std::vector<bool>& edge_active, int32_t start_index,
                            int32_t round_index) {
-    const int32_t len = static_cast<int32_t>(tour.size());
-    if (len <= 3)
+    const auto len = static_cast<int32_t>(tour.size());
+    if (len <= 3) {
         return false;
+    }
     const int32_t interior_count = len - 2;
 
     for (int32_t trial = 0; trial < kKickTrials; ++trial) {
@@ -326,16 +358,18 @@ bool perturb_relocate_kick(const Problem& prob, std::vector<int32_t>& tour,
             deterministic_kick_key(start_index, round_index, trial, 0x94d049bb133111ebull);
         const int32_t from = 1 + static_cast<int32_t>(key % static_cast<uint64_t>(interior_count));
         const int32_t to = 1 + static_cast<int32_t>((key >> 32) % static_cast<uint64_t>(len - 1));
-        if (to == from || to == from + 1)
+        if (to == from || to == from + 1) {
             continue;
+        }
 
         std::vector<int32_t> moved = tour;
         const int32_t node = moved[from];
         moved.erase(moved.begin() + from);
         const int32_t ins = (to > from) ? to - 1 : to;
         moved.insert(moved.begin() + ins, node);
-        if (!seed_uses_active_edges(prob, moved, edge_active))
+        if (!seed_uses_active_edges(prob, moved, edge_active)) {
             continue;
+        }
 
         tour = std::move(moved);
         return true;
@@ -367,8 +401,9 @@ std::pair<std::vector<int32_t>, double> single_restart(const Problem& prob,
     // Mandatory endpoints consume capacity too: depot once for tours,
     // source+target for paths.
     double remaining_cap = Q - prob.demand(source);
-    if (!is_tour)
+    if (!is_tour) {
         remaining_cap -= prob.demand(target);
+    }
 
     if (remaining_cap < 0.0) {
         return {std::move(tour), kNoSolution};
@@ -386,26 +421,28 @@ std::pair<std::vector<int32_t>, double> single_restart(const Problem& prob,
         double bd = std::numeric_limits<double>::max();
         int32_t bn = -1;
         for (int32_t c : customers) {
-            if (in_tour[c])
+            if (in_tour[c]) {
                 continue;
-            if (prob.demand(c) > remaining_cap)
+            }
+            if (prob.demand(c) > remaining_cap) {
                 continue;
+            }
             double best_delta = std::numeric_limits<double>::max();
             for (size_t pos = 0; pos + 1 < tour.size(); ++pos) {
                 double delta = edge_cost(prob, tour[pos], c, edge_active) +
                                edge_cost(prob, c, tour[pos + 1], edge_active) -
                                edge_cost(prob, tour[pos], tour[pos + 1], edge_active) -
                                prob.profit(c);
-                if (delta < best_delta)
-                    best_delta = delta;
+                best_delta = std::min(delta, best_delta);
             }
             if (best_delta < bd) {
                 bd = best_delta;
                 bn = c;
             }
         }
-        if (bn < 0)
+        if (bn < 0) {
             break;
+        }
         size_t best_pos = 1;
         double best_delta = std::numeric_limits<double>::max();
         for (size_t pos = 0; pos + 1 < tour.size(); ++pos) {
@@ -438,24 +475,29 @@ std::vector<int32_t> fallback_feasible(const Problem& prob, const std::vector<bo
     const bool is_tour = prob.is_tour();
 
     double remaining_cap = prob.capacity() - prob.demand(source);
-    if (!is_tour)
+    if (!is_tour) {
         remaining_cap -= prob.demand(target);
-    if (remaining_cap < 0.0)
+    }
+    if (remaining_cap < 0.0) {
         return {};
+    }
 
     constexpr double kBig = 1e15;
     if (is_tour) {
         int32_t best = -1;
         double best_obj = kNoSolution;
         for (int32_t c = 0; c < n; ++c) {
-            if (c == source)
+            if (c == source) {
                 continue;
-            if (prob.demand(c) > remaining_cap)
+            }
+            if (prob.demand(c) > remaining_cap) {
                 continue;
+            }
             const double c1 = edge_cost(prob, source, c, edge_active);
             const double c2 = edge_cost(prob, c, source, edge_active);
-            if (c1 > kBig || c2 > kBig)
+            if (c1 > kBig || c2 > kBig) {
                 continue;
+            }
             const std::vector<int32_t> cand = {source, c, source};
             const double obj = tour_objective(prob, cand);
             if (obj < best_obj) {
@@ -463,26 +505,31 @@ std::vector<int32_t> fallback_feasible(const Problem& prob, const std::vector<bo
                 best = c;
             }
         }
-        if (best >= 0)
+        if (best >= 0) {
             return {source, best, source};
+        }
         return {};
     }
 
     const double direct = edge_cost(prob, source, target, edge_active);
-    if (direct <= kBig)
+    if (direct <= kBig) {
         return {source, target};
+    }
 
     int32_t best = -1;
     double best_obj = kNoSolution;
     for (int32_t c = 0; c < n; ++c) {
-        if (c == source || c == target)
+        if (c == source || c == target) {
             continue;
-        if (prob.demand(c) > remaining_cap)
+        }
+        if (prob.demand(c) > remaining_cap) {
             continue;
+        }
         const double c1 = edge_cost(prob, source, c, edge_active);
         const double c2 = edge_cost(prob, c, target, edge_active);
-        if (c1 > kBig || c2 > kBig)
+        if (c1 > kBig || c2 > kBig) {
             continue;
+        }
         const std::vector<int32_t> cand = {source, c, target};
         const double obj = tour_objective(prob, cand);
         if (obj < best_obj) {
@@ -490,8 +537,9 @@ std::vector<int32_t> fallback_feasible(const Problem& prob, const std::vector<bo
             best = c;
         }
     }
-    if (best >= 0)
+    if (best >= 0) {
         return {source, best, target};
+    }
     return {};
 }
 
@@ -503,19 +551,23 @@ std::vector<TourCandidate> enumerate_small_seed_candidates(const Problem& prob,
     const bool is_tour = prob.is_tour();
 
     double base_remaining = prob.capacity() - prob.demand(source);
-    if (!is_tour)
+    if (!is_tour) {
         base_remaining -= prob.demand(target);
-    if (base_remaining < 0.0)
+    }
+    if (base_remaining < 0.0) {
         return {};
+    }
 
     std::vector<TourCandidate> candidates;
     candidates.reserve(static_cast<size_t>(customers.size()) * customers.size());
 
     auto try_seed = [&](std::vector<int32_t> seed, double used_demand) {
-        if (used_demand > base_remaining + 1e-9)
+        if (used_demand > base_remaining + 1e-9) {
             return;
-        if (!seed_uses_active_edges(prob, seed, edge_active))
+        }
+        if (!seed_uses_active_edges(prob, seed, edge_active)) {
             return;
+        }
         candidates.push_back(TourCandidate{.tour = std::move(seed), .objective = kNoSolution});
     };
 
@@ -553,13 +605,12 @@ std::vector<TourCandidate> enumerate_small_seed_candidates(const Problem& prob,
     for (auto& cand : candidates) {
         cand.objective = tour_objective(prob, cand.tour);
     }
-    std::stable_sort(candidates.begin(), candidates.end(),
-                     [](const TourCandidate& a, const TourCandidate& b) {
-                         if (std::abs(a.objective - b.objective) > 1e-12) {
-                             return a.objective < b.objective;
-                         }
-                         return a.tour < b.tour;
-                     });
+    std::ranges::stable_sort(candidates, [](const TourCandidate& a, const TourCandidate& b) {
+        if (std::abs(a.objective - b.objective) > 1e-12) {
+            return a.objective < b.objective;
+        }
+        return a.tour < b.tour;
+    });
     return candidates;
 }
 
@@ -606,8 +657,9 @@ void validate_tour_or_throw(const Problem& prob, std::span<const int32_t> tour) 
     }
 
     double used = prob.demand(source);
-    if (!prob.is_tour())
+    if (!prob.is_tour()) {
         used += prob.demand(target);
+    }
     std::vector<double> y_values(static_cast<size_t>(n), 0.0);
     y_values[static_cast<size_t>(source)] = 1.0;
     y_values[static_cast<size_t>(target)] = 1.0;
@@ -643,12 +695,14 @@ std::vector<double> tour_to_solution(const Problem& prob, const std::vector<int3
     sol[m + target] = 1.0;
 
     if (static_cast<int32_t>(tour.size()) >= min_valid_size) {
-        for (size_t i = 1; i + 1 < tour.size(); ++i)
+        for (size_t i = 1; i + 1 < tour.size(); ++i) {
             sol[m + tour[i]] = 1.0;
+        }
         for (size_t i = 0; i + 1 < tour.size(); ++i) {
             int32_t e = find_edge(g, tour[i], tour[i + 1]);
-            if (e >= 0)
+            if (e >= 0) {
                 sol[e] += 1.0;
+            }
         }
     }
     return sol;
@@ -673,8 +727,9 @@ ReducedGraph reduce_lp_threshold(const Problem& prob, std::span<const double> x_
 
     // Activate nodes with high y-value
     for (int32_t i = 0; i < n; ++i) {
-        if (y_lp[i] > node_threshold)
+        if (y_lp[i] > node_threshold) {
             rg.node_active[i] = true;
+        }
     }
 
     // Activate edges above threshold or incident to active nodes
@@ -721,8 +776,9 @@ ReducedGraph reduce_rins(const Problem& prob, std::span<const double> x_lp,
 
     // Activate nodes from incumbent or LP
     for (int32_t i = 0; i < n; ++i) {
-        if (incumbent[m + i] > 0.5 || y_lp[i] > 0.5)
+        if (incumbent[m + i] > 0.5 || y_lp[i] > 0.5) {
             rg.node_active[i] = true;
+        }
     }
 
     return rg;
@@ -781,8 +837,9 @@ std::vector<bool> build_edge_activity_from_bounds(const Problem& prob,
                 inactive++;
             }
         }
-        if (inactive > 0)
+        if (inactive > 0) {
             return edge_active;
+        }
     }
     return {};
 }
@@ -864,7 +921,7 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
         snap.ls_iterations_total = ls_iterations_total.load(std::memory_order_relaxed);
         snap.ub_improvements = ub_improvements.load(std::memory_order_relaxed);
         {
-            std::lock_guard<std::mutex> lock(progress_best_mu);
+            std::scoped_lock lock(progress_best_mu);
             snap.best_objective = progress_best_objective;
         }
         snap.final = final;
@@ -872,12 +929,14 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
     };
 
     auto emit_progress = [&](bool final) {
-        if (!progress_enabled)
+        if (!progress_enabled) {
             return;
+        }
         const auto snap = build_progress_snapshot(final);
-        std::lock_guard<std::mutex> lock(progress_emit_mu);
-        if (!final && snap.starts_done <= last_emitted_starts)
+        std::scoped_lock lock(progress_emit_mu);
+        if (!final && snap.starts_done <= last_emitted_starts) {
             return;
+        }
         last_emitted_starts = snap.starts_done;
         progress_cb(snap);
     };
@@ -896,8 +955,9 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
         if (progress_enabled && report_every > 0) {
             while (true) {
                 int64_t milestone = next_report_milestone.load(std::memory_order_relaxed);
-                if (done_after < milestone)
+                if (done_after < milestone) {
                     break;
+                }
                 if (next_report_milestone.compare_exchange_weak(milestone, milestone + report_every,
                                                                 std::memory_order_relaxed,
                                                                 std::memory_order_relaxed)) {
@@ -918,8 +978,9 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
         [&](int) {
             while (true) {
                 const int32_t i = next_start.fetch_add(1, std::memory_order_relaxed);
-                if (i >= starts)
+                if (i >= starts) {
                     break;
+                }
 
                 bool ub_improved = false;
                 int64_t ls_iters_for_start = 0;
@@ -983,7 +1044,7 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
 
                 improved[static_cast<size_t>(i)] = std::move(best_local);
                 if (std::isfinite(improved[static_cast<size_t>(i)].objective)) {
-                    std::lock_guard<std::mutex> lock(progress_best_mu);
+                    std::scoped_lock lock(progress_best_mu);
                     if (!std::isfinite(progress_best_objective) ||
                         improved[static_cast<size_t>(i)].objective + detail::kLsEpsTie <
                             progress_best_objective) {
@@ -999,8 +1060,9 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
 
     detail::TourCandidate best;
     for (const auto& cand : improved) {
-        if (cand.tour.empty())
+        if (cand.tour.empty()) {
             continue;
+        }
         if (!std::isfinite(best.objective) || cand.objective + detail::kLsEpsTie < best.objective ||
             (std::abs(cand.objective - best.objective) <= detail::kLsEpsTie &&
              cand.tour < best.tour)) {
@@ -1019,8 +1081,8 @@ HeuristicResult build_initial_solution(const Problem& prob, int num_restarts, do
                                        double upper_bound, int32_t max_workers) {
     (void)time_budget_ms;  // deterministic-only workflow
 
-    const int32_t candidate_cap =
-        std::max<int32_t>(1, std::max<int32_t>(num_restarts, (max_workers > 0 ? max_workers : 1)));
+    const auto candidate_cap =
+        std::max<int32_t>({1, num_restarts, (max_workers > 0 ? max_workers : 1)});
     auto pool = build_construction_pool(prob, candidate_cap, fwd_bounds, bwd_bounds, correction,
                                         upper_bound);
     auto construction = best_construction_solution(prob, pool);
@@ -1050,21 +1112,26 @@ HeuristicResult lp_guided_heuristic(const Problem& prob, std::span<const double>
 
     // Build reduced graphs for selected strategies
     std::vector<ReducedGraph> graphs;
-    if (strategy == 0 || strategy == 1)
+    if (strategy == 0 || strategy == 1) {
         graphs.push_back(
             reduce_lp_threshold(prob, x_lp, y_lp, lpg_edge_threshold, lpg_node_threshold));
-    if (strategy == 0 || strategy == 2)
+    }
+    if (strategy == 0 || strategy == 2) {
         graphs.push_back(reduce_rins(prob, x_lp, y_lp, incumbent, lpg_lp_threshold));
-    if (strategy == 0 || strategy == 3)
+    }
+    if (strategy == 0 || strategy == 3) {
         graphs.push_back(reduce_neighborhood(prob, x_lp, y_lp, lpg_seed_threshold));
+    }
 
     std::vector<const ReducedGraph*> strategies;
     strategies.reserve(graphs.size());
-    for (auto& g : graphs)
+    for (auto& g : graphs) {
         strategies.push_back(&g);
+    }
     const int num_strategies = static_cast<int>(strategies.size());
-    if (num_strategies == 0)
+    if (num_strategies == 0) {
         return {{}, detail::kNoSolution};
+    }
 
     // Build customer lists per strategy (only active nodes)
     std::vector<std::vector<int32_t>> strategy_customers(num_strategies);
@@ -1081,9 +1148,10 @@ HeuristicResult lp_guided_heuristic(const Problem& prob, std::span<const double>
     // profit/demand
     auto make_lp_order = [&](const std::vector<int32_t>& customers) {
         auto order = customers;
-        std::sort(order.begin(), order.end(), [&](int32_t a, int32_t b) {
-            if (std::abs(y_lp[a] - y_lp[b]) > 1e-6)
+        std::ranges::sort(order, [&](int32_t a, int32_t b) {
+            if (std::abs(y_lp[a] - y_lp[b]) > 1e-6) {
                 return y_lp[a] > y_lp[b];
+            }
             double ra = prob.demand(a) > 0 ? prob.profit(a) / prob.demand(a) : prob.profit(a);
             double rb = prob.demand(b) > 0 ? prob.profit(b) / prob.demand(b) : prob.profit(b);
             return ra > rb;
@@ -1125,7 +1193,7 @@ HeuristicResult lp_guided_heuristic(const Problem& prob, std::span<const double>
 
         detail::TourCandidate best_local{.tour = std::move(tour), .objective = obj};
 
-        const int32_t ils_start = static_cast<int32_t>(restart_seed + static_cast<uint32_t>(r));
+        const auto ils_start = static_cast<int32_t>(restart_seed + static_cast<uint32_t>(r));
         for (int32_t round = 0; round < detail::kIlsRounds; ++round) {
             std::vector<int32_t> kicked = best_local.tour;
             std::vector<bool> kicked_in_tour;

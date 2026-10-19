@@ -12,7 +12,7 @@ struct Cut {
     double rhs;
     double violation = 0.0;  // how much the current LP violates this cut
 
-    int32_t size() const { return static_cast<int32_t>(indices.size()); }
+    [[nodiscard]] int32_t size() const { return static_cast<int32_t>(indices.size()); }
 };
 
 }  // namespace cptp::sep

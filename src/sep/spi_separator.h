@@ -29,16 +29,16 @@ namespace cptp::sep {
 /// inequality class.
 class SPISeparator : public Separator {
 public:
-    std::string name() const override { return "SPI"; }
+    [[nodiscard]] std::string name() const override { return "SPI"; }
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 
     void set_max_dp_size(int32_t v) { max_dp_size_ = v; }
     void set_max_seeds(int32_t v) { max_seeds_ = v; }
     void set_max_grow_candidates(int32_t v) { max_grow_candidates_ = v; }
 
-    int32_t max_dp_size() const { return max_dp_size_; }
-    int32_t max_seeds() const { return max_seeds_; }
-    int32_t max_grow_candidates() const { return max_grow_candidates_; }
+    [[nodiscard]] int32_t max_dp_size() const { return max_dp_size_; }
+    [[nodiscard]] int32_t max_seeds() const { return max_seeds_; }
+    [[nodiscard]] int32_t max_grow_candidates() const { return max_grow_candidates_; }
 
 private:
     int32_t max_dp_size_ = 15;

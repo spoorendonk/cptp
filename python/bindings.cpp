@@ -93,7 +93,7 @@ NB_MODULE(_cptp, m) {
             "graph_edges",
             [](const cptp::Problem& self) {
                 const auto& g = self.graph();
-                size_t m = static_cast<size_t>(self.num_edges());
+                auto m = static_cast<size_t>(self.num_edges());
                 auto data = std::make_unique<std::vector<int32_t>>(m * 2);
                 size_t idx = 0;
                 for (auto e : g.edges()) {
@@ -109,25 +109,25 @@ NB_MODULE(_cptp, m) {
             "Return (m, 2) numpy array of (tail, head) pairs")
         .def(
             "__init__",
-            [](cptp::Problem* self, int32_t num_nodes, nb::ndarray<int32_t, nb::shape<-1, 2>> edges,
-               nb::ndarray<double, nb::shape<-1>> edge_costs,
-               nb::ndarray<double, nb::shape<-1>> profits,
-               nb::ndarray<double, nb::shape<-1>> demands, double capacity, int32_t source,
+            [](cptp::Problem* self, int32_t num_nodes,
+               const nb::ndarray<int32_t, nb::shape<-1, 2>>& edges,
+               const nb::ndarray<double, nb::shape<-1>>& edge_costs,
+               const nb::ndarray<double, nb::shape<-1>>& profits,
+               const nb::ndarray<double, nb::shape<-1>>& demands, double capacity, int32_t source,
                int32_t target, const std::string& name) {
                 new (self) cptp::Problem();
                 auto e_view = edges.view();
-                int32_t m = static_cast<int32_t>(edges.shape(0));
+                auto m = static_cast<int32_t>(edges.shape(0));
                 std::vector<cptp::Edge> edge_vec(m);
-                for (int32_t i = 0; i < m; ++i)
+                for (int32_t i = 0; i < m; ++i) {
                     edge_vec[i] = {e_view(i, 0), e_view(i, 1)};
+                }
                 auto ec_view = edge_costs.view();
                 auto p_view = profits.view();
                 auto d_view = demands.view();
-                self->build(num_nodes, edge_vec,
-                            {ec_view.data(), static_cast<size_t>(edge_costs.shape(0))},
-                            {p_view.data(), static_cast<size_t>(profits.shape(0))},
-                            {d_view.data(), static_cast<size_t>(demands.shape(0))}, capacity,
-                            source, target);
+                self->build(num_nodes, edge_vec, {ec_view.data(), edge_costs.shape(0)},
+                            {p_view.data(), profits.shape(0)}, {d_view.data(), demands.shape(0)},
+                            capacity, source, target);
                 self->name = name;
             },
             "num_nodes"_a, "edges"_a, "edge_costs"_a, "profits"_a, "demands"_a, "capacity"_a,
@@ -141,11 +141,11 @@ NB_MODULE(_cptp, m) {
         .def("problem", &cptp::Model::problem, nb::rv_policy::reference_internal)
         .def(
             "set_graph",
-            [](cptp::Model& self, int32_t n, nb::ndarray<int32_t, nb::shape<-1, 2>> edges,
-               nb::ndarray<double, nb::shape<-1>> costs) {
+            [](cptp::Model& self, int32_t n, const nb::ndarray<int32_t, nb::shape<-1, 2>>& edges,
+               const nb::ndarray<double, nb::shape<-1>>& costs) {
                 auto e_view = edges.view();
                 auto c_view = costs.view();
-                int32_t num_edges = static_cast<int32_t>(edges.shape(0));
+                auto num_edges = static_cast<int32_t>(edges.shape(0));
 
                 std::vector<cptp::Edge> edge_vec(num_edges);
                 for (int32_t i = 0; i < num_edges; ++i) {
@@ -160,17 +160,16 @@ NB_MODULE(_cptp, m) {
         .def("set_depot", &cptp::Model::set_depot)
         .def(
             "set_profits",
-            [](cptp::Model& self, nb::ndarray<double, nb::shape<-1>> profits) {
+            [](cptp::Model& self, const nb::ndarray<double, nb::shape<-1>>& profits) {
                 auto view = profits.view();
-                self.set_profits({view.data(), static_cast<size_t>(profits.shape(0))});
+                self.set_profits({view.data(), profits.shape(0)});
             },
             "profits"_a)
         .def(
             "add_capacity_resource",
-            [](cptp::Model& self, nb::ndarray<double, nb::shape<-1>> demands, double limit) {
+            [](cptp::Model& self, const nb::ndarray<double, nb::shape<-1>>& demands, double limit) {
                 auto view = demands.view();
-                self.add_capacity_resource({view.data(), static_cast<size_t>(demands.shape(0))},
-                                           limit);
+                self.add_capacity_resource({view.data(), demands.shape(0)}, limit);
             },
             "demands"_a, "limit"_a)
         .def(

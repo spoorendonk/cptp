@@ -30,10 +30,11 @@ constexpr double kInf = std::numeric_limits<double>::infinity();
 
 double held_karp(int32_t source, int32_t target, const std::vector<int32_t>& nodes,
                  std::span<const double> ap, int32_t n) {
-    const int32_t k = static_cast<int32_t>(nodes.size());
+    const auto k = static_cast<int32_t>(nodes.size());
 
-    if (k == 0)
+    if (k == 0) {
         return ap[static_cast<size_t>(source) * n + target];
+    }
 
     auto d = [&](int32_t u, int32_t v) -> double { return ap[static_cast<size_t>(u) * n + v]; };
 
@@ -59,20 +60,22 @@ double held_karp(int32_t source, int32_t target, const std::vector<int32_t>& nod
     // Fill in order of increasing popcount
     for (int32_t mask = 1; mask < states; ++mask) {
         for (int32_t last = 0; last < k; ++last) {
-            if (!(mask & (1 << last)))
+            if (!(mask & (1 << last))) {
                 continue;
+            }
             double cur = dp[static_cast<size_t>(mask) * k + last];
-            if (cur >= kInf)
+            if (cur >= kInf) {
                 continue;
+            }
 
             for (int32_t next = 0; next < k; ++next) {
-                if (mask & (1 << next))
+                if (mask & (1 << next)) {
                     continue;
+                }
                 int32_t new_mask = mask | (1 << next);
                 double cost = cur + d(nodes[last], nodes[next]);
                 auto& slot = dp[static_cast<size_t>(new_mask) * k + next];
-                if (cost < slot)
-                    slot = cost;
+                slot = std::min(cost, slot);
             }
         }
     }
@@ -82,8 +85,7 @@ double held_karp(int32_t source, int32_t target, const std::vector<int32_t>& nod
     double best = kInf;
     for (int32_t last = 0; last < k; ++last) {
         double cost = dp[static_cast<size_t>(full) * k + last] + d(nodes[last], target);
-        if (cost < best)
-            best = cost;
+        best = std::min(cost, best);
     }
     return best;
 }
@@ -93,9 +95,10 @@ double held_karp(int32_t source, int32_t target, const std::vector<int32_t>& nod
 double compute_set_lb(const Problem& prob, std::span<const double> all_pairs,
                       const std::vector<int32_t>& set, int32_t max_dp_size = 15) {
     const int32_t n = prob.num_nodes();
-    const int32_t k = static_cast<int32_t>(set.size());
-    if (k == 0 || k > max_dp_size)
+    const auto k = static_cast<int32_t>(set.size());
+    if (k == 0 || k > max_dp_size) {
         return -kInf;
+    }
 
     const int32_t source = prob.source();
     const int32_t target = prob.is_tour() ? source : prob.target();
@@ -104,8 +107,9 @@ double compute_set_lb(const Problem& prob, std::span<const double> all_pairs,
     // Junction-node profit correction: each node in the set appears in two
     // consecutive segments, so its profit is subtracted twice.  Add it back.
     double profit_sum = correction;
-    for (int32_t v : set)
+    for (int32_t v : set) {
         profit_sum += prob.profit(v);
+    }
 
     double path_cost = held_karp(source, target, set, all_pairs, n);
     return path_cost + profit_sum;
@@ -116,11 +120,10 @@ double compute_set_lb(const Problem& prob, std::span<const double> all_pairs,
 void greedy_grow(const Problem& prob, std::span<const double> all_pairs, double ub,
                  std::vector<int32_t>& set, const std::vector<int32_t>& candidates,
                  int32_t max_dp_size = 15) {
-    for (size_t ci = 0; ci < candidates.size(); ++ci) {
-        if (static_cast<int32_t>(set.size()) >= max_dp_size)
+    for (int v : candidates) {
+        if (static_cast<int32_t>(set.size()) >= max_dp_size) {
             break;
-
-        int32_t v = candidates[ci];
+        }
 
         // Skip if already in set
         bool in_set = false;
@@ -130,8 +133,9 @@ void greedy_grow(const Problem& prob, std::span<const double> all_pairs, double 
                 break;
             }
         }
-        if (in_set)
+        if (in_set) {
             continue;
+        }
 
         // Try adding
         set.push_back(v);
@@ -161,8 +165,9 @@ void greedy_shrink(const Problem& prob, std::span<const double> all_pairs, doubl
             std::vector<int32_t> reduced;
             reduced.reserve(set.size() - 1);
             for (size_t j = 0; j < set.size(); ++j) {
-                if (j != i)
+                if (j != i) {
                     reduced.push_back(set[j]);
+                }
             }
 
             double lb = compute_set_lb(prob, all_pairs, reduced);
@@ -204,12 +209,15 @@ void lift_cut(const Problem& prob, std::span<const double> all_pairs, double ub,
 
     // For each candidate j ∉ S, check all |S| replacements
     for (int32_t j = 0; j < n; ++j) {
-        if (j == source)
+        if (j == source) {
             continue;
-        if (!is_tour && j == target)
+        }
+        if (!is_tour && j == target) {
             continue;
-        if (y_values[j] <= tol)
+        }
+        if (y_values[j] <= tol) {
             continue;
+        }
 
         // Skip if j ∈ S
         bool in_set = false;
@@ -219,8 +227,9 @@ void lift_cut(const Problem& prob, std::span<const double> all_pairs, double ub,
                 break;
             }
         }
-        if (in_set)
+        if (in_set) {
             continue;
+        }
 
         // Check: for every i ∈ S, is (S \ {i}) ∪ {j} infeasible?
         bool can_lift = true;
@@ -253,10 +262,12 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
     const double ub = ctx.upper_bound;
 
     // Need both all-pairs matrix and a finite upper bound
-    if (ub >= kInf || ctx.all_pairs.empty())
+    if (ub >= kInf || ctx.all_pairs.empty()) {
         return {};
-    if (static_cast<int32_t>(ctx.all_pairs.size()) < n * n)
+    }
+    if (static_cast<int32_t>(ctx.all_pairs.size()) < n * n) {
         return {};
+    }
 
     const int32_t source = prob.source();
     const int32_t target = prob.target();
@@ -272,19 +283,21 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
     };
     std::vector<Candidate> cands;
     for (int32_t i = 0; i < n; ++i) {
-        if (i == source)
+        if (i == source) {
             continue;
-        if (!is_tour && i == target)
+        }
+        if (!is_tour && i == target) {
             continue;
-        if (ctx.y_values[i] <= tol)
+        }
+        if (ctx.y_values[i] <= tol) {
             continue;
+        }
         cands.push_back({i, ctx.y_values[i]});
     }
-    std::sort(cands.begin(), cands.end(),
-              [](const Candidate& a, const Candidate& b) { return a.y > b.y; });
+    std::ranges::sort(cands, [](const Candidate& a, const Candidate& b) { return a.y > b.y; });
 
     // Flat candidate node list (y-descending) for grow phase
-    const size_t grow_cap = static_cast<size_t>(max_grow_candidates_);
+    const auto grow_cap = static_cast<size_t>(max_grow_candidates_);
     std::vector<int32_t> cand_nodes;
     cand_nodes.reserve(std::min(cands.size(), grow_cap));
     for (size_t i = 0; i < std::min(cands.size(), grow_cap); ++i) {
@@ -311,8 +324,9 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
             const double yj = cands[aj].y;
 
             double violation = yi + yj - 1.0;
-            if (violation <= tol)
+            if (violation <= tol) {
                 continue;
+            }
 
             double lb = compute_set_lb(prob, ctx.all_pairs, {i, j}, max_dp_size_);
             if (lb > ub + 1e-6) {
@@ -332,8 +346,9 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
                     sum_y += lifted_coeffs[li] * ctx.y_values[lifted_nodes[li]];
                 }
                 cut.violation = sum_y - cut.rhs;
-                if (cut.violation > tol)
+                if (cut.violation > tol) {
                     cuts.push_back(std::move(cut));
+                }
 
                 seeds.push_back({i, j, violation});
             }
@@ -350,16 +365,12 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
     // infeasible set gives the strongest (most violated) cut.
 
     // Sort seeds by violation descending — most violated pairs first
-    std::sort(seeds.begin(), seeds.end(), [](const InfeasiblePair& a, const InfeasiblePair& b) {
+    std::ranges::sort(seeds, [](const InfeasiblePair& a, const InfeasiblePair& b) {
         return a.violation > b.violation;
     });
 
     auto is_duplicate = [&](const std::vector<int32_t>& set) -> bool {
-        for (const auto& s : emitted) {
-            if (s == set)
-                return true;
-        }
-        return false;
+        return std::ranges::any_of(emitted, [&](const auto& s) { return s == set; });
     };
 
     size_t num_seeds = std::min(seeds.size(), static_cast<size_t>(max_seeds_));
@@ -371,8 +382,9 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
         // Grow: add high-y candidates that maintain infeasibility
         greedy_grow(prob, ctx.all_pairs, ub, set, cand_nodes, max_dp_size_);
 
-        if (static_cast<int32_t>(set.size()) <= 2)
+        if (static_cast<int32_t>(set.size()) <= 2) {
             continue;  // pair already emitted
+        }
 
         // Shrink: remove nodes to find minimal infeasible subset.
         // min_size=3: don't shrink back to pairs (already emitted in Phase 1).
@@ -380,17 +392,20 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
 
         // Compute violation
         double sum_y = 0.0;
-        for (int32_t v : set)
+        for (int32_t v : set) {
             sum_y += ctx.y_values[v];
+        }
         double violation = sum_y - (static_cast<double>(set.size()) - 1.0);
-        if (violation <= tol)
+        if (violation <= tol) {
             continue;
+        }
 
         // Dedup
         auto sorted_set = set;
-        std::sort(sorted_set.begin(), sorted_set.end());
-        if (is_duplicate(sorted_set))
+        std::ranges::sort(sorted_set);
+        if (is_duplicate(sorted_set)) {
             continue;
+        }
         emitted.push_back(sorted_set);
 
         // Lift: scan for nodes that can replace any member of the minimal set
@@ -409,8 +424,9 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
             lifted_sum_y += lifted_coeffs[li] * ctx.y_values[lifted_nodes[li]];
         }
         cut.violation = lifted_sum_y - cut.rhs;
-        if (cut.violation <= tol)
+        if (cut.violation <= tol) {
             continue;
+        }
         cuts.push_back(std::move(cut));
     }
 

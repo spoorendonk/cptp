@@ -32,7 +32,7 @@ public:
 
     SolveResult solve(const SolverOptions& options = {});
 
-    const Problem& problem() const { return problem_; }
+    [[nodiscard]] const Problem& problem() const { return problem_; }
     Logger& logger() { return logger_; }
 
 private:

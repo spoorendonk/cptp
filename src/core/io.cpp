@@ -14,8 +14,9 @@ namespace {
 /// Trim whitespace from both ends.
 std::string trim(const std::string& s) {
     auto start = s.find_first_not_of(" \t\r\n");
-    if (start == std::string::npos)
+    if (start == std::string::npos) {
         return "";
+    }
     auto end = s.find_last_not_of(" \t\r\n");
     return s.substr(start, end - start + 1);
 }
@@ -28,7 +29,7 @@ double euc2d(double x1, double y1, double x2, double y2) {
 }
 
 bool starts_with(const std::string& s, const std::string& prefix) {
-    return s.compare(0, prefix.size(), prefix) == 0;
+    return s.starts_with(prefix);
 }
 
 /// Detect format by peeking at file content.
@@ -39,8 +40,9 @@ bool is_tsplib_format(const std::filesystem::path& path) {
     std::string line;
     while (std::getline(f, line)) {
         line = trim(line);
-        if (line.empty())
+        if (line.empty()) {
             continue;
+        }
         // TSPLIB/SPPCC files have keyword : value lines
         if (starts_with(line, "NAME") || starts_with(line, "COMMENT") ||
             starts_with(line, "TYPE") || starts_with(line, "DIMENSION")) {
@@ -60,7 +62,7 @@ Problem load(const std::filesystem::path& path) {
     }
 
     auto ext = path.extension().string();
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    std::ranges::transform(ext, ext.begin(), ::tolower);
 
     if (ext == ".vrp" || ext == ".tsp" || ext == ".sppcc") {
         return load_tsplib(path);
@@ -85,7 +87,8 @@ Problem load_tsplib(const std::filesystem::path& path) {
     std::string edge_weight_type;
 
     // Coordinate, demand, and profit data
-    std::vector<double> x_coords, y_coords;
+    std::vector<double> x_coords;
+    std::vector<double> y_coords;
     std::vector<double> demands;
     std::vector<double> profits;
     int32_t depot = 0;
@@ -98,8 +101,9 @@ Problem load_tsplib(const std::filesystem::path& path) {
 
     while (std::getline(f, line)) {
         line = trim(line);
-        if (line.empty())
+        if (line.empty()) {
             continue;
+        }
 
         if (line == "NODE_COORD_SECTION") {
             section = Section::NodeCoord;
@@ -126,8 +130,9 @@ Problem load_tsplib(const std::filesystem::path& path) {
             profit_section_used = true;
             continue;
         }
-        if (line == "EOF")
+        if (line == "EOF") {
             break;
+        }
 
         if (section == Section::Header) {
             auto pos = line.find(':');
@@ -137,16 +142,19 @@ Problem load_tsplib(const std::filesystem::path& path) {
                 header[key] = val;
                 if (key == "DIMENSION") {
                     dimension = std::stoi(val);
-                    if (dimension <= 0)
+                    if (dimension <= 0) {
                         throw std::runtime_error("TSPLIB: DIMENSION must be positive");
+                    }
                 }
                 if (key == "CAPACITY") {
                     capacity = std::stoi(val);
-                    if (capacity < 0)
+                    if (capacity < 0) {
                         throw std::runtime_error("TSPLIB: CAPACITY must be non-negative");
+                    }
                 }
-                if (key == "EDGE_WEIGHT_TYPE")
+                if (key == "EDGE_WEIGHT_TYPE") {
                     edge_weight_type = val;
+                }
                 if (key == "NAME") {
                 }  // stored in header map
             }
@@ -156,7 +164,8 @@ Problem load_tsplib(const std::filesystem::path& path) {
         if (section == Section::NodeCoord) {
             std::istringstream iss(line);
             int id;
-            double x, y;
+            double x;
+            double y;
             if (iss >> id >> x >> y) {
                 x_coords.push_back(x);
                 y_coords.push_back(y);
@@ -178,8 +187,9 @@ Problem load_tsplib(const std::filesystem::path& path) {
             int d;
             std::istringstream iss(line);
             if (iss >> d) {
-                if (d >= 1)
+                if (d >= 1) {
                     depot = d - 1;  // TSPLIB is 1-indexed
+                }
             }
             continue;
         }
@@ -215,10 +225,12 @@ Problem load_tsplib(const std::filesystem::path& path) {
             std::istringstream iss(line);
             std::vector<double> row;
             double v;
-            while (iss >> v)
+            while (iss >> v) {
                 row.push_back(v);
-            if (!row.empty())
+            }
+            if (!row.empty()) {
                 edge_weight_matrix.push_back(std::move(row));
+            }
             continue;
         }
     }
@@ -234,21 +246,27 @@ Problem load_tsplib(const std::filesystem::path& path) {
         // Explicit weights (FULL_MATRIX, LOWER_DIAG_ROW, etc.)
         // For simplicity, handle FULL_MATRIX and LOWER_DIAG_ROW
         auto format =
-            header.count("EDGE_WEIGHT_FORMAT") ? header["EDGE_WEIGHT_FORMAT"] : "FULL_MATRIX";
+            header.contains("EDGE_WEIGHT_FORMAT") ? header["EDGE_WEIGHT_FORMAT"] : "FULL_MATRIX";
         if (format == "FULL_MATRIX") {
             // Flatten all rows
             std::vector<double> flat;
-            for (auto& row : edge_weight_matrix)
-                for (double v : row)
+            for (auto& row : edge_weight_matrix) {
+                for (double v : row) {
                     flat.push_back(v);
-            for (int i = 0; i < dimension; ++i)
-                for (int j = 0; j < dimension; ++j)
+                }
+            }
+            for (int i = 0; i < dimension; ++i) {
+                for (int j = 0; j < dimension; ++j) {
                     dist[i][j] = flat[i * dimension + j];
+                }
+            }
         } else if (format == "LOWER_DIAG_ROW" || format == "LOWER_ROW") {
             std::vector<double> flat;
-            for (auto& row : edge_weight_matrix)
-                for (double v : row)
+            for (auto& row : edge_weight_matrix) {
+                for (double v : row) {
                     flat.push_back(v);
+                }
+            }
             int k = 0;
             for (int i = 0; i < dimension; ++i) {
                 for (int j = 0; j <= i; ++j) {
@@ -260,9 +278,11 @@ Problem load_tsplib(const std::filesystem::path& path) {
         }
     } else if (!x_coords.empty()) {
         // Compute from coordinates
-        for (int i = 0; i < dimension; ++i)
-            for (int j = 0; j < dimension; ++j)
+        for (int i = 0; i < dimension; ++i) {
+            for (int j = 0; j < dimension; ++j) {
                 dist[i][j] = euc2d(x_coords[i], y_coords[i], x_coords[j], y_coords[j]);
+            }
+        }
     }
 
     // Build edges: complete undirected graph (i < j)
@@ -301,7 +321,7 @@ Problem load_tsplib(const std::filesystem::path& path) {
     }
 
     Problem prob;
-    prob.name = header.count("NAME") ? header["NAME"] : path.stem().string();
+    prob.name = header.contains("NAME") ? header["NAME"] : path.stem().string();
     prob.build(dimension, edges, edge_costs, profits, demands, static_cast<double>(capacity), depot,
                depot);
     return prob;
@@ -319,7 +339,8 @@ Problem load_numeric(const std::filesystem::path& path) {
     // Next num_arcs lines: tail head cost (directed arcs)
     // Last line (optional): capacity
 
-    int32_t num_nodes, num_arcs;
+    int32_t num_nodes;
+    int32_t num_arcs;
     f >> num_nodes >> num_arcs;
 
     std::vector<double> profits(num_nodes);
@@ -335,7 +356,8 @@ Problem load_numeric(const std::filesystem::path& path) {
     std::vector<double> edge_costs;
 
     for (int32_t i = 0; i < num_arcs; ++i) {
-        int32_t tail, head;
+        int32_t tail;
+        int32_t head;
         double cost;
         f >> tail >> head >> cost;
         if (tail < head) {
@@ -350,7 +372,8 @@ Problem load_numeric(const std::filesystem::path& path) {
     }
 
     // Optionally read source and target nodes (default: 0 0 = tour)
-    int32_t source = 0, target = 0;
+    int32_t source = 0;
+    int32_t target = 0;
     if (f >> source >> target) {
         // source/target were present
     }

@@ -253,7 +253,7 @@ TEST_CASE("Propagator: clearCallback on one thread does not affect another",
 
 // ─── Integration: concurrent Model::solve ───
 
-static const cptp::SolverOptions quiet = {
+static const cptp::SolverOptions kQuiet = {
     {"time_limit", "30"},
     {"output_flag", "false"},
 };
@@ -263,8 +263,9 @@ static bool wait_for_condition(
     Predicate&& predicate, std::chrono::milliseconds timeout = std::chrono::milliseconds(5000)) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!predicate()) {
-        if (std::chrono::steady_clock::now() >= deadline)
+        if (std::chrono::steady_clock::now() >= deadline) {
             return false;
+        }
         std::this_thread::yield();
     }
     return true;
@@ -286,7 +287,7 @@ TEST_CASE("Concurrent Model::solve on different threads", "[thread_local][integr
         auto prob = cptp::io::load("tests/data/tiny4.txt");
         cptp::Model model;
         model.set_problem(std::move(prob));
-        auto result = model.solve(quiet);
+        auto result = model.solve(kQuiet);
         ok = result.has_solution() && result.is_optimal();
     };
 
@@ -311,7 +312,7 @@ TEST_CASE("Concurrent Model::solve with different instances", "[thread_local][in
         auto prob = cptp::io::load("tests/data/tiny4.txt");
         cptp::Model model;
         model.set_problem(std::move(prob));
-        auto result = model.solve(quiet);
+        auto result = model.solve(kQuiet);
         if (result.is_optimal()) {
             ok_tour = true;
             obj_tour = result.objective;
@@ -322,7 +323,7 @@ TEST_CASE("Concurrent Model::solve with different instances", "[thread_local][in
         auto prob = cptp::io::load("tests/data/tiny4_path.txt");
         cptp::Model model;
         model.set_problem(std::move(prob));
-        auto result = model.solve(quiet);
+        auto result = model.solve(kQuiet);
         if (result.is_optimal()) {
             ok_path = true;
             obj_path = result.objective;

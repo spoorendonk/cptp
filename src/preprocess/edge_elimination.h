@@ -34,10 +34,10 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
     const int32_t n = prob.num_nodes();
     const auto& graph = prob.graph();
     const double Q = prob.capacity();
-    constexpr double inf = std::numeric_limits<double>::infinity();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
 
     std::vector<std::vector<Label>> labels(n);
-    std::vector<double> best_cost(n, inf);
+    std::vector<double> best_cost(n, kInf);
 
     double root_cost = -profits[root];
     double root_demand = prob.demand(root);
@@ -58,16 +58,18 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
         }
         auto [u, li] = queue[head++];
 
-        if (li >= static_cast<int32_t>(labels[u].size()))
+        if (li >= static_cast<int32_t>(labels[u].size())) {
             continue;
+        }
         const Label& lbl = labels[u][li];
 
         for (auto e : graph.incident_edges(u)) {
             int32_t v = graph.other_endpoint(e, u);
 
             double new_demand = lbl.demand + prob.demand(v);
-            if (new_demand > Q)
+            if (new_demand > Q) {
                 continue;
+            }
 
             double new_cost = lbl.cost + edge_costs[e] - profits[v];
 
@@ -79,8 +81,9 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                     break;
                 }
             }
-            if (dominated)
+            if (dominated) {
                 continue;
+            }
 
             std::erase_if(v_labels, [&](const Label& ex) {
                 return new_cost <= ex.cost && new_demand <= ex.demand;
@@ -88,9 +91,7 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
 
             v_labels.push_back({new_cost, new_demand});
 
-            if (new_cost < best_cost[v]) {
-                best_cost[v] = new_cost;
-            }
+            best_cost[v] = std::min(new_cost, best_cost[v]);
 
             queue.push_back({v, static_cast<int32_t>(v_labels.size()) - 1});
         }
@@ -137,20 +138,21 @@ inline std::vector<bool> edge_elimination(const Problem& prob, const std::vector
                                           double correction) {
     const auto& graph = prob.graph();
     const int32_t m = prob.num_edges();
-    constexpr double inf = std::numeric_limits<double>::infinity();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
 
     std::vector<bool> eliminated(m, false);
 
-    if (upper_bound >= inf)
+    if (upper_bound >= kInf) {
         return eliminated;
+    }
 
     for (auto e : graph.edges()) {
         int32_t u = graph.edge_source(e);
         int32_t v = graph.edge_target(e);
 
-        if (f[u] >= inf || b[v] >= inf) {
+        if (f[u] >= kInf || b[v] >= kInf) {
             // Try both orientations for undirected
-            if (f[v] >= inf || b[u] >= inf) {
+            if (f[v] >= kInf || b[u] >= kInf) {
                 eliminated[e] = true;
                 continue;
             }
@@ -177,12 +179,13 @@ inline std::vector<bool> edge_elimination(const Problem& prob, const std::vector
 inline std::vector<bool> edge_elimination(const Problem& prob, double upper_bound) {
     const auto& graph = prob.graph();
     const int32_t m = prob.num_edges();
-    constexpr double inf = std::numeric_limits<double>::infinity();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
 
     std::vector<bool> eliminated(m, false);
 
-    if (upper_bound >= inf)
+    if (upper_bound >= kInf) {
         return eliminated;
+    }
 
     // Forward labeling from source
     auto f_s = labeling_from(prob, prob.source());
@@ -196,7 +199,7 @@ inline std::vector<bool> edge_elimination(const Problem& prob, double upper_boun
             int32_t u = graph.edge_source(e);
             int32_t v = graph.edge_target(e);
 
-            if (f_s[u] >= inf || f_s[v] >= inf) {
+            if (f_s[u] >= kInf || f_s[v] >= kInf) {
                 eliminated[e] = true;
                 continue;
             }
@@ -215,11 +218,13 @@ inline std::vector<bool> edge_elimination(const Problem& prob, double upper_boun
             int32_t v = graph.edge_target(e);
 
             // Try both orientations: source->...->u->v->...->target and reverse
-            double lb1 = (f_s[u] < inf && f_t[v] < inf) ? f_s[u] + prob.edge_cost(e) + f_t[v] : inf;
-            double lb2 = (f_s[v] < inf && f_t[u] < inf) ? f_s[v] + prob.edge_cost(e) + f_t[u] : inf;
+            double lb1 =
+                (f_s[u] < kInf && f_t[v] < kInf) ? f_s[u] + prob.edge_cost(e) + f_t[v] : kInf;
+            double lb2 =
+                (f_s[v] < kInf && f_t[u] < kInf) ? f_s[v] + prob.edge_cost(e) + f_t[u] : kInf;
             double lb = std::min(lb1, lb2);
 
-            if (lb >= inf || lb > upper_bound + 1e-6) {
+            if (lb >= kInf || lb > upper_bound + 1e-6) {
                 eliminated[e] = true;
             }
         }

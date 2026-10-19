@@ -13,9 +13,9 @@ namespace cptp::preprocess {
 inline std::vector<double> demand_dijkstra(const Problem& prob, int32_t root) {
     const int32_t n = prob.num_nodes();
     const auto& graph = prob.graph();
-    constexpr double inf = std::numeric_limits<double>::infinity();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
 
-    std::vector<double> dist(n, inf);
+    std::vector<double> dist(n, kInf);
     dist[root] = 0.0;
 
     using Entry = std::pair<double, int32_t>;
@@ -25,8 +25,9 @@ inline std::vector<double> demand_dijkstra(const Problem& prob, int32_t root) {
     while (!pq.empty()) {
         auto [d, u] = pq.top();
         pq.pop();
-        if (d > dist[u])
+        if (d > dist[u]) {
             continue;
+        }
 
         for (auto e : graph.incident_edges(u)) {
             int32_t v = graph.other_endpoint(e, u);
@@ -50,7 +51,7 @@ inline std::vector<bool> demand_reachability(const Problem& prob) {
     const double Q = prob.capacity();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
-    constexpr double inf = std::numeric_limits<double>::infinity();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
 
     auto dist_s = demand_dijkstra(prob, source);
 
@@ -59,7 +60,7 @@ inline std::vector<bool> demand_reachability(const Problem& prob) {
     if (prob.is_tour()) {
         // Tour: round-trip check
         for (int32_t v = 0; v < n; ++v) {
-            if (dist_s[v] < inf) {
+            if (dist_s[v] < kInf) {
                 reachable[v] = (2.0 * dist_s[v] - prob.demand(v) <= Q);
             }
         }
@@ -67,7 +68,7 @@ inline std::vector<bool> demand_reachability(const Problem& prob) {
         // Path: Dijkstra from both source and target
         auto dist_t = demand_dijkstra(prob, target);
         for (int32_t v = 0; v < n; ++v) {
-            if (dist_s[v] < inf && dist_t[v] < inf) {
+            if (dist_s[v] < kInf && dist_t[v] < kInf) {
                 reachable[v] = (dist_s[v] + dist_t[v] - prob.demand(v) <= Q);
             }
         }

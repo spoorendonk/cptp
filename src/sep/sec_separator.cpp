@@ -17,8 +17,9 @@ std::vector<Cut> SECSeparator::separate(const SeparationContext& ctx) {
     std::vector<Cut> all_cuts;
 
     for (int32_t target = 0; target < n; ++target) {
-        if (target == source || ctx.y_values[target] <= tol)
+        if (target == source || ctx.y_values[target] <= tol) {
             continue;
+        }
 
         auto [flow, reachable] = ctx.flow_tree->min_cut(target);
         double yi = ctx.y_values[target];
@@ -32,8 +33,9 @@ std::vector<Cut> SECSeparator::separate(const SeparationContext& ctx) {
         double rhs_coeff = target_in_S ? 1.0 : 2.0;
 
         double sec_violation = rhs_coeff * yi - flow;
-        if (sec_violation <= tol)
+        if (sec_violation <= tol) {
             continue;
+        }
 
         // Count |E(S)| and |δ(S)| to choose sparser form.
         int32_t n_inside = 0;
@@ -44,14 +46,16 @@ std::vector<Cut> SECSeparator::separate(const SeparationContext& ctx) {
             int32_t v = graph.edge_target(e);
             bool u_in = !reachable[u];
             bool v_in = !reachable[v];
-            if (u_in && v_in)
+            if (u_in && v_in) {
                 n_inside++;
-            else if (u_in != v_in)
+            } else if (u_in != v_in) {
                 n_delta++;
+            }
         }
         for (int32_t i = 0; i < n; ++i) {
-            if (!reachable[i])
+            if (!reachable[i]) {
                 s_size++;
+            }
         }
 
         // Cut form:   |δ(S)| + 1 nonzeros
@@ -79,8 +83,9 @@ std::vector<Cut> SECSeparator::separate(const SeparationContext& ctx) {
                 }
             }
             for (int32_t i = 0; i < n; ++i) {
-                if (reachable[i] || i == target)
+                if (reachable[i] || i == target) {
                     continue;
+                }
                 cut.indices.push_back(ctx.y_offset + i);
                 cut.values.push_back(-1.0);
             }

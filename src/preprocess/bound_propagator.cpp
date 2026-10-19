@@ -50,8 +50,9 @@ std::vector<int32_t> BoundPropagator::sweep(double upper_bound,
     std::vector<int32_t> fixings;
 
     for (int32_t e = 0; e < m; ++e) {
-        if (col_upper[e] < 0.5)
+        if (col_upper[e] < 0.5) {
             continue;  // already fixed
+        }
 
         int32_t u = prob_.graph().edge_source(e);
         int32_t v = prob_.graph().edge_target(e);
@@ -74,8 +75,9 @@ std::vector<int32_t> BoundPropagator::sweep_nodes(std::span<const double> col_up
     std::vector<int32_t> fixings;
 
     for (int32_t i = 0; i < n; ++i) {
-        if (col_upper[y_offset + i] < 0.5)
+        if (col_upper[y_offset + i] < 0.5) {
             continue;
+        }
         bool all_fixed = true;
         for (const auto& [e, nb] : adjacency_[i]) {
             if (col_upper[e] > 0.5) {
@@ -110,10 +112,12 @@ std::vector<int32_t> BoundPropagator::propagate_fixed_edge(
         const double cost_ai = edge_costs_[edge];
 
         for (int32_t ej = 0; ej < m; ++ej) {
-            if (ej == edge)
+            if (ej == edge) {
                 continue;
-            if (col_upper[ej] < 0.5)
+            }
+            if (col_upper[ej] < 0.5) {
                 continue;
+            }
 
             int32_t u = prob_.graph().edge_source(ej);
             int32_t v = prob_.graph().edge_target(ej);
@@ -148,10 +152,12 @@ std::vector<int32_t> BoundPropagator::propagate_fixed_edge(
         double cost_a_to_i = f[a] + edge_costs_[edge] - profits_[i];
 
         for (const auto& [ej, j] : adjacency_[i]) {
-            if (ej == edge)
+            if (ej == edge) {
                 continue;
-            if (col_upper[ej] < 0.5)
+            }
+            if (col_upper[ej] < 0.5) {
                 continue;
+            }
 
             double lb = cost_a_to_i + edge_costs_[ej] + b[j] + correction_;
             if (lb > upper_bound + 1e-6) {
@@ -162,10 +168,12 @@ std::vector<int32_t> BoundPropagator::propagate_fixed_edge(
         double cost_via_i_return = edge_costs_[edge] + b[i] - profits_[a];
 
         for (const auto& [ek, k] : adjacency_[a]) {
-            if (ek == edge)
+            if (ek == edge) {
                 continue;
-            if (col_upper[ek] < 0.5)
+            }
+            if (col_upper[ek] < 0.5) {
                 continue;
+            }
 
             double lb = f[k] + edge_costs_[ek] + cost_via_i_return + correction_;
             if (lb > upper_bound + 1e-6) {

@@ -51,7 +51,7 @@ int main(int argc, char* argv[]) {
         std::vector<int> indices;
         std::vector<double> values;
         for (auto e : graph.incident_edges(i)) {
-            indices.push_back(static_cast<int>(e));
+            indices.push_back(e);
             values.push_back(1.0);
         }
         indices.push_back(m + i);

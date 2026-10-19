@@ -11,7 +11,7 @@
 
 using Catch::Matchers::WithinAbs;
 
-static const cptp::SolverOptions quiet = {
+static const cptp::SolverOptions kQuiet = {
     {"time_limit", "30"},
     {"output_flag", "false"},
 };
@@ -63,7 +63,7 @@ TEST_CASE("Model solves trivial 3-node instance", "[model]") {
     std::vector<double> demands = {0.0, 2.0, 3.0};
     model.add_capacity_resource(demands, 5.0);
 
-    auto result = model.solve(quiet);
+    auto result = model.solve(kQuiet);
 
     REQUIRE(result.has_solution());
     // Raw HiGHS objective: cost - profit (minimization)
@@ -86,7 +86,7 @@ TEST_CASE("Model solves instance with negative edge costs", "[model]") {
     std::vector<double> demands = {0.0, 1.0, 1.0};
     model.add_capacity_resource(demands, 10.0);
 
-    auto result = model.solve(quiet);
+    auto result = model.solve(kQuiet);
 
     REQUIRE(result.has_solution());
     // Negative costs + profits make objective very negative
@@ -107,7 +107,7 @@ TEST_CASE("Model tour allows single-customer cycle with depot-edge multiplicity"
     model.set_profits(profits);
     model.add_capacity_resource(demands, 10.0);
 
-    auto result = model.solve(quiet);
+    auto result = model.solve(kQuiet);
 
     REQUIRE(result.has_solution());
     REQUIRE_THAT(result.objective, WithinAbs(-1.0, 1e-6));
@@ -217,7 +217,7 @@ TEST_CASE("Heuristic warm-start progress snapshots are monotonic", "[heuristic][
     auto result = cptp::heuristic::run_local_search_from_pool(
         prob, pool, static_cast<int>(pool.candidates.size()), 200, 4, {}, &progress_opts,
         [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
-            std::lock_guard<std::mutex> lock(snapshots_mu);
+            std::scoped_lock lock(snapshots_mu);
             snapshots.push_back(snap);
         });
     REQUIRE(std::isfinite(result.objective));
@@ -260,7 +260,7 @@ TEST_CASE("Heuristic warm-start reuses seeds to honor requested starts",
     auto result = cptp::heuristic::run_local_search_from_pool(
         prob, pool, requested_starts, 200, 4, {}, &progress_opts,
         [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
-            std::lock_guard<std::mutex> lock(snapshots_mu);
+            std::scoped_lock lock(snapshots_mu);
             snapshots.push_back(snap);
         },
         true);
@@ -290,7 +290,7 @@ TEST_CASE("Model handles high-cost low-profit instance", "[model]") {
     std::vector<double> demands = {0.0, 1.0, 1.0};
     model.add_capacity_resource(demands, 10.0);
 
-    auto result = model.solve(quiet);
+    auto result = model.solve(kQuiet);
 
     REQUIRE(result.has_solution());
     // High cost, low profit: objective (cost - profit) should be positive
@@ -314,7 +314,7 @@ TEST_CASE("Model solves s-t path instance", "[model][path]") {
     std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
     model.add_capacity_resource(demands, 7.0);
 
-    auto result = model.solve(quiet);
+    auto result = model.solve(kQuiet);
 
     REQUIRE(result.has_solution());
     // Path should start at source and end at target
@@ -338,8 +338,8 @@ TEST_CASE("Model path: heu_ws=false still keeps optimal objective", "[model][pat
     model.set_profits(profits);
     model.add_capacity_resource(demands, 7.0);
 
-    auto opts = quiet;
-    opts.push_back({"heu_ws", "false"});
+    auto opts = kQuiet;
+    opts.emplace_back("heu_ws", "false");
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -369,8 +369,8 @@ TEST_CASE("Model path: heu_lpg=false warm-start (setSolution) stays optimal",
     model.set_profits(profits);
     model.add_capacity_resource(demands, 7.0);
 
-    auto opts = quiet;
-    opts.push_back({"heu_lpg", "false"});  // heu_ws defaults true -> setSolution
+    auto opts = kQuiet;
+    opts.emplace_back("heu_lpg", "false");  // heu_ws defaults true -> setSolution
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -392,8 +392,8 @@ TEST_CASE("Model path: async incumbent proof handoff does not stop without solut
     model.set_profits(profits);
     model.add_capacity_resource(demands, 7.0);
 
-    auto opts = quiet;
-    opts.push_back({"heu_ws", "false"});  // no initial setSolution
+    auto opts = kQuiet;
+    opts.emplace_back("heu_ws", "false");  // no initial setSolution
 
     auto result = model.solve(opts);
 
@@ -418,7 +418,7 @@ TEST_CASE("Model solves path with non-zero source", "[model][path]") {
     std::vector<double> demands = {3.0, 0.0, 4.0, 2.0};
     model.add_capacity_resource(demands, 7.0);
 
-    auto result = model.solve(quiet);
+    auto result = model.solve(kQuiet);
     REQUIRE(result.has_solution());
     if (!result.tour.empty()) {
         REQUIRE(result.tour.front() == 1);
@@ -439,7 +439,7 @@ TEST_CASE("Model: source==target gives same result as set_depot", "[model][path]
     model_depot.set_depot(0);
     model_depot.set_profits(profits);
     model_depot.add_capacity_resource(demands, 5.0);
-    auto result_depot = model_depot.solve(quiet);
+    auto result_depot = model_depot.solve(kQuiet);
 
     cptp::Model model_st;
     model_st.set_graph(3, edges, costs);
@@ -447,7 +447,7 @@ TEST_CASE("Model: source==target gives same result as set_depot", "[model][path]
     model_st.set_target(0);
     model_st.set_profits(profits);
     model_st.add_capacity_resource(demands, 5.0);
-    auto result_st = model_st.solve(quiet);
+    auto result_st = model_st.solve(kQuiet);
 
     REQUIRE(result_depot.has_solution());
     REQUIRE(result_st.has_solution());
@@ -469,8 +469,8 @@ TEST_CASE("Model: submip_separation=false produces valid result", "[model]") {
     std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
     model.add_capacity_resource(demands, 10.0);
 
-    auto opts = quiet;
-    opts.push_back({"heu_highs_submip_sec", "false"});
+    auto opts = kQuiet;
+    opts.emplace_back("heu_highs_submip_sec", "false");
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -492,8 +492,8 @@ TEST_CASE("Model: submip_separation=true produces valid result", "[model]") {
     std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
     model.add_capacity_resource(demands, 10.0);
 
-    auto opts = quiet;
-    opts.push_back({"heu_highs_submip_sec", "true"});
+    auto opts = kQuiet;
+    opts.emplace_back("heu_highs_submip_sec", "true");
     auto result = model.solve(opts);
 
     REQUIRE(result.has_solution());
@@ -515,23 +515,23 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
     std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
     model.add_capacity_resource(demands, 7.0);
 
-    auto opts = quiet;
-    opts.push_back({"heu_lpg_deterministic_restarts", "8"});
-    opts.push_back({"heu_lpg_node_interval", "50"});
-    opts.push_back({"enable_sec", "true"});
-    opts.push_back({"enable_rci", "true"});
-    opts.push_back({"enable_multistar", "true"});
-    opts.push_back({"enable_comb", "true"});
-    opts.push_back({"enable_rglm", "true"});
-    opts.push_back({"edge_elimination", "true"});
-    opts.push_back({"edge_elimination_nodes", "true"});
-    opts.push_back({"max_cuts_sec", "2"});
-    opts.push_back({"max_cuts_rci", "2"});
-    opts.push_back({"branch_hyper", "pairs"});
-    opts.push_back({"branch_hyper_sb_max_depth", "1"});
-    opts.push_back({"branch_hyper_sb_iter_limit", "20"});
-    opts.push_back({"branch_hyper_sb_min_reliable", "2"});
-    opts.push_back({"branch_hyper_sb_max_candidates", "2"});
+    auto opts = kQuiet;
+    opts.emplace_back("heu_lpg_deterministic_restarts", "8");
+    opts.emplace_back("heu_lpg_node_interval", "50");
+    opts.emplace_back("enable_sec", "true");
+    opts.emplace_back("enable_rci", "true");
+    opts.emplace_back("enable_multistar", "true");
+    opts.emplace_back("enable_comb", "true");
+    opts.emplace_back("enable_rglm", "true");
+    opts.emplace_back("edge_elimination", "true");
+    opts.emplace_back("edge_elimination_nodes", "true");
+    opts.emplace_back("max_cuts_sec", "2");
+    opts.emplace_back("max_cuts_rci", "2");
+    opts.emplace_back("branch_hyper", "pairs");
+    opts.emplace_back("branch_hyper_sb_max_depth", "1");
+    opts.emplace_back("branch_hyper_sb_iter_limit", "20");
+    opts.emplace_back("branch_hyper_sb_min_reliable", "2");
+    opts.emplace_back("branch_hyper_sb_max_candidates", "2");
 
     auto result = model.solve(opts);
     REQUIRE(result.has_solution());
@@ -552,9 +552,9 @@ TEST_CASE("Model: deterministic work-unit settings produce stable repeated solve
     model.set_profits(profits);
     model.add_capacity_resource(demands, 7.0);
 
-    auto opts = quiet;
-    opts.push_back({"threads", "1"});
-    opts.push_back({"heu_lpg_deterministic_restarts", "8"});
+    auto opts = kQuiet;
+    opts.emplace_back("threads", "1");
+    opts.emplace_back("heu_lpg_deterministic_restarts", "8");
 
     auto r1 = model.solve(opts);
     auto r2 = model.solve(opts);
@@ -581,13 +581,13 @@ TEST_CASE("Model: disabling cut families still yields valid tiny solution",
     model.set_profits(profits);
     model.add_capacity_resource(demands, 7.0);
 
-    auto opts = quiet;
-    opts.push_back({"enable_sec", "false"});
-    opts.push_back({"enable_rci", "false"});
-    opts.push_back({"enable_multistar", "false"});
-    opts.push_back({"enable_comb", "false"});
-    opts.push_back({"enable_rglm", "false"});
-    opts.push_back({"enable_spi", "false"});
+    auto opts = kQuiet;
+    opts.emplace_back("enable_sec", "false");
+    opts.emplace_back("enable_rci", "false");
+    opts.emplace_back("enable_multistar", "false");
+    opts.emplace_back("enable_comb", "false");
+    opts.emplace_back("enable_rglm", "false");
+    opts.emplace_back("enable_spi", "false");
 
     auto result = model.solve(opts);
     REQUIRE(result.has_solution());
@@ -620,16 +620,16 @@ TEST_CASE("Model: connectivity still enforced when SEC cut generation is disable
         m->add_capacity_resource(demands, 10.0);
     }
 
-    auto opts_on = quiet;
+    auto opts_on = kQuiet;
     auto r_on = model_sec_on.solve(opts_on);
 
-    auto opts_off = quiet;
-    opts_off.push_back({"enable_sec", "false"});
-    opts_off.push_back({"enable_rci", "false"});
-    opts_off.push_back({"enable_multistar", "false"});
-    opts_off.push_back({"enable_comb", "false"});
-    opts_off.push_back({"enable_rglm", "false"});
-    opts_off.push_back({"enable_spi", "false"});
+    auto opts_off = kQuiet;
+    opts_off.emplace_back("enable_sec", "false");
+    opts_off.emplace_back("enable_rci", "false");
+    opts_off.emplace_back("enable_multistar", "false");
+    opts_off.emplace_back("enable_comb", "false");
+    opts_off.emplace_back("enable_rglm", "false");
+    opts_off.emplace_back("enable_spi", "false");
     auto r_off = model_sec_off.solve(opts_off);
 
     REQUIRE(r_on.is_optimal());
@@ -660,14 +660,14 @@ TEST_CASE(
     model.set_profits(profits);
     model.add_capacity_resource(demands, 10.0);
 
-    auto opts = quiet;
-    opts.push_back({"enable_sec", "false"});
-    opts.push_back({"enable_rci", "false"});
-    opts.push_back({"enable_multistar", "false"});
-    opts.push_back({"enable_comb", "false"});
-    opts.push_back({"enable_rglm", "false"});
-    opts.push_back({"enable_spi", "false"});
-    opts.push_back({"heu_highs_submip_sec", "false"});
+    auto opts = kQuiet;
+    opts.emplace_back("enable_sec", "false");
+    opts.emplace_back("enable_rci", "false");
+    opts.emplace_back("enable_multistar", "false");
+    opts.emplace_back("enable_comb", "false");
+    opts.emplace_back("enable_rglm", "false");
+    opts.emplace_back("enable_spi", "false");
+    opts.emplace_back("heu_highs_submip_sec", "false");
     auto result = model.solve(opts);
 
     REQUIRE(result.is_optimal());
@@ -690,17 +690,17 @@ TEST_CASE("Model: edge elimination toggles preserve tiny optimum", "[model][opti
         m->add_capacity_resource(demands, 7.0);
     }
 
-    auto opts_on = quiet;
-    opts_on.push_back({"cutoff", "-11.0"});
-    opts_on.push_back({"heu_ws", "false"});
-    opts_on.push_back({"edge_elimination", "true"});
-    opts_on.push_back({"edge_elimination_nodes", "true"});
+    auto opts_on = kQuiet;
+    opts_on.emplace_back("cutoff", "-11.0");
+    opts_on.emplace_back("heu_ws", "false");
+    opts_on.emplace_back("edge_elimination", "true");
+    opts_on.emplace_back("edge_elimination_nodes", "true");
 
-    auto opts_off = quiet;
-    opts_off.push_back({"cutoff", "-11.0"});
-    opts_off.push_back({"heu_ws", "false"});
-    opts_off.push_back({"edge_elimination", "false"});
-    opts_off.push_back({"edge_elimination_nodes", "false"});
+    auto opts_off = kQuiet;
+    opts_off.emplace_back("cutoff", "-11.0");
+    opts_off.emplace_back("heu_ws", "false");
+    opts_off.emplace_back("edge_elimination", "false");
+    opts_off.emplace_back("edge_elimination_nodes", "false");
 
     auto r_on = model_on.solve(opts_on);
     auto r_off = model_off.solve(opts_off);
@@ -727,11 +727,11 @@ TEST_CASE("Model: presolve option is captured and forced off", "[model][options]
         m->add_capacity_resource(demands, 7.0);
     }
 
-    auto opts_forced = quiet;
-    opts_forced.push_back({"presolve", "true"});  // should be intercepted and ignored
+    auto opts_forced = kQuiet;
+    opts_forced.emplace_back("presolve", "true");  // should be intercepted and ignored
 
-    auto opts_off = quiet;
-    opts_off.push_back({"presolve", "off"});
+    auto opts_off = kQuiet;
+    opts_off.emplace_back("presolve", "off");
 
     auto r_forced = model_a.solve(opts_forced);
     auto r_off = model_b.solve(opts_off);
@@ -757,9 +757,9 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
         model.set_depot(0);
         model.set_profits(profits);
         model.add_capacity_resource(demands, 10.0);
-        auto ref_opts = quiet;
-        ref_opts.push_back({"threads", "1"});
-        ref_opts.push_back({"random_seed", "0"});
+        auto ref_opts = kQuiet;
+        ref_opts.emplace_back("threads", "1");
+        ref_opts.emplace_back("random_seed", "0");
         auto result = model.solve(ref_opts);
         if (result.status == cptp::SolveResult::Status::Error) {
             WARN("Reference run returned Error; skipping hyperplane mode assertions");
@@ -782,10 +782,10 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
             model.set_depot(0);
             model.set_profits(profits);
             model.add_capacity_resource(demands, 10.0);
-            auto opts = quiet;
-            opts.push_back({"threads", "1"});
-            opts.push_back({"random_seed", "0"});
-            opts.push_back({"branch_hyper", mode});
+            auto opts = kQuiet;
+            opts.emplace_back("threads", "1");
+            opts.emplace_back("random_seed", "0");
+            opts.emplace_back("branch_hyper", mode);
             auto result = model.solve(opts);
             if (result.status == cptp::SolveResult::Status::Error) {
                 WARN("mode=" << mode << " returned Error; skipping objective check");
@@ -813,15 +813,15 @@ TEST_CASE("Model: deterministic parallel settings preserve objective", "[model][
 
     cptp::Model base_model;
     setup_path_model(base_model);
-    auto base_opts = quiet;
+    auto base_opts = kQuiet;
     auto base = base_model.solve(base_opts);
     REQUIRE(base.has_solution());
 
     cptp::Model staged_model;
     setup_path_model(staged_model);
-    auto staged_opts = quiet;
-    staged_opts.push_back({"heu_lpg_deterministic_restarts", "8"});
-    staged_opts.push_back({"preproc_fast_restarts", "4"});
+    auto staged_opts = kQuiet;
+    staged_opts.emplace_back("heu_lpg_deterministic_restarts", "8");
+    staged_opts.emplace_back("preproc_fast_restarts", "4");
     auto staged = staged_model.solve(staged_opts);
     REQUIRE(staged.has_solution());
     REQUIRE_THAT(staged.objective, WithinAbs(base.objective, 1e-6));
@@ -839,10 +839,10 @@ TEST_CASE("Model: mip_max_nodes limit is surfaced as non-error status", "[model]
     model.set_profits(profits);
     model.add_capacity_resource(demands, 3.0);
 
-    auto opts = quiet;
-    opts.push_back({"threads", "1"});
-    opts.push_back({"random_seed", "0"});
-    opts.push_back({"mip_max_nodes", "1"});
+    auto opts = kQuiet;
+    opts.emplace_back("threads", "1");
+    opts.emplace_back("random_seed", "0");
+    opts.emplace_back("mip_max_nodes", "1");
 
     auto r = model.solve(opts);
     if (r.status == cptp::SolveResult::Status::Error) {
