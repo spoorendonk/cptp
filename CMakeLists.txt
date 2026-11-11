@@ -167,6 +167,12 @@ if(CPTP_BUILD_TESTS)
                 -DEXTENSION=$<TARGET_FILE:cptp_python>
                 -DSOLVE=$<TARGET_FILE:cptp-solve>
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/run_pytest.cmake)
+        # The committed type stubs match what this build's extension exports.
+        add_test(NAME python_stub
+            COMMAND ${CMAKE_COMMAND}
+                -DGENERATED=${CPTP_STUB}
+                -DCOMMITTED=${CPTP_STUB_SOURCE}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_stub.cmake)
     endif()
 endif()
 

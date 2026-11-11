@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.4.0"]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.15.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -41,6 +41,8 @@ wheel.packages = ["python/cptp"]
 line-length = 100
 target-version = "py312"
 output-format = "concise"
+# nanobind's stubgen writes it (python/CMakeLists.txt); mypy still checks it.
+extend-exclude = ["python/cptp/_cptp.pyi"]
 
 [tool.ruff.lint]
 select = [
@@ -70,11 +72,6 @@ show_column_numbers = true
 error_summary = true
 # Build trees (`build*/`, ignored by git) hold fetched dependencies' Python.
 exclude = ["^build[^/]*/"]
-
-# The nanobind extension ships no stubs, so its names are Any to mypy.
-[[tool.mypy.overrides]]
-module = "cptp._cptp"
-ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-q --tb=short --no-header"

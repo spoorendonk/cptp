@@ -215,10 +215,15 @@ def test_result_stats() -> None:
 
 
 def test_status_enum() -> None:
-    """Status enum values are accessible."""
-    assert Status.Optimal != Status.Error
-    assert Status.Feasible != Status.Infeasible
-    assert Status.TimeLimit != Status.Unbounded
+    """Status enum values are accessible and distinct (an alias would drop out)."""
+    assert [s.name for s in Status] == [
+        "Optimal",
+        "Feasible",
+        "Infeasible",
+        "Unbounded",
+        "TimeLimit",
+        "Error",
+    ]
 
 
 # ---------- solve() convenience wrapper ----------
