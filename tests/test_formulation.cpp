@@ -56,7 +56,7 @@ int main(int argc, char* argv[]) {
         }
         indices.push_back(m + i);
         values.push_back(-2.0);
-        highs.addRow(0.0, 0.0, (int)indices.size(), indices.data(), values.data());
+        highs.addRow(0.0, 0.0, static_cast<int>(indices.size()), indices.data(), values.data());
     }
 
     // Depot: y_depot = 1
@@ -78,8 +78,8 @@ int main(int argc, char* argv[]) {
             }
         }
         if (!indices.empty()) {
-            highs.addRow(-kHighsInf, prob.capacity(), (int)indices.size(), indices.data(),
-                         values.data());
+            highs.addRow(-kHighsInf, prob.capacity(), static_cast<int>(indices.size()),
+                         indices.data(), values.data());
         }
     }
 
@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
     double obj_val;
     highs.getInfoValue("objective_function_value", obj_val);
     printf("HiGHS objective: %.2f (our_obj = %.2f)\n", obj_val, -obj_val);
-    printf("Model status: %d\n", (int)highs.getModelStatus());
+    printf("Model status: %d\n", static_cast<int>(highs.getModelStatus()));
 
     // Print the solution tour
     const auto& sol = highs.getSolution();

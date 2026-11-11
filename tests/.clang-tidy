@@ -1,0 +1,13 @@
+---
+# The repository's checks, less two that clang-tidy 22 added and that fire on
+# what a test is made of rather than on defects:
+# - bugprone-throwing-static-initialization: Catch2's TEST_CASE registers each
+#   test through a static object whose constructor may throw, and the shared
+#   `kQuiet` options are file-scope statics. A throw there aborts the test
+#   binary before any test runs, which ctest reports as a failure.
+# - bugprone-random-generator-seed: tests seed their generators with constants
+#   on purpose, so a failure reproduces.
+InheritParentConfig: true
+Checks: >
+  -bugprone-throwing-static-initialization,
+  -bugprone-random-generator-seed

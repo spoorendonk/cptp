@@ -61,7 +61,7 @@ RCICandidate make_candidate(const gomory_hu_tree& tree, int32_t cut_node, const 
 
     for (int32_t i = 0; i < n; ++i) {
         bool on_source_side = !tree.on_root_side(cut_node, i);
-        bool in_S = (depot_on_source) ? !on_source_side : on_source_side;
+        bool in_S = depot_on_source ? !on_source_side : on_source_side;
 
         if (in_S && i != depot && (is_tour || i != path_target)) {
             c.in_S[i] = true;

@@ -101,7 +101,7 @@ void print_result(const std::string& instance_name, const Problem& prob,
 
     if (!result.tour.empty()) {
         std::cout << "  Tour (" << result.tour.size() - 1 << " stops): ";
-        for (size_t i = 0; i < std::min(result.tour.size(), size_t(10)); ++i) {
+        for (size_t i = 0; i < std::min(result.tour.size(), size_t{10}); ++i) {
             if (i > 0) {
                 std::cout << " -> ";
             }
