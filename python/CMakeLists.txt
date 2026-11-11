@@ -47,11 +47,25 @@ if(NOT SKBUILD)
     set_target_properties(cptp_python PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY ${CPTP_STUB_PACKAGE})
     file(WRITE ${CPTP_STUB_PACKAGE}/__init__.py "")
-    nanobind_add_stub(cptp_python_stub
-        MODULE cptp._cptp
+    # Not nanobind_add_stub: its plain interpreter would import the editable
+    # install's copy of the extension instead (cmake/run_stubgen.cmake).
+    set(CPTP_STUBGEN ${nanobind_SOURCE_DIR}/src/stubgen.py)
+    if(NOT EXISTS ${CPTP_STUBGEN})
+        message(FATAL_ERROR "nanobind's stubgen.py is not at ${CPTP_STUBGEN}")
+    endif()
+    add_custom_command(
         OUTPUT ${CPTP_STUB}
-        PYTHON_PATH ${CMAKE_CURRENT_BINARY_DIR}
-        DEPENDS cptp_python)
+        COMMAND ${CMAKE_COMMAND}
+            -DPYTHON=${Python_EXECUTABLE}
+            -DSTUBGEN=${CPTP_STUBGEN}
+            -DPACKAGE_DIR=${CMAKE_CURRENT_BINARY_DIR}
+            -DOUTPUT=${CPTP_STUB}
+            -P ${PROJECT_SOURCE_DIR}/cmake/run_stubgen.cmake
+        DEPENDS cptp_python ${CPTP_STUBGEN}
+            ${PROJECT_SOURCE_DIR}/cmake/run_stubgen.cmake
+        COMMENT "Generating cptp/_cptp.pyi"
+        VERBATIM)
+    add_custom_target(cptp_python_stub ALL DEPENDS ${CPTP_STUB})
     add_custom_target(cptp_python_stub_update
         COMMAND ${CMAKE_COMMAND} -E copy ${CPTP_STUB} ${CPTP_STUB_SOURCE}
         DEPENDS cptp_python_stub
