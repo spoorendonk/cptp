@@ -738,11 +738,11 @@ SolveResult Model::solve(const SolverOptions& options) {
     const char* simd_str =
 #ifdef __AVX512F__
         ", AVX-512";
-#elif defined(__AVX2__)
+#elifdef __AVX2__
         ", AVX2";
-#elif defined(__AVX__)
+#elifdef __AVX__
         ", AVX";
-#elif defined(__SSE4_2__)
+#elifdef __SSE4_2__
         ", SSE4.2";
 #else
         "";

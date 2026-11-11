@@ -447,3 +447,40 @@ if(_found_search EQUAL -1)
 else()
     message(STATUS "HighsSearch.cpp hyperplane patch already applied, skipping")
 endif()
+
+# ── 6. Move ~HighsMipWorker() out of line ──
+# The header's inline destructor resets std::unique_ptr<HighsSearch> where
+# HighsSearch is only forward-declared. Under C++23 unique_ptr is constexpr,
+# so clang instantiates its deleter there and rejects the incomplete type as
+# a hard error (gcc accepts it). Defining the destructor in HighsMipWorker.cpp,
+# where HighsSearch is complete, lets units that include the header (through
+# mip/HighsMipSolverData.h) be compiled and tidied as C++23.
+file(READ "${MIP_DIR}/HighsMipWorker.h" WORKER_H)
+set(_worker_dtor_inline
+  "  ~HighsMipWorker() {\n    search_ptr_.reset();\n    sepa_ptr_.reset();\n  }")
+string(FIND "${WORKER_H}" "${_worker_dtor_inline}" _worker_inline)
+if(NOT _worker_inline EQUAL -1)
+    string(REPLACE "${_worker_dtor_inline}" "  ~HighsMipWorker();"
+      WORKER_H "${WORKER_H}")
+    file(WRITE "${MIP_DIR}/HighsMipWorker.h" "${WORKER_H}")
+    message(STATUS "Moved ~HighsMipWorker() out of line in HighsMipWorker.h")
+else()
+    string(FIND "${WORKER_H}" "  ~HighsMipWorker();" _worker_decl)
+    if(_worker_decl EQUAL -1)
+        message(FATAL_ERROR
+          "HighsMipWorker.h: inline destructor anchor did not match — "
+          "the C++23 fix would be lost. Update the patch anchor.")
+    endif()
+    message(STATUS "HighsMipWorker.h destructor patch already applied, skipping")
+endif()
+
+file(READ "${MIP_DIR}/HighsMipWorker.cpp" WORKER_CPP)
+string(FIND "${WORKER_CPP}" "HighsMipWorker::~HighsMipWorker()" _worker_def)
+if(_worker_def EQUAL -1)
+    string(APPEND WORKER_CPP
+      "\nHighsMipWorker::~HighsMipWorker() {\n  search_ptr_.reset();\n  sepa_ptr_.reset();\n}\n")
+    file(WRITE "${MIP_DIR}/HighsMipWorker.cpp" "${WORKER_CPP}")
+    message(STATUS "Defined ~HighsMipWorker() in HighsMipWorker.cpp")
+else()
+    message(STATUS "HighsMipWorker.cpp destructor patch already applied, skipping")
+endif()

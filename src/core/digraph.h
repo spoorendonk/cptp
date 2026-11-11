@@ -62,9 +62,7 @@ public:
 
         // Sort arcs by source to build out-CSR
         std::vector<int32_t> perm(g.num_arcs_);
-        // Not std::ranges::iota: model.cpp and highs_bridge.cpp are tidied as
-        // C++20 (cmake/Lint.cmake), which lacks it.
-        std::iota(perm.begin(), perm.end(), 0);  // NOLINT(modernize-use-ranges)
+        std::ranges::iota(perm, 0);
         std::ranges::sort(perm,
                           [&](int32_t a, int32_t b) { return g.sources_[a] < g.sources_[b]; });
 

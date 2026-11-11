@@ -76,22 +76,11 @@ else()
                     "registered, so the push gate does not check formatting.")
 endif()
 
-# Units that include HiGHS's mip/HighsMipSolverData.h are tidied as C++20.
-# Its HighsMipWorker.h resets a std::unique_ptr to a type it only forward
-# declares in an inline destructor; under C++23, where unique_ptr is
-# constexpr, clang rejects that as a hard error (gcc, which builds the
-# project, accepts it), and no check option can silence an error.
-set(CPTP_LINT_CXX20_UNITS src/model/model.cpp src/model/highs_bridge.cpp)
-
 if(CPTP_CLANG_TIDY)
     foreach(unit IN LISTS CPTP_LINT_UNITS)
-        set(_cptp_lint_std)
-        if(unit IN_LIST CPTP_LINT_CXX20_UNITS)
-            set(_cptp_lint_std --extra-arg=-std=c++20)
-        endif()
         add_test(NAME "clang_tidy:${unit}"
             COMMAND ${CPTP_CLANG_TIDY} -p ${CMAKE_BINARY_DIR}
-                    --quiet --warnings-as-errors=* ${_cptp_lint_std}
+                    --quiet --warnings-as-errors=*
                     ${CMAKE_CURRENT_SOURCE_DIR}/${unit})
         set_tests_properties("clang_tidy:${unit}" PROPERTIES LABELS lint)
     endforeach()
