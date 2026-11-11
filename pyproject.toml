@@ -12,8 +12,18 @@ requires-python = ">=3.10"
 dependencies = ["numpy"]
 
 # `uv sync` installs these, so the pre-commit hook's ruff and mypy checks run.
+# clang-format and clang-tidy are pinned exactly, to the group's one toolchain
+# version (#83, also in `.clang-format-version`): their output and findings
+# change between releases. The hooks and cmake/Lint.cmake look in .venv/bin
+# first, so the gate is the same whatever the host has installed.
 [dependency-groups]
-dev = ["mypy>=2.4", "pytest>=9.1", "ruff>=0.17"]
+dev = [
+    "clang-format==22.1.8",
+    "clang-tidy==22.1.8",
+    "mypy>=2.4",
+    "pytest>=9.1",
+    "ruff>=0.17",
+]
 
 [project.urls]
 Repository = "https://github.com/spoorendonk/cptp"

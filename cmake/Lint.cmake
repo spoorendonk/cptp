@@ -14,11 +14,15 @@
 # `src/`, `tests/` and `python/` and keeps out FetchContent's sources (HiGHS,
 # Catch2, nanobind) under the build tree.
 #
-# `.venv/bin` is searched first, as the hooks do, so pinned tools there win
-# over the ones on PATH; NO_CACHE, so one put there after a first configure is
-# picked up. A missing tool, or one older than the 18 CLAUDE.md vouches for
-# (older clang-format formats this tree differently), is a configure warning
-# that drops its tests, not an error: a machine without them still builds.
+# `.venv/bin` is searched first, as the hooks do, so the tools the dev group
+# pins there (`pyproject.toml`) win over the ones on PATH; NO_CACHE, so one put
+# there after a first configure is picked up. The expected version is the
+# group's one toolchain version, 22.1.8, read from `.clang-format-version`
+# (which the pre-commit hook reads too). A missing tool, or one of another
+# major version (it formats this tree differently, or reports other
+# findings), is a configure warning that drops its tests, so a machine
+# without them still builds; with the CI environment variable set, the wrong
+# major is a configure error instead.
 #
 # Expects CPTP_LINT_UNITS (paths relative to the source root) to be set.
 
@@ -26,22 +30,37 @@ set(_cptp_lint_hint "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin")
 find_program(CPTP_CLANG_FORMAT clang-format HINTS "${_cptp_lint_hint}" NO_CACHE)
 find_program(CPTP_CLANG_TIDY clang-tidy HINTS "${_cptp_lint_hint}" NO_CACHE)
 
-# Clears <var> when the tool's major version is below 18, with a warning.
-function(_cptp_lint_require_18 var)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/.clang-format-version"
+     CPTP_CLANG_VERSION LIMIT_COUNT 1)
+string(STRIP "${CPTP_CLANG_VERSION}" CPTP_CLANG_VERSION)
+string(REGEX MATCH "^([0-9]+)" _cptp_lint_major "${CPTP_CLANG_VERSION}")
+if(NOT _cptp_lint_major)
+    message(FATAL_ERROR ".clang-format-version does not begin with a version "
+                        "(\"${CPTP_CLANG_VERSION}\")")
+endif()
+
+# Clears <var>, with a warning (an error when CI is set), when the tool's
+# major version is not the pinned one.
+function(_cptp_lint_require_pinned var)
     if(NOT ${var})
         return()
     endif()
     execute_process(COMMAND ${${var}} --version
         OUTPUT_VARIABLE _v ERROR_QUIET RESULT_VARIABLE _rc)
     string(REGEX MATCH "version ([0-9]+)\\." _m "${_v}")
-    if(NOT _rc EQUAL 0 OR NOT CMAKE_MATCH_1 OR CMAKE_MATCH_1 LESS 18)
-        message(WARNING "${${var}} is not version 18 or newer (\"${_v}\"): "
-                        "its lint tests are not registered.")
+    if(NOT _rc EQUAL 0 OR NOT CMAKE_MATCH_1 STREQUAL _cptp_lint_major)
+        set(_level WARNING)
+        if(DEFINED ENV{CI})
+            set(_level FATAL_ERROR)
+        endif()
+        message(${_level} "${${var}} is not version ${CPTP_CLANG_VERSION} "
+                          "(\"${_v}\"): its lint tests are not registered. "
+                          "Run `uv sync` for the pinned copy in .venv/bin.")
         set(${var} "" PARENT_SCOPE)
     endif()
 endfunction()
-_cptp_lint_require_18(CPTP_CLANG_FORMAT)
-_cptp_lint_require_18(CPTP_CLANG_TIDY)
+_cptp_lint_require_pinned(CPTP_CLANG_FORMAT)
+_cptp_lint_require_pinned(CPTP_CLANG_TIDY)
 
 if(CPTP_CLANG_FORMAT AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
     message(STATUS "Not a git checkout: no clang_format test")
