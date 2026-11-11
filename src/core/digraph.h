@@ -86,7 +86,7 @@ public:
             g.out_begin_[i + 1] += g.out_begin_[i];
         }
         g.out_arcs_.resize(g.num_arcs_);
-        std::iota(g.out_arcs_.begin(), g.out_arcs_.end(), 0);  // NOLINT(modernize-use-ranges)
+        std::ranges::iota(g.out_arcs_, 0);
 
         // Build in-CSR
         g.in_begin_.assign(num_nodes_ + 1, 0);
