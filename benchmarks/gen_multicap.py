@@ -379,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
     stale = sorted(
         str(p.relative_to(args.out))
         for d in owned
-        for p in d.glob("*")
+        for p in d.glob("[!.]*")  # dotfiles (.DS_Store) are not stale outputs
         if p.is_file() and str(p.relative_to(args.out)) not in files
     )
     if args.check:

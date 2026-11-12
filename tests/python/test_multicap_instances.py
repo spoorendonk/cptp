@@ -50,7 +50,11 @@ def test_regenerates_byte_for_byte(tmp_path: Path) -> None:
         "manifest.sha256"
     }
     assert generated == set(manifest)
-    committed = {str(p.relative_to(MULTICAP)) for p in MULTICAP.rglob("*") if p.is_file()}
+    committed = {
+        str(p.relative_to(MULTICAP))
+        for p in MULTICAP.rglob("*")
+        if p.is_file() and not p.name.startswith(".")
+    }
     assert committed - {"manifest.sha256"} == set(manifest)  # no stale files
     for rel, digest in manifest.items():
         assert hashlib.sha256((tmp_path / rel).read_bytes()).hexdigest() == digest, rel
@@ -106,6 +110,31 @@ def test_nested_rows_and_original_row_one() -> None:
         orig = (REPO_ROOT / "benchmarks/instances" / set_name / f"{base}{ext}").read_text()
         q = next(int(s.split(":", 1)[1]) for s in orig.splitlines() if s.startswith("CAPACITY"))
         assert caps10[0] == q
+
+
+@pytest.mark.parametrize("rel", _instances())
+def test_derived_from_base_with_original_row_one(rel: str) -> None:
+    """Restricted to its first demand column and capacity, and without the
+    MULTICAP line, every file is its base, byte for byte: same graph, costs,
+    profits and row 1."""
+    set_name, _, fname = rel.split("/")
+    ext = Path(fname).suffix
+    base = fname.rsplit("-m", 1)[0]
+    orig = (REPO_ROOT / "benchmarks/instances" / set_name / f"{base}{ext}").read_text()
+    lines = (MULTICAP / rel).read_text().splitlines()
+    assert sum(s.startswith("MULTICAP :") for s in lines) == 1
+    lines = [s for s in lines if not s.startswith("MULTICAP :")]
+    start = lines.index("DEMAND_SECTION") + 1
+    dims = int(next(s.split(":", 1)[1] for s in lines if s.startswith("DIMENSION")))
+    m = int(rel.split("/")[1][1:])
+    base_lines = orig.splitlines()
+    assert len(lines) == len(base_lines)
+    for j, (s, b) in enumerate(zip(lines, base_lines, strict=True)):
+        if start <= j < start + dims or s.startswith("CAPACITY"):
+            # drop the m - 1 appended values; the rest is the base line
+            assert s.rsplit(None, m - 1)[0] == b.rstrip(), (rel, j)
+        else:
+            assert s == b, (rel, j)
 
 
 def test_correlations_within_bound() -> None:
