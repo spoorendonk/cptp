@@ -396,7 +396,9 @@ endif()
 # ── 5b. Patch HighsSearch.cpp: hyperplane branching in branch() ──
 file(READ "${MIP_DIR}/HighsSearch.cpp" SEARCH_CONTENT)
 
-string(FIND "${SEARCH_CONTENT}" "HighsUserSeparator" _found_search)
+# Marker specific to this section: section 4c already puts
+# HighsUserSeparator into HighsSearch.cpp.
+string(FIND "${SEARCH_CONTENT}" "HighsUserSeparator::evaluateCandidates" _found_search)
 if(_found_search EQUAL -1)
     # Add includes
     string(REPLACE
