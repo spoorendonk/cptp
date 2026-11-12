@@ -115,6 +115,26 @@ TEST_CASE("Multicap: the optimum satisfies every row", "[multicap][model]") {
     }
 }
 
+TEST_CASE("Multicap: Q_k = 0 is a limit, Q_k < 0 is rejected", "[multicap][model]") {
+    // Row 1 has Q = 0 and only customer 1 has demand on it, so 1 is out and
+    // the optimum is {2, 3}: 21 - 3 = -18 (row 0 alone would allow all three).
+    cptp::Model model;
+    model.set_graph(4, kEdges, kCosts);
+    model.set_profits(kProfits);
+    model.set_depot(0);
+    model.add_capacity_resource(kRows[0], kCaps[0]);
+    model.add_capacity_resource(std::vector<double>{0.0, 1.0, 0.0, 0.0}, 0.0);
+    const auto result = model.solve(kQuiet);
+    REQUIRE(result.is_optimal());
+    REQUIRE_THAT(result.objective, WithinAbs(-18.0, 1e-6));
+    require_tour_fits(model.problem(), result.tour);
+
+    cptp::Problem bad;
+    REQUIRE_THROWS_AS(
+        bad.build(4, kEdges, kCosts, kProfits, {kRows[0], kRows[1]}, {3.0, -1.0}, 0, 0),
+        std::invalid_argument);
+}
+
 TEST_CASE("Multicap: s-t path respects every row", "[multicap][model][path]") {
     // Path 0 -> 3: endpoints count against every row. Row 1 leaves room for
     // one of customers 1 and 2 (d = 2 each, Q - d_3 = 2); row 2 forbids 1.
@@ -198,6 +218,17 @@ TEST_CASE("Multicap: TSPLIB loader reads m capacities and m demand columns", "[m
                                 "DEPOT_SECTION\n1\n-1\nEOF\n");
     REQUIRE_THROWS_AS(cptp::io::load_tsplib(bad), std::runtime_error);
     std::filesystem::remove(bad);
+
+    // No CAPACITY: one row with no limit, not a limit of 0.
+    const auto open = write_temp("cptp_multicap_open.vrp",
+                                 "NAME : open\nTYPE : CVRP\nDIMENSION : 3\n"
+                                 "EDGE_WEIGHT_TYPE : EUC_2D\n"
+                                 "NODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n"
+                                 "DEPOT_SECTION\n1\n-1\nEOF\n");
+    const auto unlimited = cptp::io::load_tsplib(open);
+    std::filesystem::remove(open);
+    REQUIRE(unlimited.num_capacities() == 1);
+    REQUIRE(unlimited.capacity() >= 1e17);
 }
 
 TEST_CASE("Multicap: numeric loader reads m rows", "[multicap][io]") {

@@ -328,7 +328,9 @@ Problem load_tsplib(const std::filesystem::path& path) {
 
     // Default demands and capacities if not provided; one capacity per row.
     if (capacities.empty()) {
-        capacities.assign(demand_rows.empty() ? 1 : demand_rows.size(), 0.0);
+        // No CAPACITY: no limit (1e18, the numeric format's default), rather
+        // than 0, which every part of the solver now enforces as a limit.
+        capacities.assign(demand_rows.empty() ? 1 : demand_rows.size(), 1e18);
     }
     if (demand_rows.empty()) {
         demand_rows.assign(capacities.size(), std::vector<double>(dimension, 0.0));
@@ -435,7 +437,11 @@ Problem load_numeric(const std::filesystem::path& path) {
                 throw std::runtime_error("numeric: expected " + std::to_string(num_rows) +
                                          " capacities");
             }
-            break;  // no capacity line: as before, the failed read leaves 0
+            // No capacity line: at end of file row 0 keeps the "no limit"
+            // 1e18, as before; a non-numeric token reads as 0. The format is
+            // untagged, so with m > 1 the capacity line is required: a
+            // missing one followed by "s t" would be read as capacities.
+            break;
         }
     }
 

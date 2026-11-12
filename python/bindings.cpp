@@ -168,11 +168,13 @@ NB_MODULE(_cptp, m) {
             "__init__",
             [](cptp::Problem* self, int32_t num_nodes,
                const nb::ndarray<int32_t, nb::shape<-1, 2>>& edges,
-               const nb::ndarray<double, nb::shape<-1>>& edge_costs,
-               const nb::ndarray<double, nb::shape<-1>>& profits,
+               // c_contig: the 1-D arrays are copied as data()..data()+n, so a
+               // strided view (e.g. caps[::2]) is converted to a dense copy first.
+               const nb::ndarray<double, nb::shape<-1>, nb::c_contig>& edge_costs,
+               const nb::ndarray<double, nb::shape<-1>, nb::c_contig>& profits,
                const nb::ndarray<double, nb::shape<-1, -1>>& demands,
-               const nb::ndarray<double, nb::shape<-1>>& capacities, int32_t source, int32_t target,
-               const std::string& name) {
+               const nb::ndarray<double, nb::shape<-1>, nb::c_contig>& capacities, int32_t source,
+               int32_t target, const std::string& name) {
                 new (self) cptp::Problem();
                 auto e_view = edges.view();
                 auto m = static_cast<int32_t>(edges.shape(0));

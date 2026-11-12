@@ -78,6 +78,36 @@ def test_solve_with_m_rows(rows: int, objective: float) -> None:
         assert sum(ROWS[k, v] for v in visited) <= CAPS[k] + 1e-9
 
 
+def test_problem_strided_capacities() -> None:
+    """A strided view is read element by element, not as raw memory."""
+    spread = np.array([CAPS[0], -5.0, CAPS[1], -5.0, CAPS[2]])
+    prob = Problem(
+        num_nodes=4,
+        edges=EDGES,
+        edge_costs=COSTS,
+        profits=np.repeat(PROFITS, 2)[::2],
+        demands=ROWS,
+        capacities=spread[::2],
+        source=0,
+        target=0,
+    )
+    np.testing.assert_array_equal(prob.capacities, CAPS)
+    np.testing.assert_array_equal(prob.profits, PROFITS)
+
+
+def test_solve_zero_dimensional_capacity() -> None:
+    result = solve(
+        num_nodes=4,
+        edges=EDGES,
+        edge_costs=COSTS,
+        profits=PROFITS,
+        demands=ROWS[1],
+        capacity=np.array(CAPS[1]),
+        time_limit=30.0,
+    )
+    assert result.objective == pytest.approx(-20.0)
+
+
 def test_solve_one_dimensional_demands_unchanged() -> None:
     result = solve(
         num_nodes=4,

@@ -77,7 +77,7 @@ class Problem:
     def __init__(self, num_nodes: int, edges: Annotated[NDArray[numpy.int32], dict(shape=(None, 2))], edge_costs: Annotated[NDArray[numpy.float64], dict(shape=(None,))], profits: Annotated[NDArray[numpy.float64], dict(shape=(None,))], demands: Annotated[NDArray[numpy.float64], dict(shape=(None,))], capacity: float, source: int = 0, target: int = 0, name: str = '') -> None: ...
 
     @overload
-    def __init__(self, num_nodes: int, edges: Annotated[NDArray[numpy.int32], dict(shape=(None, 2))], edge_costs: Annotated[NDArray[numpy.float64], dict(shape=(None,))], profits: Annotated[NDArray[numpy.float64], dict(shape=(None,))], demands: Annotated[NDArray[numpy.float64], dict(shape=(None, None))], capacities: Annotated[NDArray[numpy.float64], dict(shape=(None,))], source: int = 0, target: int = 0, name: str = '') -> None:
+    def __init__(self, num_nodes: int, edges: Annotated[NDArray[numpy.int32], dict(shape=(None, 2))], edge_costs: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], profits: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], demands: Annotated[NDArray[numpy.float64], dict(shape=(None, None))], capacities: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], source: int = 0, target: int = 0, name: str = '') -> None:
         """Build with m capacity rows: demands is (m, n), capacities is (m,)"""
 
     @property

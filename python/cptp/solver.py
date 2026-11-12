@@ -59,9 +59,11 @@ def solve(
     model.set_profits(np.ascontiguousarray(profits, dtype=np.float64))
     demand_rows = np.asarray(demands, dtype=np.float64)
     if demand_rows.ndim == 1:
-        if not isinstance(capacity, (int, float, np.integer, np.floating)):
+        # Any scalar float() took before (0-d arrays, Decimal, ...), but not m values.
+        scalar = np.asarray(capacity, dtype=np.float64)
+        if scalar.ndim != 0:
             raise ValueError("capacity must be a number when demands is one-dimensional")
-        model.add_capacity_resource(np.ascontiguousarray(demand_rows), float(capacity))
+        model.add_capacity_resource(np.ascontiguousarray(demand_rows), float(scalar))
     else:
         capacities = np.atleast_1d(np.asarray(capacity, dtype=np.float64))
         if demand_rows.ndim != 2 or capacities.shape != (demand_rows.shape[0],):

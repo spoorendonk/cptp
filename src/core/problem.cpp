@@ -37,6 +37,11 @@ void Problem::build(int32_t num_nodes, std::span<const Edge> edges, std::vector<
     if (capacities.size() != demand_rows.size()) {
         throw std::invalid_argument("one capacity per demand row is required");
     }
+    for (double q : capacities) {
+        if (!(q >= 0.0)) {  // also rejects NaN
+            throw std::invalid_argument("capacities must be non-negative");
+        }
+    }
     for (const auto& row : demand_rows) {
         if (row.size() != static_cast<size_t>(num_nodes)) {
             throw std::invalid_argument("demands size must equal num_nodes");

@@ -13,6 +13,7 @@
 #include "sep/sec_separator.h"
 #include "sep/separation_context.h"
 #include "sep/separation_oracle.h"
+#include "sep/separator.h"
 
 #include <algorithm>
 #include <cassert>
@@ -24,10 +25,11 @@ namespace cptp {
 
 namespace {
 
-/// A capacity row enters the model when 0 < Q_k < 1e17; a zero or huge
-/// capacity means the row is absent, as for the single row before.
+/// A capacity row enters the model unless Q_k >= kInfiniteCapacity, the
+/// "no limit" sentinel. Q_k = 0 is a real limit, as the heuristic and edge
+/// elimination already treat it; Problem::build rejects Q_k < 0.
 bool capacity_row_bounded(const Problem& prob, int32_t k) {
-    return prob.capacity(k) > 0 && prob.capacity(k) < 1e17;
+    return prob.capacity(k) < sep::kInfiniteCapacity;
 }
 
 bool should_run_rc_fixing(const RCFixingSettings& settings, bool ub_improved,

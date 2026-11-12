@@ -29,7 +29,7 @@ $$
 
 Here, `c_e` is edge cost, `p_i` node profit, `d_i` node demand, `Q` vehicle capacity, and `\delta(.)` denotes incident edges/cut boundary edges. Connectivity (subtour elimination) inequalities are enforced via dynamic cut separation in branch-and-cut.
 
-**Several capacities.** An instance may have m >= 1 capacity rows `\sum_i d^k_i y_i <= Q_k`, k = 1..m, and a solution satisfies all of them. Every row is in the formulation and the primal heuristic. Capacity cuts, labeling bounds and branching hyperplanes still use row 1 only. That is valid, since a relaxation of one row is a relaxation of the intersection, but weaker than per-row versions.
+**Several capacities.** An instance may have m >= 1 capacity rows `\sum_i d^k_i y_i <= Q_k`, k = 1..m, and a solution satisfies all of them. Every row is in the formulation and the primal heuristic. Capacity cuts, labeling bounds, branching hyperplanes and the heuristic's profit/demand ordering still use row 1 only. That is valid, since a relaxation of one row is a relaxation of the intersection, but weaker than per-row versions.
 
 ## Capabilities
 
