@@ -29,6 +29,7 @@ add_library(cptp
     src/heuristic/primal_heuristic.cpp
     src/model/model.cpp
     src/model/highs_bridge.cpp
+    src/model/hyperplane.cpp
 )
 target_include_directories(cptp PUBLIC src)
 # HiGHS internal headers (mip/HighsUserSeparator.h) are PRIVATE in the highs target,

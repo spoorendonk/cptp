@@ -1,6 +1,7 @@
 #include "model/model.h"
 
 #include "model/highs_bridge.h"
+#include "model/hyperplane.h"
 #include "parallel/parallel.h"
 
 #include <algorithm>
@@ -94,181 +95,17 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
     sb_cfg.max_sb_candidates = hyper_sb_max_candidates;
     HighsUserSeparator::setStrongBranchConfig(sb_cfg);
 
-    const int32_t n = bridge.num_nodes();
-    const int32_t y_off = bridge.y_offset();
-    const auto& graph = problem.graph();
-
-    std::vector<double> demands(n, 0.0);
-    for (int32_t i = 0; i < n; ++i) {
-        demands[i] = problem.demand(i);
-    }
-
-    // Ryan-Foster pairs: for each non-depot node, pair with nearest neighbor.
-    struct Pair {
-        int32_t i, j;
-    };
-    std::vector<Pair> rf_pairs;
-    if (branch_hyper == "pairs" || branch_hyper == "all") {
-        std::vector<bool> paired(n, false);
-        for (int32_t i = 0; i < n; ++i) {
-            if (i == problem.source()) {
-                continue;
-            }
-            double best_cost = std::numeric_limits<double>::infinity();
-            int32_t best_j = -1;
-            for (auto e : graph.incident_edges(i)) {
-                int32_t u = graph.edge_source(e);
-                int32_t v = graph.edge_target(e);
-                int32_t nb = (u == i) ? v : u;
-                if (nb == problem.source()) {
-                    continue;
-                }
-                double c = problem.edge_cost(e);
-                if (c < best_cost) {
-                    best_cost = c;
-                    best_j = nb;
-                }
-            }
-            if (best_j >= 0) {
-                // Deduplicate: only add (min, max) pairs.
-                int32_t lo = std::min(i, best_j);
-                int32_t hi = std::max(i, best_j);
-                if (!paired[lo] && !paired[hi]) {
-                    rf_pairs.push_back({lo, hi});
-                    paired[lo] = true;
-                    paired[hi] = true;
-                }
-            }
-        }
-    }
-
-    // Greedy nearest-neighbor clusters of size ~4.
-    std::vector<std::vector<int32_t>> clusters;
-    if (branch_hyper == "clusters" || branch_hyper == "all") {
-        constexpr int32_t kClusterSize = 4;
-        std::vector<bool> assigned(n, false);
-        assigned[problem.source()] = true;
-
-        // Sort nodes by demand (descending) to seed clusters.
-        std::vector<int32_t> nodes_by_demand;
-        for (int32_t i = 0; i < n; ++i) {
-            if (i != problem.source()) {
-                nodes_by_demand.push_back(i);
-            }
-        }
-        std::ranges::sort(nodes_by_demand,
-                          [&](int32_t a, int32_t b) { return demands[a] > demands[b]; });
-
-        for (int32_t seed : nodes_by_demand) {
-            if (assigned[seed]) {
-                continue;
-            }
-            std::vector<int32_t> cluster = {seed};
-            assigned[seed] = true;
-
-            // Add nearest unassigned neighbors.
-            while (static_cast<int32_t>(cluster.size()) < kClusterSize) {
-                double best_cost = std::numeric_limits<double>::infinity();
-                int32_t best_nb = -1;
-                for (int32_t ci : cluster) {
-                    for (auto e : graph.incident_edges(ci)) {
-                        int32_t u = graph.edge_source(e);
-                        int32_t v = graph.edge_target(e);
-                        int32_t nb = (u == ci) ? v : u;
-                        if (assigned[nb]) {
-                            continue;
-                        }
-                        double c = problem.edge_cost(e);
-                        if (c < best_cost) {
-                            best_cost = c;
-                            best_nb = nb;
-                        }
-                    }
-                }
-                if (best_nb < 0) {
-                    break;
-                }
-                cluster.push_back(best_nb);
-                assigned[best_nb] = true;
-            }
-            if (cluster.size() >= 2) {
-                clusters.push_back(std::move(cluster));
-            }
-        }
-    }
-
     HighsUserSeparator::setBranchingCallback(
-        [y_off, n, source = problem.source(), demands = std::move(demands), branch_hyper,
-         rf_pairs = std::move(rf_pairs),
-         clusters = std::move(clusters)](const HighsMipSolver& mipsolver)
+        [gen = detail::HyperplaneCandidates(problem, bridge.y_offset(), branch_hyper)](
+            const HighsMipSolver& mipsolver)
             -> std::vector<HighsUserSeparator::HyperplaneCandidate> {
             const auto& sol = mipsolver.mipdata_->getLp().getSolution().col_value;
             std::vector<HighsUserSeparator::HyperplaneCandidate> result;
-
-            if (branch_hyper == "pairs" || branch_hyper == "all") {
-                for (const auto& [pi, pj] : rf_pairs) {
-                    double yi = sol[y_off + pi];
-                    double yj = sol[y_off + pj];
-                    // Skip if either variable is near-integer.
-                    if (yi < 0.05 || yi > 0.95 || yj < 0.05 || yj > 0.95) {
-                        continue;
-                    }
-                    HighsUserSeparator::HyperplaneCandidate c;
-                    c.indices = {static_cast<HighsInt>(y_off + pi),
-                                 static_cast<HighsInt>(y_off + pj)};
-                    c.values = {1.0, 1.0};
-                    c.name = "pair_" + std::to_string(pi) + "_" + std::to_string(pj);
-                    result.push_back(std::move(c));
-                }
-            }
-            if (branch_hyper == "clusters" || branch_hyper == "all") {
-                for (size_t k = 0; k < clusters.size(); ++k) {
-                    const auto& cluster = clusters[k];
-                    // Cluster demand hyperplane: sum(demand_i * y_i) for i in cluster.
-                    HighsUserSeparator::HyperplaneCandidate c;
-                    c.name = "cluster_" + std::to_string(k);
-                    double total_demand = 0.0;
-                    for (int32_t i : cluster) {
-                        if (demands[i] > 0) {
-                            c.indices.push_back(y_off + i);
-                            c.values.push_back(demands[i]);
-                            total_demand += demands[i] * sol[y_off + i];
-                        }
-                    }
-                    if (!c.indices.empty()) {
-                        double frac = total_demand - std::floor(total_demand);
-                        if (frac > 0.01 && frac < 0.99) {
-                            result.push_back(std::move(c));
-                        }
-                    }
-                }
-            }
-            if (branch_hyper == "demand" || branch_hyper == "all") {
+            for (auto& h : gen(sol)) {
                 HighsUserSeparator::HyperplaneCandidate c;
-                c.name = "demand";
-                for (int32_t i = 0; i < n; ++i) {
-                    if (i == source) {
-                        continue;  // skip depot
-                    }
-                    if (demands[i] > 0) {
-                        c.indices.push_back(y_off + i);
-                        c.values.push_back(demands[i]);
-                    }
-                }
-                if (!c.indices.empty()) {
-                    result.push_back(std::move(c));
-                }
-            }
-            if (branch_hyper == "cardinality" || branch_hyper == "all") {
-                HighsUserSeparator::HyperplaneCandidate c;
-                c.name = "cardinality";
-                for (int32_t i = 0; i < n; ++i) {
-                    if (i == source) {
-                        continue;  // skip depot
-                    }
-                    c.indices.push_back(y_off + i);
-                    c.values.push_back(1.0);
-                }
+                c.indices.assign(h.indices.begin(), h.indices.end());
+                c.values = std::move(h.values);
+                c.name = std::move(h.name);
                 result.push_back(std::move(c));
             }
             return result;
