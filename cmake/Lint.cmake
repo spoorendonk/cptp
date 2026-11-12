@@ -80,20 +80,26 @@ endif()
 # headers) through xcrun, so compile_commands.json carries no -isysroot when
 # CMAKE_OSX_SYSROOT is empty. The pinned clang-tidy is a plain LLVM build that
 # does not ask xcrun, and without a sysroot finds no standard headers at all.
-# Hand it the SDK the compiler uses. Other platforms are unaffected.
+# Hand it the SDK xcrun names. With CMAKE_OSX_SYSROOT set (a path or an SDK
+# name), CMake already puts the resolved -isysroot in the database, so nothing
+# is added. Other platforms are unaffected.
 set(_cptp_tidy_extra_args "")
-if(APPLE AND CPTP_CLANG_TIDY)
-    set(_cptp_sdk "${CMAKE_OSX_SYSROOT}")
-    if(NOT _cptp_sdk)
-        execute_process(COMMAND xcrun --show-sdk-path
-            OUTPUT_VARIABLE _cptp_sdk OUTPUT_STRIP_TRAILING_WHITESPACE
-            ERROR_QUIET)
-    endif()
-    if(_cptp_sdk)
+if(APPLE AND CPTP_CLANG_TIDY AND NOT CMAKE_OSX_SYSROOT)
+    execute_process(COMMAND xcrun --show-sdk-path
+        OUTPUT_VARIABLE _cptp_sdk OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET RESULT_VARIABLE _cptp_sdk_rc)
+    if(_cptp_sdk_rc EQUAL 0 AND _cptp_sdk)
         list(APPEND _cptp_tidy_extra_args "--extra-arg=-isysroot${_cptp_sdk}")
     else()
-        message(WARNING "No macOS SDK found (xcrun --show-sdk-path): the "
-                        "clang_tidy: tests will not find the standard headers.")
+        set(_level WARNING)
+        if(DEFINED ENV{CI})
+            set(_level FATAL_ERROR)
+        endif()
+        message(${_level} "No macOS SDK found (xcrun --show-sdk-path) and "
+                          "CMAKE_OSX_SYSROOT is empty: clang-tidy would find "
+                          "no standard headers, so its lint tests are not "
+                          "registered.")
+        set(CPTP_CLANG_TIDY "")
     endif()
 endif()
 
