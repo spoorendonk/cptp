@@ -275,6 +275,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     // the nodes on the m = 2, 5, 10 smoke set; most_violated tied at the median
     // with a worse upper quartile in nodes and time.
     std::string capacity_cut_rows = "all";
+    // RCI and RGLM also separate on the surrogate row of all bounded rows
+    // (#112), next to the rows above. Off until measured (#113).
+    bool capacity_cut_surrogate = false;
 
     // --- Other ---
     std::string branch_hyper = "off";
@@ -444,6 +447,10 @@ SolveResult Model::solve(const SolverOptions& options) {
         if (key == "capacity_cut_rows") {
             sep::parse_capacity_rows(value);  // reject an unknown value here
             capacity_cut_rows = value;
+            continue;
+        }
+        if (key == "capacity_cut_surrogate") {
+            capacity_cut_surrogate = parse_bool(value);
             continue;
         }
         if (key == "enable_multistar") {
@@ -767,6 +774,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     if (capacity_cut_rows != "all") {
         nondefault_settings.push_back("capacity_cut_rows=" + capacity_cut_rows);
+    }
+    if (capacity_cut_surrogate) {
+        nondefault_settings.emplace_back("capacity_cut_surrogate=on");
     }
     if (!enable_multistar) {
         nondefault_settings.emplace_back("enable_multistar=off");
@@ -1151,16 +1161,16 @@ SolveResult Model::solve(const SolverOptions& options) {
         bridge.add_separator(std::make_unique<sep::SECSeparator>());
     }
     if (enable_rci) {
-        bridge.add_separator(
-            std::make_unique<sep::RCISeparator>(sep::parse_capacity_rows(capacity_cut_rows)));
+        bridge.add_separator(std::make_unique<sep::RCISeparator>(
+            sep::parse_capacity_rows(capacity_cut_rows), capacity_cut_surrogate));
     }
     if (enable_multistar) {
         bridge.add_separator(
             std::make_unique<sep::MultistarSeparator>(sep::parse_capacity_rows(capacity_cut_rows)));
     }
     if (enable_rglm) {
-        bridge.add_separator(
-            std::make_unique<sep::RGLMSeparator>(sep::parse_capacity_rows(capacity_cut_rows)));
+        bridge.add_separator(std::make_unique<sep::RGLMSeparator>(
+            sep::parse_capacity_rows(capacity_cut_rows), capacity_cut_surrogate));
     }
     if (enable_comb) {
         bridge.add_separator(std::make_unique<sep::CombSeparator>());

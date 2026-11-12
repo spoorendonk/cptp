@@ -3,6 +3,7 @@
 #include "core/gomory_hu.h"
 #include "core/problem.h"
 #include "parallel/parallel.h"
+#include "sep/capacity_rows.h"
 
 #include <algorithm>
 #include <cmath>
@@ -313,15 +314,10 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     const int32_t path_target = prob.target();
 
     // Rows that can give a cut: Q_k > 0 (as row 0 alone was before) and
-    // bounded (an unbounded row has ceil(d(S)/Q_k) <= 1, so no RCI).
-    std::vector<int32_t> rows;
-    const int32_t num_rows = rows_ == CapacityRows::kFirst ? 1 : prob.num_capacities();
-    for (int32_t k = 0; k < num_rows; ++k) {
-        const double Q = prob.capacity(k);
-        if (Q > 0 && Q < kInfiniteCapacity) {
-            rows.push_back(k);
-        }
-    }
+    // bounded (an unbounded row has ceil(d(S)/Q_k) <= 1, so no RCI), plus
+    // the surrogate row when it is on (#112).
+    const SurrogateRow surrogate = surrogate_ ? surrogate_row(prob) : SurrogateRow{};
+    const std::vector<CapacityRowView> rows = capacity_row_views(prob, rows_, surrogate);
 
     if (rows.empty() || !ctx.flow_tree) {
         return {};
@@ -364,9 +360,9 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
         auto& cr = candidates[static_cast<size_t>(idx)];
         auto& out = per_candidate[static_cast<size_t>(idx)];
 
-        for (const int32_t row : rows) {
-            const double Q = prob.capacity(row);
-            const std::span<const double> d = prob.demands(row);
+        for (const auto& row : rows) {
+            const double Q = row.capacity;
+            const std::span<const double> d = row.demand;
 
             auto c = make_candidate(tree, cr.node, prob, d, ctx);
 

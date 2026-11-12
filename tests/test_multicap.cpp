@@ -303,7 +303,8 @@ namespace {
 
 // A point where every customer is served and x(delta({1, 2, 3})) = 1 is the
 // smallest cut, so {1, 2, 3} is a Gomory-Hu candidate: x01 = x03 = x13 = 0.5,
-// x12 = x23 = 1 (each customer has degree 2).
+// x12 = x23 = 1 (each customer has degree 2). make_point(prob, t) scales x and
+// the customers' y by t, so each customer keeps degree 2 y_i.
 struct LpPoint {
     std::vector<double> x;
     std::vector<double> y{1.0, 1.0, 1.0, 1.0};
@@ -320,15 +321,18 @@ double point_value(int32_t u, int32_t v) {
     return 0.0;
 }
 
-LpPoint make_point(const cptp::Problem& prob) {
+LpPoint make_point(const cptp::Problem& prob, double scale = 1.0) {
     LpPoint p;
+    for (size_t i = 1; i < p.y.size(); ++i) {
+        p.y[i] = scale;
+    }
     const auto& g = prob.graph();
     p.x.assign(static_cast<size_t>(prob.num_edges()), 0.0);
     cptp::digraph_builder builder(prob.num_nodes());
     for (auto e : g.edges()) {
         const int32_t u = g.edge_source(e);
         const int32_t v = g.edge_target(e);
-        const double xe = point_value(std::min(u, v), std::max(u, v));
+        const double xe = scale * point_value(std::min(u, v), std::max(u, v));
         if (xe > 0.0) {
             p.x[static_cast<size_t>(e)] = xe;
             builder.add_arc(u, v, xe);
@@ -340,8 +344,9 @@ LpPoint make_point(const cptp::Problem& prob) {
     return p;
 }
 
-std::vector<cptp::sep::Cut> cuts_of(const cptp::Problem& prob, cptp::sep::Separator& separator) {
-    const auto point = make_point(prob);
+std::vector<cptp::sep::Cut> cuts_of(const cptp::Problem& prob, cptp::sep::Separator& separator,
+                                    double scale = 1.0) {
+    const auto point = make_point(prob, scale);
     const cptp::sep::SeparationContext ctx{
         .problem = prob,
         .x_values = point.x,
@@ -453,6 +458,77 @@ TEMPLATE_TEST_CASE("Multicap: GLM-type cuts come from rows after the first", "[m
     for (const auto rows : {CapacityRows::kMostViolated, CapacityRows::kFirst}) {
         TestType other(rows);
         require_same_cuts(cuts_of(single, other), reference);
+    }
+}
+
+namespace {
+
+// The example of the #86 write-up (#105) on S = {1, 2, 3}: row 0 has
+// d = 7 each and Q = 10 (rho = 2.1), row 1 has d = 3 each and Q = 10
+// (rho = 0.9). At the point scaled by t = 10/21 (y_i = t, so row 0's served
+// load is exactly 10 and both rows hold), row 0's cut has
+// 2(3 - (1 - t) 2.1 / 0.1) < 0 on the right and row 1 has rho < 1, so
+// neither row gives a violated RCI or RGLM. The surrogate row has s_i = 1
+// each against 2: rho = 1.5, remainder 1, rhs 2(2 - 3(1 - t)) = 6t - 2, and
+// x(delta(S)) = t, so it is violated by 6t - 2 - t = 8/21.
+constexpr double kSurrogateScale = 10.0 / 21.0;
+
+cptp::Problem make_surrogate_example() {
+    cptp::Problem prob;
+    prob.build(4, kEdges, kCosts, kProfits,
+               std::vector<std::vector<double>>{{0.0, 7.0, 7.0, 7.0}, {0.0, 3.0, 3.0, 3.0}},
+               std::vector<double>{10.0, 10.0}, 0, 0);
+    return prob;
+}
+
+}  // namespace
+
+TEMPLATE_TEST_CASE("Multicap: the surrogate row cuts where no single row does", "[multicap][rci]",
+                   cptp::sep::RCISeparator, cptp::sep::RGLMSeparator) {
+    using cptp::sep::CapacityRows;
+    const auto prob = make_surrogate_example();
+    for (const auto rows : {CapacityRows::kAll, CapacityRows::kMostViolated}) {
+        TestType plain(rows);
+        REQUIRE(cuts_of(prob, plain, kSurrogateScale).empty());
+        TestType with_surrogate(rows, true);
+        const auto cuts = cuts_of(prob, with_surrogate, kSurrogateScale);
+        REQUIRE_FALSE(cuts.empty());
+        double best = 0.0;
+        for (const auto& cut : cuts) {
+            best = std::max(best, cut.violation);
+        }
+        REQUIRE_THAT(best, WithinAbs(8.0 / 21.0, 1e-6));
+    }
+
+    // With one bounded row there is no surrogate: the same cuts as without.
+    const auto single = make_single_tight_row();
+    TestType plain(CapacityRows::kAll);
+    TestType with_surrogate(CapacityRows::kAll, true);
+    const auto reference = cuts_of(single, plain);
+    REQUIRE_FALSE(reference.empty());
+    require_same_cuts(cuts_of(single, with_surrogate), reference);
+}
+
+TEST_CASE("Multicap: capacity_cut_surrogate keeps every row's optimum", "[multicap][rci]") {
+    struct Case {
+        int32_t rows;
+        double objective;
+    };
+    for (const auto& c : {Case{1, -29.0}, Case{2, -20.0}, Case{3, -18.0}}) {
+        for (const char* rows : {"all", "most_violated", "first"}) {
+            INFO("m = " << c.rows << ", capacity_cut_rows = " << rows);
+            cptp::Model model;
+            fill_model(model, c.rows);
+            model.set_depot(0);
+            auto options = kQuiet;
+            options.emplace_back("capacity_cut_surrogate", "true");
+            options.emplace_back("capacity_cut_rows", rows);
+            options.emplace_back("enable_rglm", "true");
+            const auto result = model.solve(options);
+            REQUIRE(result.is_optimal());
+            REQUIRE_THAT(result.objective, WithinAbs(c.objective, 1e-6));
+            require_tour_fits(model.problem(), result.tour);
+        }
     }
 }
 

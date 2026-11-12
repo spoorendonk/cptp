@@ -10,14 +10,19 @@ namespace cptp::sep {
 /// where d(S) = sum of demands in S, Q = vehicle capacity.
 /// With m capacity rows, cuts are built from each row's d^k and Q_k as
 /// `rows` selects (unbounded rows, Q_k >= kInfiniteCapacity, give none).
+/// With `surrogate`, one more row next to them: the surrogate row of all
+/// bounded rows (surrogate_row, #112), which under kMostViolated competes
+/// with the others.
 class RCISeparator : public Separator {
 public:
-    explicit RCISeparator(CapacityRows rows = CapacityRows::kAll) : rows_(rows) {}
+    explicit RCISeparator(CapacityRows rows = CapacityRows::kAll, bool surrogate = false)
+        : rows_(rows), surrogate_(surrogate) {}
     [[nodiscard]] std::string name() const override { return "RCI"; }
     std::vector<Cut> separate(const SeparationContext& ctx) override;
 
 private:
     CapacityRows rows_;
+    bool surrogate_;
 };
 
 }  // namespace cptp::sep

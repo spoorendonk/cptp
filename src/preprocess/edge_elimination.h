@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/problem.h"
+#include "sep/capacity_rows.h"
 #include "sep/separator.h"
 
 #include <algorithm>
@@ -187,41 +188,9 @@ inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32
                            max_queue_pops);
 }
 
-/// One surrogate capacity row: demand s(v) = sum_k d_k(v) / Q_k against
-/// capacity S = the number of rows summed, over the rows with
-/// 0 < Q_k < kInfiniteCapacity. A path within every row is within it (sum
-/// of terms <= 1 each), so labeling it relaxes the rows and its f is a bound.
-/// A row left out only loosens it further; Q_k = 0 is left out because 1/Q_k
-/// is undefined. S carries a relative slack of 1e-9, so rounding in the
-/// scaling cannot cut off a path that fits. Empty demand when fewer than two
-/// rows qualify: then the surrogate is no stronger than one row (#102).
-struct SurrogateRow {
-    std::vector<double> demand;
-    double capacity = 0.0;
-};
-
-inline SurrogateRow surrogate_row(const Problem& prob) {
-    SurrogateRow row;
-    int32_t used = 0;
-    for (int32_t k = 0; k < prob.num_capacities(); ++k) {
-        const double q = prob.capacity(k);
-        if (q <= 0.0 || q >= sep::kInfiniteCapacity) {
-            continue;
-        }
-        if (row.demand.empty()) {
-            row.demand.assign(static_cast<size_t>(prob.num_nodes()), 0.0);
-        }
-        for (int32_t v = 0; v < prob.num_nodes(); ++v) {
-            row.demand[static_cast<size_t>(v)] += prob.demand(k, v) / q;
-        }
-        ++used;
-    }
-    if (used < 2) {
-        return {};
-    }
-    row.capacity = static_cast<double>(used) * (1.0 + 1e-9);
-    return row;
-}
+/// The surrogate capacity row (#102), shared with the capacity separators
+/// (#112): see sep::surrogate_row.
+using sep::surrogate_row;
 
 /// Labels the vector labeling (labeling_vector) created, for the log.
 struct LabelingStats {

@@ -2,8 +2,10 @@
 
 #include "core/gomory_hu.h"
 #include "core/problem.h"
+#include "sep/capacity_rows.h"
 
 #include <cmath>
+#include <span>
 #include <vector>
 
 namespace cptp::sep {
@@ -18,15 +20,9 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
     const int32_t path_target = prob.target();
 
     // Rows that can give a cut: 0 < Q_k < kInfiniteCapacity, as row 0 alone
-    // was before.
-    std::vector<int32_t> rows;
-    const int32_t num_rows = rows_ == CapacityRows::kFirst ? 1 : prob.num_capacities();
-    for (int32_t k = 0; k < num_rows; ++k) {
-        const double Q = prob.capacity(k);
-        if (Q > 0 && Q < kInfiniteCapacity) {
-            rows.push_back(k);
-        }
-    }
+    // was before, plus the surrogate row when it is on (#112).
+    const SurrogateRow surrogate = surrogate_ ? surrogate_row(prob) : SurrogateRow{};
+    const std::vector<CapacityRowView> rows = capacity_row_views(prob, rows_, surrogate);
     if (rows.empty()) {
         return {};
     }
@@ -36,7 +32,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
     for (size_t r = 0; r < rows.size(); ++r) {
         for (int32_t i = 0; i < n; ++i) {
             if (i != depot && (is_tour || i != path_target)) {
-                d_totals[r] += prob.demand(rows[r], i);
+                d_totals[r] += rows[r].demand[i];
             }
         }
     }
@@ -55,8 +51,8 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
         bool have_best = false;
 
         for (size_t row_idx = 0; row_idx < rows.size(); ++row_idx) {
-            const int32_t row = rows[row_idx];
-            const double Q = prob.capacity(row);
+            const std::span<const double> d = rows[row_idx].demand;
+            const double Q = rows[row_idx].capacity;
             const double d_total = d_totals[row_idx];
 
             // S = {u : !reachable[u]} (target side, not containing depot)
@@ -64,7 +60,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
             double d_S = 0.0;
             for (int32_t i = 0; i < n; ++i) {
                 if (!reachable[i] && (is_tour || i != path_target)) {
-                    d_S += prob.demand(row, i);
+                    d_S += d[i];
                 }
             }
 
@@ -94,7 +90,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
                 }
 
                 int32_t outside = u_in_S ? v : u;
-                double d_out = prob.demand(row, outside);
+                double d_out = d[outside];
 
                 cut_flow += ctx.x_values[e];
                 star_sum += d_out * ctx.x_values[e];
@@ -105,7 +101,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
             double beta_y_part = 0.0;
             for (int32_t i = 0; i < n; ++i) {
                 if (!reachable[i] && (is_tour || i != path_target)) {
-                    beta_y_part += prob.demand(row, i) * (1.0 - ctx.y_values[i]);
+                    beta_y_part += d[i] * (1.0 - ctx.y_values[i]);
                 }
             }
             double beta = beta_y_part + 2.0 * d_NmS - star_sum;
@@ -132,7 +128,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
                 }
 
                 int32_t outside = u_in_S ? v : u;
-                double d_out = prob.demand(row, outside);
+                double d_out = d[outside];
 
                 double coeff = 2.0 * d_out / r - 1.0;
                 cut.indices.push_back(ctx.x_offset + e);
@@ -143,7 +139,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
                 if (reachable[i] || (!is_tour && i == path_target)) {
                     continue;
                 }
-                double d_i = prob.demand(row, i);
+                double d_i = d[i];
                 if (d_i <= 0) {
                     continue;
                 }
