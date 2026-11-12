@@ -628,6 +628,48 @@ TEST_CASE("Multicap: zero-demand cycles that are not negative keep their row",
     REQUIRE_FALSE(cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kAll).empty());
 }
 
+TEST_CASE("Multicap: the surrogate row fixes an edge no single row does", "[multicap][labeling]") {
+    using cptp::preprocess::LabelRows;
+    // Depot 0, customers 1, 2 (profit 1) and 3 (profit 15); edge (0,3) costs
+    // 20, the others 1. Q = 10 on both rows, d0 = (0,4,7,5), d1 = (0,7,4,5):
+    // 0-1-3 fits row 0 only (9 / 12), 0-2-3 row 1 only (12 / 9), so each row
+    // alone reaches 3 at 2 - 16 = -14. The surrogate row d0/10 + d1/10 =
+    // (0, 1.1, 1.1, 1.0) against 2 cuts both (2.1), leaving 0-3: 20 - 15 = 5.
+    // No tour with 3 fits both rows, so the best is the empty tour (0) and
+    // edge (1,3), lb = f[1] + 1 + f[3] = 0 + 1 + 5 = 6 > 0, is fixed.
+    cptp::Problem prob;
+    prob.build(4, kEdges, std::vector<double>{1.0, 1.0, 20.0, 1.0, 1.0, 1.0},
+               std::vector<double>{0.0, 1.0, 1.0, 15.0},
+               std::vector<std::vector<double>>{{0.0, 4.0, 7.0, 5.0}, {0.0, 7.0, 4.0, 5.0}},
+               std::vector<double>{10.0, 10.0}, 0, 0);
+    const auto all = cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kAll);
+    const auto sur = cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kSurrogate);
+    const auto first = cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kFirst);
+    REQUIRE_THAT(all[3], WithinAbs(-14.0, 1e-9));
+    REQUIRE_THAT(sur[3], WithinAbs(5.0, 1e-9));
+    for (int32_t v = 0; v < prob.num_nodes(); ++v) {
+        REQUIRE(sur[v] >= first[v]);
+    }
+    constexpr int32_t kEdge13 = 4;
+    const double depot_profit = prob.profit(0);
+    REQUIRE_FALSE(cptp::preprocess::edge_elimination(prob, all, all, 0.0, depot_profit)[kEdge13]);
+    REQUIRE(cptp::preprocess::edge_elimination(prob, sur, sur, 0.0, depot_profit)[kEdge13]);
+}
+
+TEST_CASE("Multicap: the surrogate row needs two bounded rows", "[multicap][labeling]") {
+    using cptp::preprocess::LabelRows;
+    REQUIRE(cptp::preprocess::surrogate_row(make_problem(1)).demand.empty());
+    const auto prob = make_problem(1);
+    for (int32_t root = 0; root < prob.num_nodes(); ++root) {
+        REQUIRE(cptp::preprocess::labeling_from(prob, root, 0, LabelRows::kSurrogate) ==
+                cptp::preprocess::labeling_from(prob, root, 0, LabelRows::kFirst));
+    }
+    // Rows 0 and 1 qualify (Q = 3, 3): s = d0/3 + d1/3 against 2 (+ slack).
+    const auto row = cptp::preprocess::surrogate_row(make_problem(2));
+    REQUIRE_THAT(row.demand[1], WithinAbs(1.0, 1e-12));
+    REQUIRE_THAT(row.capacity, WithinAbs(2.0, 1e-6));
+}
+
 TEST_CASE("Multicap: labeling_rows = all keeps every row's optimum", "[multicap][labeling]") {
     struct Case {
         int32_t rows;
@@ -635,15 +677,18 @@ TEST_CASE("Multicap: labeling_rows = all keeps every row's optimum", "[multicap]
     };
     for (const auto& c : {Case{1, -29.0}, Case{2, -20.0}, Case{3, -18.0}}) {
         INFO("m = " << c.rows);
-        cptp::Model model;
-        fill_model(model, c.rows);
-        model.set_depot(0);
-        auto opts = kQuiet;
-        opts.emplace_back("labeling_rows", "all");
-        const auto result = model.solve(opts);
-        REQUIRE(result.is_optimal());
-        REQUIRE_THAT(result.objective, WithinAbs(c.objective, 1e-6));
-        require_tour_fits(model.problem(), result.tour);
+        for (const char* rows : {"all", "surrogate"}) {
+            INFO("labeling_rows = " << rows);
+            cptp::Model model;
+            fill_model(model, c.rows);
+            model.set_depot(0);
+            auto opts = kQuiet;
+            opts.emplace_back("labeling_rows", rows);
+            const auto result = model.solve(opts);
+            REQUIRE(result.is_optimal());
+            REQUIRE_THAT(result.objective, WithinAbs(c.objective, 1e-6));
+            require_tour_fits(model.problem(), result.tour);
+        }
     }
     REQUIRE_THROWS_AS(cptp::preprocess::parse_label_rows("every"), std::invalid_argument);
 }

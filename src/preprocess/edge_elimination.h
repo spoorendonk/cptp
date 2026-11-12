@@ -23,11 +23,12 @@ struct Label {
 
 /// Which capacity rows the labeling bounds come from (#101).
 enum class LabelRows {
-    kFirst,  ///< row 0 only (the single-row behaviour)
-    kAll,    ///< row 0 and every row k >= 1 with Q_k < kInfiniteCapacity, combined
+    kFirst,      ///< row 0 only (the single-row behaviour)
+    kAll,        ///< row 0 and every row k >= 1 with Q_k < kInfiniteCapacity, combined
+    kSurrogate,  ///< row 0 combined with one surrogate row (#102, surrogate_demands)
 };
 
-/// Parse the `labeling_rows` option: "first" or "all".
+/// Parse the `labeling_rows` option: "first", "all" or "surrogate".
 inline LabelRows parse_label_rows(std::string_view value) {
     if (value == "first") {
         return LabelRows::kFirst;
@@ -35,13 +36,16 @@ inline LabelRows parse_label_rows(std::string_view value) {
     if (value == "all") {
         return LabelRows::kAll;
     }
-    throw std::invalid_argument("labeling_rows must be first or all, got '" + std::string(value) +
-                                "'");
+    if (value == "surrogate") {
+        return LabelRows::kSurrogate;
+    }
+    throw std::invalid_argument("labeling_rows must be first, all or surrogate, got '" +
+                                std::string(value) + "'");
 }
 
-/// Whether row k's zero-demand nodes carry a closed walk of negative net cost
+/// Whether the zero-demand nodes of the row `demand` carry a closed walk of negative net cost
 /// (arc u -> v costs edge_costs[e] - profits[v]). Such a walk adds no demand,
-/// so the non-elementary labeling under row k would improve its labels along
+/// so the non-elementary labeling under that row would improve its labels along
 /// it forever. Without one the labeling terminates: every other cycle adds
 /// demand, and a zero-cost one is caught by the dominance test.
 ///
@@ -49,14 +53,14 @@ inline LabelRows parse_label_rows(std::string_view value) {
 /// leaves it, and its cost is sum over its arcs of c_e - (p_u + p_v) / 2: half
 /// the sum of its edges' 2-cycle costs 2 c_e - p_u - p_v. A negative closed
 /// walk exists exactly when some zero-demand edge's 2-cycle is negative.
-inline bool has_zero_demand_negative_cycle(const Problem& prob, int32_t k,
+inline bool has_zero_demand_negative_cycle(const Problem& prob, std::span<const double> demand,
                                            std::span<const double> edge_costs,
                                            std::span<const double> profits) {
     const auto& graph = prob.graph();
     for (int32_t e = 0; e < graph.num_edges(); ++e) {
         const int32_t u = graph.edge_source(e);
         const int32_t v = graph.edge_target(e);
-        if (prob.demand(k, u) <= 0.0 && prob.demand(k, v) <= 0.0 &&
+        if (demand[u] <= 0.0 && demand[v] <= 0.0 &&
             2.0 * edge_costs[e] - profits[u] - profits[v] < 0.0) {
             return true;
         }
@@ -64,36 +68,43 @@ inline bool has_zero_demand_negative_cycle(const Problem& prob, int32_t k,
     return false;
 }
 
-/// Capacity-aware labeling from a given root node under capacity row k alone,
-/// with custom edge costs and node profits.
+/// has_zero_demand_negative_cycle for capacity row k.
+inline bool has_zero_demand_negative_cycle(const Problem& prob, int32_t k,
+                                           std::span<const double> edge_costs,
+                                           std::span<const double> profits) {
+    return has_zero_demand_negative_cycle(prob, prob.demands(k), edge_costs, profits);
+}
+
+/// Capacity-aware labeling from a given root node under one capacity row,
+/// demand[v] against Q, with custom edge costs and node profits.
 ///
 /// For each node v, computes the minimum net cost f[v] to reach v from root
-/// via any (possibly non-elementary) path that respects row k's capacity.
+/// via any (possibly non-elementary) path that respects that row's capacity.
 ///
 /// Net cost = sum of edge costs along path - sum of profits of visited nodes
 /// (excluding root profit, which is always collected... see seed below).
 ///
 /// Returns f[v] for each node, f[root] = -profits[root]; empty when the
-/// budget of max_queue_pops (0 = none) runs out, or up front when row k has
+/// budget of max_queue_pops (0 = none) runs out, or up front when the row has
 /// a zero-demand negative cycle (has_zero_demand_negative_cycle), on which
 /// the labeling would not terminate.
-inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32_t k,
-                                        std::span<const double> edge_costs,
-                                        std::span<const double> profits,
-                                        int64_t max_queue_pops = 0) {
-    if (has_zero_demand_negative_cycle(prob, k, edge_costs, profits)) {
+inline std::vector<double> labeling_demand(const Problem& prob, int32_t root,
+                                           std::span<const double> demand, double Q,
+                                           std::span<const double> edge_costs,
+                                           std::span<const double> profits,
+                                           int64_t max_queue_pops = 0) {
+    if (has_zero_demand_negative_cycle(prob, demand, edge_costs, profits)) {
         return {};
     }
     const int32_t n = prob.num_nodes();
     const auto& graph = prob.graph();
-    const double Q = prob.capacity(k);
     constexpr double kInf = std::numeric_limits<double>::infinity();
 
     std::vector<std::vector<Label>> labels(n);
     std::vector<double> best_cost(n, kInf);
 
     double root_cost = -profits[root];
-    double root_demand = prob.demand(k, root);
+    double root_demand = demand[root];
     labels[root].push_back({root_cost, root_demand});
     best_cost[root] = root_cost;
 
@@ -119,7 +130,7 @@ inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32
         for (auto e : graph.incident_edges(u)) {
             int32_t v = graph.other_endpoint(e, u);
 
-            double new_demand = lbl.demand + prob.demand(k, v);
+            double new_demand = lbl.demand + demand[v];
             if (new_demand > Q) {
                 continue;
             }
@@ -153,6 +164,51 @@ inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32
     return best_cost;
 }
 
+/// labeling_demand under capacity row k alone.
+inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32_t k,
+                                        std::span<const double> edge_costs,
+                                        std::span<const double> profits,
+                                        int64_t max_queue_pops = 0) {
+    return labeling_demand(prob, root, prob.demands(k), prob.capacity(k), edge_costs, profits,
+                           max_queue_pops);
+}
+
+/// One surrogate capacity row: demand s(v) = sum_k d_k(v) / Q_k against
+/// capacity S = the number of rows summed, over the rows with
+/// 0 < Q_k < kInfiniteCapacity. A path within every row is within it (sum
+/// of terms <= 1 each), so labeling it relaxes the rows and its f is a bound.
+/// A row left out only loosens it further; Q_k = 0 is left out because 1/Q_k
+/// is undefined. S carries a relative slack of 1e-9, so rounding in the
+/// scaling cannot cut off a path that fits. Empty demand when fewer than two
+/// rows qualify: then the surrogate is no stronger than one row (#102).
+struct SurrogateRow {
+    std::vector<double> demand;
+    double capacity = 0.0;
+};
+
+inline SurrogateRow surrogate_row(const Problem& prob) {
+    SurrogateRow row;
+    int32_t used = 0;
+    for (int32_t k = 0; k < prob.num_capacities(); ++k) {
+        const double q = prob.capacity(k);
+        if (q <= 0.0 || q >= sep::kInfiniteCapacity) {
+            continue;
+        }
+        if (row.demand.empty()) {
+            row.demand.assign(static_cast<size_t>(prob.num_nodes()), 0.0);
+        }
+        for (int32_t v = 0; v < prob.num_nodes(); ++v) {
+            row.demand[static_cast<size_t>(v)] += prob.demand(k, v) / q;
+        }
+        ++used;
+    }
+    if (used < 2) {
+        return {};
+    }
+    row.capacity = static_cast<double>(used) * (1.0 + 1e-9);
+    return row;
+}
+
 /// Capacity-aware labeling from root (see labeling_row) over the rows `rows`
 /// names. Each row's f_k[v] is a lower bound on the net cost of reaching v
 /// under all rows (it relaxes the others), so their maximum is one too:
@@ -161,7 +217,9 @@ inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32
 /// is skipped, since the maximum over the other rows is still a bound, so
 /// kAll is never weaker than kFirst. Rows k >= 1 get their own budget,
 /// later_rows_max_queue_pops (-1 = max_queue_pops), so a caller that runs row
-/// 0 unbounded need not run the others unbounded too.
+/// 0 unbounded need not run the others unbounded too. kSurrogate combines
+/// row 0 with the surrogate row (surrogate_row) the same way, under that
+/// budget.
 inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                                          std::span<const double> edge_costs,
                                          std::span<const double> profits,
@@ -174,6 +232,18 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
     }
     const int64_t later_pops =
         later_rows_max_queue_pops < 0 ? max_queue_pops : later_rows_max_queue_pops;
+    if (rows == LabelRows::kSurrogate) {
+        const auto surrogate = surrogate_row(prob);
+        if (surrogate.demand.empty()) {
+            return best;
+        }
+        const auto row = labeling_demand(prob, root, surrogate.demand, surrogate.capacity,
+                                         edge_costs, profits, later_pops);
+        for (size_t v = 0; v < row.size(); ++v) {  // empty row: row 0 alone
+            best[v] = std::max(best[v], row[v]);
+        }
+        return best;
+    }
     for (int32_t k = 1; k < prob.num_capacities(); ++k) {
         if (prob.capacity(k) >= sep::kInfiniteCapacity) {
             continue;  // no limit: its labeling is never above row 0's
