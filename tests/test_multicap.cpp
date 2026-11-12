@@ -23,6 +23,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -721,4 +722,76 @@ TEST_CASE("Multicap: labeling_rows = all keeps every row's optimum", "[multicap]
         }
     }
     REQUIRE_THROWS_AS(cptp::preprocess::parse_label_rows("every"), std::invalid_argument);
+}
+
+namespace {
+
+// The exact minimum net cost of a (possibly non-elementary) walk from root to
+// each node under one row, by DP over (accumulated demand, node): with integer
+// demands >= 1 every step adds demand, so level d only reads lower levels.
+std::vector<double> brute_force_labeling(const cptp::Problem& prob, int32_t root) {
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    const auto n = static_cast<size_t>(prob.num_nodes());
+    const auto q = static_cast<size_t>(prob.capacity());
+    const auto& graph = prob.graph();
+    std::vector<std::vector<double>> g(q + 1, std::vector<double>(n, kInf));
+    g[static_cast<size_t>(prob.demand(root))][static_cast<size_t>(root)] = -prob.profit(root);
+    std::vector<double> best(n, kInf);
+    for (size_t d = 0; d <= q; ++d) {
+        for (int32_t v = 0; v < prob.num_nodes(); ++v) {
+            const auto dv = static_cast<size_t>(prob.demand(v));
+            if (dv <= d) {
+                for (auto e : graph.incident_edges(v)) {
+                    const int32_t u = graph.other_endpoint(e, v);
+                    g[d][static_cast<size_t>(v)] = std::min(
+                        g[d][static_cast<size_t>(v)],
+                        g[d - dv][static_cast<size_t>(u)] + prob.edge_cost(e) - prob.profit(v));
+                }
+            }
+            best[static_cast<size_t>(v)] =
+                std::min(best[static_cast<size_t>(v)], g[d][static_cast<size_t>(v)]);
+        }
+    }
+    return best;
+}
+
+}  // namespace
+
+TEST_CASE("Labeling: every live label is extended (#111)", "[labeling]") {
+    // Random complete graphs with integer demands >= 1, against the exact DP.
+    // Queueing (node, index) let erase_if shift a queued label's index onto a
+    // newer one, so a live label went unextended and f came out too high.
+    std::mt19937 rng(111);
+    std::uniform_int_distribution<int> cost(1, 20);
+    std::uniform_int_distribution<int> profit(0, 30);
+    std::uniform_int_distribution<int> dem(1, 4);
+    constexpr int32_t kNodes = 7;
+    for (int trial = 0; trial < 300; ++trial) {
+        std::vector<cptp::Edge> edges;
+        std::vector<double> costs;
+        for (int32_t u = 0; u < kNodes; ++u) {
+            for (int32_t v = u + 1; v < kNodes; ++v) {
+                edges.push_back({u, v});
+                costs.push_back(cost(rng));
+            }
+        }
+        std::vector<double> profits(kNodes);
+        std::vector<double> demands(kNodes);
+        for (int32_t v = 0; v < kNodes; ++v) {
+            profits[static_cast<size_t>(v)] = profit(rng);
+            demands[static_cast<size_t>(v)] = dem(rng);
+        }
+        cptp::Problem prob;
+        prob.build(kNodes, edges, costs, profits, std::vector<std::vector<double>>{demands},
+                   std::vector<double>{12.0}, 0, 0);
+        const auto got =
+            cptp::preprocess::labeling_row(prob, 0, 0, prob.edge_costs(), prob.profits());
+        const auto want = brute_force_labeling(prob, 0);
+        INFO("trial " << trial);
+        REQUIRE(got.size() == want.size());
+        for (size_t v = 0; v < want.size(); ++v) {
+            INFO("node " << v);
+            REQUIRE_THAT(got[v], WithinAbs(want[v], 1e-9));
+        }
+    }
 }

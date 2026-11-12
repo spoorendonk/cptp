@@ -104,46 +104,55 @@ inline std::vector<double> labeling_demand(const Problem& prob, int32_t root,
     const auto& graph = prob.graph();
     constexpr double kInf = std::numeric_limits<double>::infinity();
 
-    std::vector<std::vector<Label>> labels(n);
-    std::vector<double> best_cost(n, kInf);
+    // Labels live in one pool under stable ids, a dominated one marked dead,
+    // and the queue holds ids, as in labeling_vector: queueing (node, index)
+    // would let erase_if shift a queued label's index onto another, leaving a
+    // live label unextended and f too high (#111).
+    std::vector<Label> pool;
+    std::vector<int32_t> node_of;
+    std::vector<char> dead;
+    std::vector<std::vector<int32_t>> live(static_cast<size_t>(n));
+    std::vector<double> best_cost(static_cast<size_t>(n), kInf);
+    std::vector<int32_t> queue;
 
-    double root_cost = -profits[root];
-    double root_demand = demand[root];
-    labels[root].push_back({root_cost, root_demand});
-    best_cost[root] = root_cost;
-
-    struct QueueEntry {
-        int32_t node;
-        int32_t label_idx;
+    auto push = [&](int32_t v, Label lbl) {
+        const auto id = static_cast<int32_t>(pool.size());
+        pool.push_back(lbl);
+        node_of.push_back(v);
+        dead.push_back(0);
+        live[static_cast<size_t>(v)].push_back(id);
+        best_cost[static_cast<size_t>(v)] = std::min(lbl.cost, best_cost[static_cast<size_t>(v)]);
+        queue.push_back(id);
     };
-    std::vector<QueueEntry> queue;
-    queue.push_back({root, 0});
+
+    push(root, {-profits[root], demand[root]});
 
     size_t head = 0;
     while (head < queue.size()) {
         if (max_queue_pops > 0 && static_cast<int64_t>(head) >= max_queue_pops) {
             return {};  // budget exhausted — caller checks .empty()
         }
-        auto [u, li] = queue[head++];
-
-        if (li >= static_cast<int32_t>(labels[u].size())) {
+        const int32_t id = queue[head++];
+        if (dead[static_cast<size_t>(id)] != 0) {
             continue;
         }
-        const Label& lbl = labels[u][li];
+        const int32_t u = node_of[static_cast<size_t>(id)];
+        const Label lbl = pool[static_cast<size_t>(id)];  // a copy: push grows the pool
 
         for (auto e : graph.incident_edges(u)) {
-            int32_t v = graph.other_endpoint(e, u);
+            const int32_t v = graph.other_endpoint(e, u);
 
-            double new_demand = lbl.demand + demand[v];
+            const double new_demand = lbl.demand + demand[v];
             if (new_demand > Q) {
                 continue;
             }
 
-            double new_cost = lbl.cost + edge_costs[e] - profits[v];
+            const double new_cost = lbl.cost + edge_costs[e] - profits[v];
 
-            auto& v_labels = labels[v];
+            auto& at_v = live[static_cast<size_t>(v)];
             bool dominated = false;
-            for (const auto& existing : v_labels) {
+            for (const int32_t other : at_v) {
+                const Label& existing = pool[static_cast<size_t>(other)];
                 if (existing.cost <= new_cost && existing.demand <= new_demand) {
                     dominated = true;
                     break;
@@ -153,15 +162,16 @@ inline std::vector<double> labeling_demand(const Problem& prob, int32_t root,
                 continue;
             }
 
-            std::erase_if(v_labels, [&](const Label& ex) {
-                return new_cost <= ex.cost && new_demand <= ex.demand;
+            std::erase_if(at_v, [&](int32_t other) {
+                const Label& ex = pool[static_cast<size_t>(other)];
+                if (new_cost <= ex.cost && new_demand <= ex.demand) {
+                    dead[static_cast<size_t>(other)] = 1;
+                    return true;
+                }
+                return false;
             });
 
-            v_labels.push_back({new_cost, new_demand});
-
-            best_cost[v] = std::min(new_cost, best_cost[v]);
-
-            queue.push_back({v, static_cast<int32_t>(v_labels.size()) - 1});
+            push(v, {new_cost, new_demand});
         }
     }
 
