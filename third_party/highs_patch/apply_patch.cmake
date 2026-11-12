@@ -151,11 +151,11 @@ if(_found2 EQUAL -1)
     # New:       { bool user_feasible = true;
     #              if (mipsolver.submip) { expand via undoPrimal, check }
     #              else { check directly }
-    #              if (!user_feasible) return false; }
+    #              if (!user_feasible) { mark rejected; return false; } }
     #            const bool execute_mip_solution_callback =
     string(REPLACE
       "  const bool execute_mip_solution_callback ="
-      "  // Reject solutions that violate user lazy constraints (e.g. SEC/GSEC)\n  {\n    bool user_feasible;\n    if (mipsolver.submip) {\n      // Sub-MIP: sol is in reduced (presolved) space; expand to original\n      HighsSolution temp_sol;\n      temp_sol.col_value = sol;\n      temp_sol.value_valid = true;\n      postSolveStack.undoPrimal(*mipsolver.options_mip_, temp_sol);\n      user_feasible = HighsUserSeparator::isFeasible(temp_sol.col_value);\n    } else {\n      user_feasible = HighsUserSeparator::isFeasible(sol);\n    }\n    if (!user_feasible) return false;\n  }\n  const bool execute_mip_solution_callback ="
+      "  // Reject solutions that violate user lazy constraints (e.g. SEC/GSEC)\n  {\n    bool user_feasible;\n    if (mipsolver.submip) {\n      // Sub-MIP: sol is in reduced (presolved) space; expand to original\n      HighsSolution temp_sol;\n      temp_sol.col_value = sol;\n      temp_sol.value_valid = true;\n      postSolveStack.undoPrimal(*mipsolver.options_mip_, temp_sol);\n      user_feasible = HighsUserSeparator::isFeasible(temp_sol.col_value);\n    } else {\n      user_feasible = HighsUserSeparator::isFeasible(sol);\n    }\n    if (!user_feasible) {\n      HighsUserSeparator::markIncumbentRejected();\n      return false;\n    }\n  }\n  const bool execute_mip_solution_callback ="
       CONTENT2 "${CONTENT2}")
 
     # Patch runSetup(): also check user feasibility for MIP start solutions.
@@ -164,10 +164,27 @@ if(_found2 EQUAL -1)
     # Original: if (feasible && solobj < upper_bound) {
     # New:      if (feasible && !mipsolver.submip) feasible = HighsUserSeparator::isFeasible(incumbent);
     #           if (feasible && solobj < upper_bound) {
+    # The reassigned flag also gates the MIP-solution callback further down.
+    # From v1.16 checkAddSolution() declares it const: drop that so it can be
+    # reassigned (v1.15 declares it non-const, and the REPLACE is a no-op).
+    string(REPLACE
+      "    const bool feasible =\n        mipsolver.bound_violation_ <="
+      "    bool feasible =\n        mipsolver.bound_violation_ <="
+      CONTENT2 "${CONTENT2}")
     string(REPLACE
       "    if (feasible && solobj < upper_bound) {\n      double prev_upper_bound = upper_bound;"
       "    if (feasible && !mipsolver.submip) feasible = HighsUserSeparator::isFeasible(incumbent);\n    if (feasible && solobj < upper_bound) {\n      double prev_upper_bound = upper_bound;"
       CONTENT2 "${CONTENT2}")
+
+    # Fail loudly if either feasibility anchor did not match: a silent no-op
+    # lets heuristic or MIP-start solutions that violate the lazy SECs in.
+    string(FIND "${CONTENT2}" "HighsUserSeparator::markIncumbentRejected();" _incumbent_ok)
+    string(FIND "${CONTENT2}" "feasible = HighsUserSeparator::isFeasible(incumbent);" _mipstart_ok)
+    if(_incumbent_ok EQUAL -1 OR _mipstart_ok EQUAL -1)
+        message(FATAL_ERROR
+          "HighsMipSolverData.cpp: user feasibility-check anchor did not match — "
+          "infeasible incumbents would be accepted. Update the patch anchor.")
+    endif()
 
     file(WRITE "${MIP_DIR}/HighsMipSolverData.cpp" "${CONTENT2}")
     message(STATUS "Applied lazy constraint + incumbent feasibility patch to HighsMipSolverData.cpp")
@@ -207,6 +224,43 @@ if(_found3 EQUAL -1)
     message(STATUS "Applied HighsUserPropagator patch to HighsSearch.cpp")
 else()
     message(STATUS "HighsSearch.cpp propagator patch already applied, skipping")
+endif()
+
+# ── 4c. Patch HighsSearch.cpp: keep integral nodes the lazy constraints reject ──
+# evaluateNode() hands an integral LP solution to addIncumbent() and then prunes
+# the node as bound exceeding. With lazy SECs the solution may contain subtours:
+# section 3 rejects it, the upper limit does not move, and the pruned node can
+# hold the optimum (M-n101-k10-97 proved -30918 instead of -32628 on v1.16).
+# A rejected node stays open: branch() then branches on an unfixed integer
+# column, and a node taken from the queue is separated (section 2).
+file(READ "${MIP_DIR}/HighsSearch.cpp" CONTENT3C)
+
+string(FIND "${CONTENT3C}" "HighsUserSeparator::takeIncumbentRejected" _found3c)
+if(_found3c EQUAL -1)
+    string(REPLACE
+      "#include \"mip/HighsSearch.h\""
+      "#include \"mip/HighsSearch.h\"\n#include \"mip/HighsUserSeparator.h\""
+      CONTENT3C "${CONTENT3C}")
+
+    string(REPLACE
+      "          double cutoffbnd = getCutoffBound();\n          addIncumbent(lp->getLpSolver().getSolution().col_value,\n                       lp->getObjective(),\n                       inheuristic ? kSolutionSourceHeuristic\n                                   : kSolutionSourceEvaluateNode);\n          if (getUpperLimit() < cutoffbnd)\n            lp->setObjectiveLimit(getUpperLimit());\n\n          if (lp->unscaledDualFeasible(status)) {"
+      "          double cutoffbnd = getCutoffBound();\n          HighsUserSeparator::takeIncumbentRejected();\n          addIncumbent(lp->getLpSolver().getSolution().col_value,\n                       lp->getObjective(),\n                       inheuristic ? kSolutionSourceHeuristic\n                                   : kSolutionSourceEvaluateNode);\n          const bool user_rejected =\n              HighsUserSeparator::takeIncumbentRejected();\n          if (getUpperLimit() < cutoffbnd)\n            lp->setObjectiveLimit(getUpperLimit());\n\n          if (!user_rejected && lp->unscaledDualFeasible(status)) {"
+      CONTENT3C "${CONTENT3C}")
+
+    # Fail loudly if the anchor did not match: a silent no-op prunes nodes that
+    # hold the optimum, which proves a wrong optimum.
+    string(FIND "${CONTENT3C}" "const bool user_rejected =" _rejected_ok)
+    if(_rejected_ok EQUAL -1)
+        message(FATAL_ERROR
+          "HighsSearch.cpp: evaluateNode incumbent anchor did not match — "
+          "integral nodes violating lazy constraints would be pruned. "
+          "Update the patch anchor.")
+    endif()
+
+    file(WRITE "${MIP_DIR}/HighsSearch.cpp" "${CONTENT3C}")
+    message(STATUS "Applied lazy-rejection node patch to HighsSearch.cpp")
+else()
+    message(STATUS "HighsSearch.cpp lazy-rejection patch already applied, skipping")
 endif()
 
 # ── 4a. Patch HighsLpRelaxation.h: add kBranching origin + methods ──
@@ -460,41 +514,4 @@ if(_found_search EQUAL -1)
     message(STATUS "Applied hyperplane branching patch to HighsSearch.cpp")
 else()
     message(STATUS "HighsSearch.cpp hyperplane patch already applied, skipping")
-endif()
-
-# ── 6. Move ~HighsMipWorker() out of line ──
-# The header's inline destructor resets std::unique_ptr<HighsSearch> where
-# HighsSearch is only forward-declared. Under C++23 unique_ptr is constexpr,
-# so clang instantiates its deleter there and rejects the incomplete type as
-# a hard error (gcc accepts it). Defining the destructor in HighsMipWorker.cpp,
-# where HighsSearch is complete, lets units that include the header (through
-# mip/HighsMipSolverData.h) be compiled and tidied as C++23.
-file(READ "${MIP_DIR}/HighsMipWorker.h" WORKER_H)
-set(_worker_dtor_inline
-  "  ~HighsMipWorker() {\n    search_ptr_.reset();\n    sepa_ptr_.reset();\n  }")
-string(FIND "${WORKER_H}" "${_worker_dtor_inline}" _worker_inline)
-if(NOT _worker_inline EQUAL -1)
-    string(REPLACE "${_worker_dtor_inline}" "  ~HighsMipWorker();"
-      WORKER_H "${WORKER_H}")
-    file(WRITE "${MIP_DIR}/HighsMipWorker.h" "${WORKER_H}")
-    message(STATUS "Moved ~HighsMipWorker() out of line in HighsMipWorker.h")
-else()
-    string(FIND "${WORKER_H}" "  ~HighsMipWorker();" _worker_decl)
-    if(_worker_decl EQUAL -1)
-        message(FATAL_ERROR
-          "HighsMipWorker.h: inline destructor anchor did not match — "
-          "the C++23 fix would be lost. Update the patch anchor.")
-    endif()
-    message(STATUS "HighsMipWorker.h destructor patch already applied, skipping")
-endif()
-
-file(READ "${MIP_DIR}/HighsMipWorker.cpp" WORKER_CPP)
-string(FIND "${WORKER_CPP}" "HighsMipWorker::~HighsMipWorker()" _worker_def)
-if(_worker_def EQUAL -1)
-    string(APPEND WORKER_CPP
-      "\nHighsMipWorker::~HighsMipWorker() {\n  search_ptr_.reset();\n  sepa_ptr_.reset();\n}\n")
-    file(WRITE "${MIP_DIR}/HighsMipWorker.cpp" "${WORKER_CPP}")
-    message(STATUS "Defined ~HighsMipWorker() in HighsMipWorker.cpp")
-else()
-    message(STATUS "HighsMipWorker.cpp destructor patch already applied, skipping")
 endif()

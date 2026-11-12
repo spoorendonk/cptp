@@ -78,6 +78,20 @@ TEST_CASE("M-n101-k10-97 optimal (warm-start reroute)", "[optimal][slow]") {
     REQUIRE_THAT(r.objective, WithinAbs(-32628.0, 1.0));
 }
 
+// The user callbacks are thread_local, so Model::solve keeps HiGHS's tree
+// search serial even when asked for HiGHS's parallel MIP (the default from
+// v1.16): worker threads would skip the lazy SECs and prove a wrong optimum.
+TEST_CASE("B-n45-k6-54 optimal with parallel requested", "[optimal][slow]") {
+    auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n45-k6-54.sppcc");
+    cptp::Model model;
+    model.set_problem(std::move(prob));
+    cptp::SolverOptions opts = {
+        {"output_flag", "false"}, {"time_limit", "60"}, {"parallel", "on"}, {"threads", "4"}};
+    auto r = model.solve(opts);
+    REQUIRE(r.is_optimal());
+    REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
+}
+
 // The benchmark pipeline reads per-phase timings and fixing counts from
 // SolveResult; verify they are wired and internally consistent. Runs with
 // fixing + propagation enabled so the propagator/rc-fixing paths are active.

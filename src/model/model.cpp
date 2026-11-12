@@ -539,6 +539,22 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
+    // One branch-and-bound tree: the patched separator and feasibility-check
+    // callbacks are thread_local and the hyperplane-branching row stack is
+    // shared, so the parallel tree search HiGHS runs by default from v1.16
+    // would explore nodes on worker threads that skip the lazy SECs and
+    // report wrong optima. "off" changes only the MIP search (and HiPO);
+    // simplex behaves as under v1.15's default.
+    if (auto it = accepted_highs_options.find("parallel");
+        it != accepted_highs_options.end() && it->second != "off") {
+        logger_.log(
+            "Warning: HiGHS option parallel = {} ignored: the user callbacks need serial tree "
+            "search",
+            it->second);
+        accepted_highs_options.erase(it);
+    }
+    highs.setOptionValue("parallel", "off");
+
     // Cascading disables: labeling_elim_bounds=false disables bounds-dependent
     // features
     if (!labeling_elim_bounds) {

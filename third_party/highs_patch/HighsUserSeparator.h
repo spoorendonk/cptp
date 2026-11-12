@@ -119,6 +119,13 @@ public:
     /// Returns true if no check is registered or if the solution passes.
     static bool isFeasible(const std::vector<double>& sol);
 
+    /// Record that addIncumbent() rejected a solution because it violates the
+    /// user lazy constraints (thread-local, like the callbacks).
+    static void markIncumbentRejected();
+
+    /// Return whether a rejection was recorded since the last call, and clear it.
+    static bool takeIncumbentRejected();
+
     /// 3-tier evaluation pipeline: dual pre-score -> pseudocost -> sequential SB.
     /// Returns index of winning candidate, or -1 if variable branching wins.
     static int evaluateCandidates(std::vector<HyperplaneCandidate>& candidates, double var_score,

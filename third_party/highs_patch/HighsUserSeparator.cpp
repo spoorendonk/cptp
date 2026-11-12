@@ -12,6 +12,7 @@
 namespace {
 thread_local HighsUserSeparator::Callback callback_;
 thread_local HighsUserSeparator::FeasibilityCheck feasibility_check_;
+thread_local bool incumbent_rejected_ = false;
 }  // namespace
 
 // Static member definitions for branching/hyperplane features.
@@ -74,6 +75,16 @@ bool HighsUserSeparator::isFeasible(const std::vector<double>& sol) {
     if (!feasibility_check_)
         return true;
     return feasibility_check_(sol);
+}
+
+void HighsUserSeparator::markIncumbentRejected() {
+    incumbent_rejected_ = true;
+}
+
+bool HighsUserSeparator::takeIncumbentRejected() {
+    const bool rejected = incumbent_rejected_;
+    incumbent_rejected_ = false;
+    return rejected;
 }
 
 // ── Hyperplane branching stack/pool management ──
