@@ -66,7 +66,7 @@ endif()
 # file-scope name they share with one breaks only the macOS build. HiGHS does
 # the same for io/filereaderlp/reader.cpp; sources.cmake is included from
 # highs/CMakeLists.txt, which defines the targets, so the property applies.
-string(FIND "${SOURCES_CONTENT}" "${SRC_PREFIX}/HighsUserSeparator.cpp ${SRC_PREFIX}/HighsUserPropagator.cpp PROPERTIES SKIP_UNITY_BUILD_INCLUSION" _skip_found)
+string(FIND "${SOURCES_CONTENT}" "# cptp patch: keep the user callback sources out of the unity build" _skip_found)
 if(_skip_found EQUAL -1)
     string(APPEND SOURCES_CONTENT
       "\n# cptp patch: keep the user callback sources out of the unity build\n"
