@@ -57,7 +57,9 @@ paths relative to that directory) and ``correlations.csv`` (per instance and
 m: the largest |corr| over all row pairs, and each row's Q_k and tau_k).
 
 Usage: ``python benchmarks/gen_multicap.py [--out DIR]``; ``--check`` exits 1
-when the files under DIR differ from what the script generates.
+when the files under DIR differ from what the script generates or its
+``<set>/m<m>/`` directories hold files it does not generate; writing removes
+such stale files there.
 """
 
 from __future__ import annotations
@@ -234,10 +236,12 @@ def gen_spatial(inst: Instance, rng: SplitMix64) -> list[int]:
     cust = inst.customers
     centres = [cust[rng.randint(0, len(cust) - 1)] for _ in range(SPATIAL_CENTRES)]
     amps = [rng.randint(1, 10) for _ in centres]
-    s = sum(inst.dist(inst.depot, i) for i in cust) / len(cust)
+    # math.fsum is correctly rounded on every Python version; the built-in
+    # sum() of floats changed to compensated summation in 3.12.
+    s = math.fsum(inst.dist(inst.depot, i) for i in cust) / len(cust)
     s2 = s * s
     w = [
-        sum(
+        math.fsum(
             a * s2 / (s2 + inst.dist(c, i) * inst.dist(c, i))
             for c, a in zip(centres, amps, strict=True)
         )
@@ -369,6 +373,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--check", action="store_true", help="compare instead of writing")
     args = ap.parse_args(argv)
     files = generate()
+    # Stale files are looked for only in the <set>/m<m>/ directories this
+    # script owns, so a wrong --out never loses unrelated files.
+    owned = [args.out / s / f"m{m}" for s in BASE_SETS for m in MS]
+    stale = sorted(
+        str(p.relative_to(args.out))
+        for d in owned
+        for p in d.glob("*")
+        if p.is_file() and str(p.relative_to(args.out)) not in files
+    )
     if args.check:
         bad = [
             r
@@ -377,7 +390,11 @@ def main(argv: list[str] | None = None) -> int:
         ]
         for r in bad:
             print(f"differs: {r}", file=sys.stderr)
-        return 1 if bad else 0
+        for r in stale:
+            print(f"not generated: {r}", file=sys.stderr)
+        return 1 if bad or stale else 0
+    for rel in stale:
+        (args.out / rel).unlink()
     for rel, data in files.items():
         p = args.out / rel
         p.parent.mkdir(parents=True, exist_ok=True)

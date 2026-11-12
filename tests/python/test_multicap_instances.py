@@ -50,6 +50,8 @@ def test_regenerates_byte_for_byte(tmp_path: Path) -> None:
         "manifest.sha256"
     }
     assert generated == set(manifest)
+    committed = {str(p.relative_to(MULTICAP)) for p in MULTICAP.rglob("*") if p.is_file()}
+    assert committed - {"manifest.sha256"} == set(manifest)  # no stale files
     for rel, digest in manifest.items():
         assert hashlib.sha256((tmp_path / rel).read_bytes()).hexdigest() == digest, rel
         assert (MULTICAP / rel).read_bytes() == (tmp_path / rel).read_bytes(), rel
