@@ -39,6 +39,31 @@ inline LabelRows parse_label_rows(std::string_view value) {
                                 "'");
 }
 
+/// Whether row k's zero-demand nodes carry a closed walk of negative net cost
+/// (arc u -> v costs edge_costs[e] - profits[v]). Such a walk adds no demand,
+/// so the non-elementary labeling under row k would improve its labels along
+/// it forever. Without one the labeling terminates: every other cycle adds
+/// demand, and a zero-cost one is caught by the dominance test.
+///
+/// The graph is undirected, so a closed walk enters each node as often as it
+/// leaves it, and its cost is sum over its arcs of c_e - (p_u + p_v) / 2: half
+/// the sum of its edges' 2-cycle costs 2 c_e - p_u - p_v. A negative closed
+/// walk exists exactly when some zero-demand edge's 2-cycle is negative.
+inline bool has_zero_demand_negative_cycle(const Problem& prob, int32_t k,
+                                           std::span<const double> edge_costs,
+                                           std::span<const double> profits) {
+    const auto& graph = prob.graph();
+    for (int32_t e = 0; e < graph.num_edges(); ++e) {
+        const int32_t u = graph.edge_source(e);
+        const int32_t v = graph.edge_target(e);
+        if (prob.demand(k, u) <= 0.0 && prob.demand(k, v) <= 0.0 &&
+            2.0 * edge_costs[e] - profits[u] - profits[v] < 0.0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// Capacity-aware labeling from a given root node under capacity row k alone,
 /// with custom edge costs and node profits.
 ///
@@ -49,11 +74,16 @@ inline LabelRows parse_label_rows(std::string_view value) {
 /// (excluding root profit, which is always collected... see seed below).
 ///
 /// Returns f[v] for each node, f[root] = -profits[root]; empty when the
-/// budget of max_queue_pops (0 = none) runs out.
+/// budget of max_queue_pops (0 = none) runs out, or up front when row k has
+/// a zero-demand negative cycle (has_zero_demand_negative_cycle), on which
+/// the labeling would not terminate.
 inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32_t k,
                                         std::span<const double> edge_costs,
                                         std::span<const double> profits,
                                         int64_t max_queue_pops = 0) {
+    if (has_zero_demand_negative_cycle(prob, k, edge_costs, profits)) {
+        return {};
+    }
     const int32_t n = prob.num_nodes();
     const auto& graph = prob.graph();
     const double Q = prob.capacity(k);
@@ -127,7 +157,9 @@ inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32
 /// names. Each row's f_k[v] is a lower bound on the net cost of reaching v
 /// under all rows (it relaxes the others), so their maximum is one too:
 /// f[v] = max_k f_k[v]. Row 0 alone is the single-row labeling. Empty when
-/// any row's labeling runs out of budget (max_queue_pops per row).
+/// row 0's labeling comes back empty (labeling_row); a row k >= 1 that does
+/// is skipped, since the maximum over the other rows is still a bound, so
+/// kAll is never weaker than kFirst.
 inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                                          std::span<const double> edge_costs,
                                          std::span<const double> profits,
@@ -143,7 +175,7 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
         }
         const auto row = labeling_row(prob, root, k, edge_costs, profits, max_queue_pops);
         if (row.empty()) {
-            return {};
+            continue;  // budget or zero-demand negative cycle: no bound from row k
         }
         for (size_t v = 0; v < best.size(); ++v) {
             best[v] = std::max(best[v], row[v]);

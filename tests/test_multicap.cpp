@@ -574,6 +574,43 @@ TEST_CASE("Multicap: with one row the labeling is the same for both row options"
     }
 }
 
+TEST_CASE("Multicap: a zero-demand negative cycle skips its row and terminates",
+          "[multicap][labeling]") {
+    using cptp::preprocess::LabelRows;
+    // kRows[2] gives node 2 zero demand at profit 10: the walk 0-2-0 costs
+    // 2 - 10 = -8 and adds no demand, so row 2's labeling never ends. With
+    // no budget (0) it must still return, as row 2 skipped: rows 0 and 1.
+    const auto prob = make_problem(3);
+    const auto rows01 = make_problem(2);
+    REQUIRE(cptp::preprocess::has_zero_demand_negative_cycle(prob, 2, prob.edge_costs(),
+                                                             prob.profits()));
+    REQUIRE_FALSE(cptp::preprocess::has_zero_demand_negative_cycle(prob, 0, prob.edge_costs(),
+                                                                   prob.profits()));
+    REQUIRE(cptp::preprocess::labeling_row(prob, 0, 2, prob.edge_costs(), prob.profits()).empty());
+    const auto all = cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kAll);
+    REQUIRE_FALSE(all.empty());
+    REQUIRE(all == cptp::preprocess::labeling_from(rows01, 0, 0, LabelRows::kAll));
+}
+
+TEST_CASE("Multicap: zero-demand cycles that are not negative keep their row",
+          "[multicap][labeling]") {
+    using cptp::preprocess::LabelRows;
+    // Row 1 gives customers 1..3 zero demand (the depot has 1), edges cost 3
+    // and profits are 3: every zero-demand 2-cycle costs 6 - 6 = 0, so the
+    // labeling terminates on dominance and row 1 is kept (f = 0 at 1..3,
+    // where row 0 alone reaches 3 - 3 = 0 too).
+    cptp::Problem prob;
+    prob.build(4, kEdges, std::vector<double>(6, 3.0), std::vector<double>{0.0, 3.0, 3.0, 3.0},
+               std::vector<std::vector<double>>{{0.0, 1.0, 1.0, 1.0}, {1.0, 0.0, 0.0, 0.0}},
+               std::vector<double>{3.0, 1.0}, 0, 0);
+    REQUIRE_FALSE(cptp::preprocess::has_zero_demand_negative_cycle(prob, 1, prob.edge_costs(),
+                                                                   prob.profits()));
+    const auto row1 = cptp::preprocess::labeling_row(prob, 0, 1, prob.edge_costs(), prob.profits());
+    REQUIRE_FALSE(row1.empty());
+    REQUIRE_THAT(row1[1], WithinAbs(0.0, 1e-9));
+    REQUIRE_FALSE(cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kAll).empty());
+}
+
 TEST_CASE("Multicap: labeling_rows = all keeps every row's optimum", "[multicap][labeling]") {
     struct Case {
         int32_t rows;

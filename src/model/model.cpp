@@ -5,6 +5,7 @@
 #include "parallel/parallel.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <map>
@@ -977,13 +978,23 @@ SolveResult Model::solve(const SolverOptions& options) {
             {
                 constexpr double kInf = std::numeric_limits<double>::infinity();
                 all_pairs.assign(static_cast<size_t>(n) * n, kInf);
+                // An empty row (row 0 has a zero-demand negative cycle) would
+                // leave kInf, "unreachable", for its source: drop all pairs.
+                std::atomic<bool> any_empty = false;
                 parallel::parallel_for(
                     0, n,
                     [&](int s) {
                         auto row = preprocess::labeling_from(problem_, s, 0, label_rows);
+                        if (row.empty()) {
+                            any_empty = true;
+                            return;
+                        }
                         std::ranges::copy(row, all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
                     },
                     preproc_thread_limit);
+                if (any_empty) {
+                    all_pairs.clear();
+                }
             }
             if (!all_pairs.empty()) {
                 const int64_t all_pairs_total = static_cast<int64_t>(n) * static_cast<int64_t>(n);
