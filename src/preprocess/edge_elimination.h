@@ -25,10 +25,11 @@ struct Label {
 enum class LabelRows {
     kFirst,      ///< row 0 only (the single-row behaviour)
     kAll,        ///< row 0 and every row k >= 1 with Q_k < kInfiniteCapacity, combined
-    kSurrogate,  ///< row 0 combined with one surrogate row (#102, surrogate_demands)
+    kSurrogate,  ///< row 0 combined with one surrogate row (#102, surrogate_row)
+    kVector,     ///< row 0 combined with vector labels over every bounded row (#103)
 };
 
-/// Parse the `labeling_rows` option: "first", "all" or "surrogate".
+/// Parse the `labeling_rows` option: "first", "all", "surrogate" or "vector".
 inline LabelRows parse_label_rows(std::string_view value) {
     if (value == "first") {
         return LabelRows::kFirst;
@@ -39,7 +40,10 @@ inline LabelRows parse_label_rows(std::string_view value) {
     if (value == "surrogate") {
         return LabelRows::kSurrogate;
     }
-    throw std::invalid_argument("labeling_rows must be first, all or surrogate, got '" +
+    if (value == "vector") {
+        return LabelRows::kVector;
+    }
+    throw std::invalid_argument("labeling_rows must be first, all, surrogate or vector, got '" +
                                 std::string(value) + "'");
 }
 
@@ -209,6 +213,150 @@ inline SurrogateRow surrogate_row(const Problem& prob) {
     return row;
 }
 
+/// Labels the vector labeling (labeling_vector) created, for the log.
+struct LabelingStats {
+    int64_t labels = 0;
+};
+
+/// Capacity-aware labeling from root with vector labels: each label carries
+/// its load on every row with Q_k < kInfiniteCapacity, a label extends only
+/// when every load stays within its Q_k, and one label dominates another
+/// when its cost and every load are <=. So f[v] is the minimum net cost of
+/// a (possibly non-elementary) path that respects all rows at once, a bound
+/// at least as strong as each row's own and the surrogate's.
+///
+/// Labels live in one pool under stable ids, a dominated one marked dead,
+/// and the queue holds ids, so every label live when popped is extended.
+/// Empty when the budget of max_queue_pops (0 = none) runs out, when no row
+/// is bounded, or when the nodes with zero demand on every bounded row carry
+/// a negative cycle (has_zero_demand_negative_cycle on the row sums): only
+/// those cycles add no load.
+inline std::vector<double> labeling_vector(const Problem& prob, int32_t root,
+                                           std::span<const double> edge_costs,
+                                           std::span<const double> profits,
+                                           int64_t max_queue_pops = 0,
+                                           LabelingStats* stats = nullptr) {
+    const int32_t n = prob.num_nodes();
+    const auto& graph = prob.graph();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+
+    std::vector<int32_t> rows;
+    for (int32_t k = 0; k < prob.num_capacities(); ++k) {
+        if (prob.capacity(k) < sep::kInfiniteCapacity) {
+            rows.push_back(k);
+        }
+    }
+    if (rows.empty()) {
+        return {};
+    }
+    std::vector<double> total(static_cast<size_t>(n), 0.0);
+    for (const int32_t k : rows) {
+        for (int32_t v = 0; v < n; ++v) {
+            total[static_cast<size_t>(v)] += prob.demand(k, v);
+        }
+    }
+    if (has_zero_demand_negative_cycle(prob, total, edge_costs, profits)) {
+        return {};
+    }
+
+    const size_t r = rows.size();
+    const size_t stride = r + 1;  // pool[id * stride] = cost, then r loads
+    std::vector<double> pool;
+    std::vector<int32_t> node_of;
+    std::vector<char> dead;
+    std::vector<std::vector<int32_t>> live(static_cast<size_t>(n));
+    std::vector<double> best_cost(static_cast<size_t>(n), kInf);
+    std::vector<int32_t> queue;
+
+    auto push = [&](int32_t v, double cost, std::span<const double> loads) {
+        const auto id = static_cast<int32_t>(node_of.size());
+        pool.push_back(cost);
+        pool.insert(pool.end(), loads.begin(), loads.end());
+        node_of.push_back(v);
+        dead.push_back(0);
+        live[static_cast<size_t>(v)].push_back(id);
+        best_cost[static_cast<size_t>(v)] = std::min(cost, best_cost[static_cast<size_t>(v)]);
+        queue.push_back(id);
+        if (stats != nullptr) {
+            ++stats->labels;
+        }
+    };
+
+    std::vector<double> loads(r);
+    for (size_t j = 0; j < r; ++j) {
+        loads[j] = prob.demand(rows[j], root);
+    }
+    push(root, -profits[root], loads);
+
+    size_t head = 0;
+    while (head < queue.size()) {
+        if (max_queue_pops > 0 && static_cast<int64_t>(head) >= max_queue_pops) {
+            return {};  // budget exhausted — caller checks .empty()
+        }
+        const int32_t id = queue[head++];
+        if (dead[static_cast<size_t>(id)] != 0) {
+            continue;
+        }
+        const int32_t u = node_of[static_cast<size_t>(id)];
+        const size_t base = static_cast<size_t>(id) * stride;
+        const double cost = pool[base];
+        std::vector<double> from(pool.begin() + static_cast<ptrdiff_t>(base) + 1,
+                                 pool.begin() + static_cast<ptrdiff_t>(base + stride));
+
+        for (auto e : graph.incident_edges(u)) {
+            const int32_t v = graph.other_endpoint(e, u);
+            bool fits = true;
+            for (size_t j = 0; j < r; ++j) {
+                loads[j] = from[j] + prob.demand(rows[j], v);
+                if (loads[j] > prob.capacity(rows[j])) {
+                    fits = false;
+                    break;
+                }
+            }
+            if (!fits) {
+                continue;
+            }
+            const double new_cost = cost + edge_costs[e] - profits[v];
+
+            // a <= b componentwise, over cost and every load
+            auto leq = [&](double cost_a, const double* a, double cost_b, const double* b) {
+                if (cost_a > cost_b) {
+                    return false;
+                }
+                for (size_t j = 0; j < r; ++j) {
+                    if (a[j] > b[j]) {
+                        return false;
+                    }
+                }
+                return true;
+            };
+            auto& at_v = live[static_cast<size_t>(v)];
+            bool dominated = false;
+            for (const int32_t other : at_v) {
+                const size_t ob = static_cast<size_t>(other) * stride;
+                if (leq(pool[ob], &pool[ob + 1], new_cost, loads.data())) {
+                    dominated = true;
+                    break;
+                }
+            }
+            if (dominated) {
+                continue;
+            }
+            std::erase_if(at_v, [&](int32_t other) {
+                const size_t ob = static_cast<size_t>(other) * stride;
+                if (leq(new_cost, loads.data(), pool[ob], &pool[ob + 1])) {
+                    dead[static_cast<size_t>(other)] = 1;
+                    return true;
+                }
+                return false;
+            });
+            push(v, new_cost, loads);
+        }
+    }
+
+    return best_cost;
+}
+
 /// Capacity-aware labeling from root (see labeling_row) over the rows `rows`
 /// names. Each row's f_k[v] is a lower bound on the net cost of reaching v
 /// under all rows (it relaxes the others), so their maximum is one too:
@@ -219,19 +367,25 @@ inline SurrogateRow surrogate_row(const Problem& prob) {
 /// later_rows_max_queue_pops (-1 = max_queue_pops), so a caller that runs row
 /// 0 unbounded need not run the others unbounded too. kSurrogate combines
 /// row 0 with the surrogate row (surrogate_row) the same way, under that
-/// budget.
-inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
-                                         std::span<const double> edge_costs,
-                                         std::span<const double> profits,
-                                         int64_t max_queue_pops = 0,
-                                         LabelRows rows = LabelRows::kFirst,
-                                         int64_t later_rows_max_queue_pops = -1) {
+/// budget, and kVector with the vector labeling (labeling_vector), whose
+/// label count goes to `stats` when given.
+inline std::vector<double> labeling_from(
+    const Problem& prob, int32_t root, std::span<const double> edge_costs,
+    std::span<const double> profits, int64_t max_queue_pops = 0, LabelRows rows = LabelRows::kFirst,
+    int64_t later_rows_max_queue_pops = -1, LabelingStats* stats = nullptr) {
     auto best = labeling_row(prob, root, 0, edge_costs, profits, max_queue_pops);
     if (rows == LabelRows::kFirst || best.empty()) {
         return best;
     }
     const int64_t later_pops =
         later_rows_max_queue_pops < 0 ? max_queue_pops : later_rows_max_queue_pops;
+    if (rows == LabelRows::kVector) {
+        const auto row = labeling_vector(prob, root, edge_costs, profits, later_pops, stats);
+        for (size_t v = 0; v < row.size(); ++v) {  // empty row: row 0 alone
+            best[v] = std::max(best[v], row[v]);
+        }
+        return best;
+    }
     if (rows == LabelRows::kSurrogate) {
         const auto surrogate = surrogate_row(prob);
         if (surrogate.demand.empty()) {
@@ -263,9 +417,10 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
 inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                                          int64_t max_queue_pops = 0,
                                          LabelRows rows = LabelRows::kFirst,
-                                         int64_t later_rows_max_queue_pops = -1) {
+                                         int64_t later_rows_max_queue_pops = -1,
+                                         LabelingStats* stats = nullptr) {
     return labeling_from(prob, root, prob.edge_costs(), prob.profits(), max_queue_pops, rows,
-                         later_rows_max_queue_pops);
+                         later_rows_max_queue_pops, stats);
 }
 
 /// Forward labeling from a given source node (wrapper for labeling_from).

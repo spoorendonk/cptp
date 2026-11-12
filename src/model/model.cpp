@@ -887,17 +887,23 @@ SolveResult Model::solve(const SolverOptions& options) {
         if (labeling_elim_bounds) {
             logger_.log("Lower bounds calculation:");
             logger_.log("  capacity-aware labeling (source={}, target={})", source, target);
+            preprocess::LabelingStats fwd_stats;
+            preprocess::LabelingStats bwd_stats;
             if (source != target) {
                 std::jthread t_fwd([&] {
-                    fwd_bounds = preprocess::labeling_from(problem_, source,
-                                                           labeling_max_queue_pops, label_rows);
+                    fwd_bounds = preprocess::labeling_from(
+                        problem_, source, labeling_max_queue_pops, label_rows, -1, &fwd_stats);
                 });
                 bwd_bounds = preprocess::labeling_from(problem_, target, labeling_max_queue_pops,
-                                                       label_rows);
+                                                       label_rows, -1, &bwd_stats);
             } else {
                 fwd_bounds = preprocess::labeling_from(problem_, source, labeling_max_queue_pops,
-                                                       label_rows);
+                                                       label_rows, -1, &fwd_stats);
                 bwd_bounds = fwd_bounds;
+            }
+            if (label_rows == preprocess::LabelRows::kVector) {
+                logger_.log("  vector labels: fwd={} bwd={}", fwd_stats.labels,
+                            source != target ? bwd_stats.labels : fwd_stats.labels);
             }
             if (fwd_bounds.empty() || bwd_bounds.empty()) {
                 logger_.log(

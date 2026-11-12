@@ -654,6 +654,36 @@ TEST_CASE("Multicap: the surrogate row fixes an edge no single row does", "[mult
     const double depot_profit = prob.profit(0);
     REQUIRE_FALSE(cptp::preprocess::edge_elimination(prob, all, all, 0.0, depot_profit)[kEdge13]);
     REQUIRE(cptp::preprocess::edge_elimination(prob, sur, sur, 0.0, depot_profit)[kEdge13]);
+
+    // Vector labels cut both routes too (each breaks one row): f[3] = 5.
+    cptp::preprocess::LabelingStats stats;
+    const auto vec = cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kVector, -1, &stats);
+    REQUIRE_THAT(vec[3], WithinAbs(5.0, 1e-9));
+    REQUIRE(stats.labels > 0);
+    REQUIRE(cptp::preprocess::edge_elimination(prob, vec, vec, 0.0, depot_profit)[kEdge13]);
+}
+
+TEST_CASE("Multicap: vector labels are never weaker than per-row or surrogate",
+          "[multicap][labeling]") {
+    using cptp::preprocess::LabelRows;
+    for (int32_t m = 1; m <= 3; ++m) {
+        INFO("m = " << m);
+        const auto prob = make_problem(m);
+        for (int32_t root = 0; root < prob.num_nodes(); ++root) {
+            const auto vec = cptp::preprocess::labeling_from(prob, root, 0, LabelRows::kVector);
+            const auto first = cptp::preprocess::labeling_from(prob, root, 0, LabelRows::kFirst);
+            if (m == 1) {
+                REQUIRE(vec == first);
+                continue;
+            }
+            const auto all = cptp::preprocess::labeling_from(prob, root, 0, LabelRows::kAll);
+            const auto sur = cptp::preprocess::labeling_from(prob, root, 0, LabelRows::kSurrogate);
+            for (int32_t v = 0; v < prob.num_nodes(); ++v) {
+                REQUIRE(vec[v] >= all[v]);
+                REQUIRE(vec[v] >= sur[v]);
+            }
+        }
+    }
 }
 
 TEST_CASE("Multicap: the surrogate row needs two bounded rows", "[multicap][labeling]") {
@@ -677,7 +707,7 @@ TEST_CASE("Multicap: labeling_rows = all keeps every row's optimum", "[multicap]
     };
     for (const auto& c : {Case{1, -29.0}, Case{2, -20.0}, Case{3, -18.0}}) {
         INFO("m = " << c.rows);
-        for (const char* rows : {"all", "surrogate"}) {
+        for (const char* rows : {"all", "surrogate", "vector"}) {
             INFO("labeling_rows = " << rows);
             cptp::Model model;
             fill_model(model, c.rows);
