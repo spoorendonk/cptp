@@ -61,6 +61,20 @@ else()
     endif()
 endif()
 
+# Keep the patch sources out of HiGHS's unity build (on only if(APPLE) in
+# highs/CMakeLists.txt): batched with neighbouring HiGHS sources, any
+# file-scope name they share with one breaks only the macOS build. HiGHS does
+# the same for io/filereaderlp/reader.cpp; sources.cmake is included from
+# highs/CMakeLists.txt, which defines the targets, so the property applies.
+string(FIND "${SOURCES_CONTENT}" "${SRC_PREFIX}/HighsUserSeparator.cpp ${SRC_PREFIX}/HighsUserPropagator.cpp PROPERTIES SKIP_UNITY_BUILD_INCLUSION" _skip_found)
+if(_skip_found EQUAL -1)
+    string(APPEND SOURCES_CONTENT
+      "\n# cptp patch: keep the user callback sources out of the unity build\n"
+      "set_source_files_properties(${SRC_PREFIX}/HighsUserSeparator.cpp ${SRC_PREFIX}/HighsUserPropagator.cpp PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)\n")
+    file(WRITE "${SOURCE_DIR}/cmake/sources.cmake" "${SOURCES_CONTENT}")
+    message(STATUS "Excluded HighsUserSeparator + HighsUserPropagator from the unity build")
+endif()
+
 # ── 2. Patch HighsSeparation.cpp: include + instantiate + lazy constraint at non-root ──
 file(READ "${MIP_DIR}/HighsSeparation.cpp" CONTENT)
 
