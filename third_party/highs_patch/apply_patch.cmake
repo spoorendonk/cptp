@@ -263,6 +263,17 @@ else()
     message(STATUS "HighsSearch.cpp lazy-rejection patch already applied, skipping")
 endif()
 
+# 4c only works if section 3 sets the flag. Check it unconditionally: a
+# HighsMipSolverData.cpp carrying an older section 3 skips that section.
+file(READ "${MIP_DIR}/HighsMipSolverData.cpp" CONTENT3C_DATA)
+string(FIND "${CONTENT3C_DATA}" "HighsUserSeparator::markIncumbentRejected();" _mark_ok)
+if(_mark_ok EQUAL -1)
+    message(FATAL_ERROR
+      "HighsMipSolverData.cpp: addIncumbent() does not record lazy rejections — "
+      "section 4c would prune integral nodes violating lazy constraints. "
+      "Re-fetch HiGHS so section 3 applies.")
+endif()
+
 # ── 4a. Patch HighsLpRelaxation.h: add kBranching origin + methods ──
 file(READ "${MIP_DIR}/HighsLpRelaxation.h" LPRELAX_H)
 
