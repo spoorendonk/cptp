@@ -3,13 +3,14 @@
 #include "Highs.h"
 
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <iostream>
 #include <vector>
 
 // Build and solve formulation WITHOUT separators.
 // Then verify a known optimal tour is feasible.
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) try {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <instance.sppcc>\n", argv[0]);
         return 1;
@@ -112,4 +113,7 @@ int main(int argc, char* argv[]) {
     }
 
     return 0;
+} catch (const std::exception& e) {
+    fprintf(stderr, "Error: %s\n", e.what());
+    return 1;
 }

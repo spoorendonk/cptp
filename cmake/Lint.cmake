@@ -76,11 +76,33 @@ else()
                     "registered, so the push gate does not check formatting.")
 endif()
 
+# On macOS, Apple's compiler shims find the SDK (and with it libc++'s
+# headers) through xcrun, so compile_commands.json carries no -isysroot when
+# CMAKE_OSX_SYSROOT is empty. The pinned clang-tidy is a plain LLVM build that
+# does not ask xcrun, and without a sysroot finds no standard headers at all.
+# Hand it the SDK the compiler uses. Other platforms are unaffected.
+set(_cptp_tidy_extra_args "")
+if(APPLE AND CPTP_CLANG_TIDY)
+    set(_cptp_sdk "${CMAKE_OSX_SYSROOT}")
+    if(NOT _cptp_sdk)
+        execute_process(COMMAND xcrun --show-sdk-path
+            OUTPUT_VARIABLE _cptp_sdk OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    endif()
+    if(_cptp_sdk)
+        list(APPEND _cptp_tidy_extra_args "--extra-arg=-isysroot${_cptp_sdk}")
+    else()
+        message(WARNING "No macOS SDK found (xcrun --show-sdk-path): the "
+                        "clang_tidy: tests will not find the standard headers.")
+    endif()
+endif()
+
 if(CPTP_CLANG_TIDY)
     foreach(unit IN LISTS CPTP_LINT_UNITS)
         add_test(NAME "clang_tidy:${unit}"
             COMMAND ${CPTP_CLANG_TIDY} -p ${CMAKE_BINARY_DIR}
                     --quiet --warnings-as-errors=*
+                    ${_cptp_tidy_extra_args}
                     ${CMAKE_CURRENT_SOURCE_DIR}/${unit})
         set_tests_properties("clang_tidy:${unit}" PROPERTIES LABELS lint)
     endforeach()

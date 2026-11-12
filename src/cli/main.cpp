@@ -170,7 +170,7 @@ static void print_version() {
               << "HiGHS " << highsVersion() << " (git hash: " << highs_githash << ")\n";
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char* argv[]) try {
     if (argc < 2) {
         print_usage(argv[0]);
         return 1;
@@ -326,4 +326,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;
     }
+} catch (const std::exception& e) {
+    // Argument parsing, before the solve's own handler (string copies and
+    // allocation can throw there too).
+    std::cerr << "Error: " << e.what() << "\n";
+    return 1;
 }
