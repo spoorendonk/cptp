@@ -425,7 +425,10 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t max_cuts_comb = -1;
     int32_t max_cuts_rglm = -1;
     int32_t max_cuts_spi = -1;
-    // Capacity rows the capacity cut families build cuts from (#91).
+    // Capacity rows the capacity cut families build cuts from (#91). `all` by
+    // measurement (#99, on #86): row 0 alone left ~8% more root gap and ~1.3x
+    // the nodes on the m = 2, 5, 10 smoke set; most_violated tied at the median
+    // with a worse upper quartile in nodes and time.
     std::string capacity_cut_rows = "all";
 
     // --- Other ---
