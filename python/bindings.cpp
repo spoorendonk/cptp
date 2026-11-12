@@ -3,6 +3,8 @@
 #include "core/solution.h"
 #include "model/model.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
@@ -75,7 +77,16 @@ NB_MODULE(_cptp, m) {
         .def_prop_ro("num_edges", &cptp::Problem::num_edges)
         .def_prop_ro("source", &cptp::Problem::source)
         .def_prop_ro("target", &cptp::Problem::target)
-        .def_prop_ro("capacity", &cptp::Problem::capacity)
+        .def_prop_ro("capacity", nb::overload_cast<>(&cptp::Problem::capacity, nb::const_),
+                     "Capacity of row 0 (the only row when num_capacities == 1)")
+        .def_prop_ro("num_capacities", &cptp::Problem::num_capacities,
+                     "Number of capacity rows m; a solution satisfies all of them")
+        .def_prop_ro(
+            "capacities",
+            [](cptp::Problem& self) {
+                return vec_view_numpy<double>(self.capacities(), nb::find(self));
+            },
+            "(m,) capacities Q_k, a read-only view")
         .def_prop_ro("is_tour", &cptp::Problem::is_tour)
         .def_prop_ro("edge_costs",
                      [](cptp::Problem& self) {
@@ -85,10 +96,31 @@ NB_MODULE(_cptp, m) {
                      [](cptp::Problem& self) {
                          return vec_view_numpy<double>(self.profits(), nb::find(self));
                      })
-        .def_prop_ro("demands",
-                     [](cptp::Problem& self) {
-                         return vec_view_numpy<double>(self.demands(), nb::find(self));
-                     })
+        .def_prop_ro(
+            "demands",
+            [](cptp::Problem& self) {
+                return vec_view_numpy<double>(self.demands(), nb::find(self));
+            },
+            "(n,) demands of row 0, a read-only view")
+        .def_prop_ro(
+            "demand_rows",
+            [](const cptp::Problem& self) {
+                // A copy the returned array owns: the rows are separate vectors.
+                const auto rows = static_cast<size_t>(self.num_capacities());
+                const auto n = static_cast<size_t>(self.num_nodes());
+                auto data = std::make_unique<std::vector<double>>(rows * n);
+                for (size_t k = 0; k < rows; ++k) {
+                    const auto& row = self.demands(static_cast<int32_t>(k));
+                    std::ranges::copy(row, data->begin() + static_cast<std::ptrdiff_t>(k * n));
+                }
+                auto* raw = data.release();
+                nb::capsule owner(
+                    raw, [](void* p) noexcept { delete static_cast<std::vector<double>*>(p); });
+                return nb::ndarray<nb::numpy, double, nb::shape<-1, -1>>(raw->data(), {rows, n},
+                                                                         std::move(owner));
+            },
+            // The array owns its copy, so not def_prop_ro's default reference_internal.
+            nb::rv_policy::move, "(m, n) demands d^k_i of every row, a copy")
         .def(
             "graph_edges",
             [](const cptp::Problem& self) {
@@ -131,7 +163,46 @@ NB_MODULE(_cptp, m) {
                 self->name = name;
             },
             "num_nodes"_a, "edges"_a, "edge_costs"_a, "profits"_a, "demands"_a, "capacity"_a,
-            "source"_a = 0, "target"_a = 0, "name"_a = "");
+            "source"_a = 0, "target"_a = 0, "name"_a = "")
+        .def(
+            "__init__",
+            [](cptp::Problem* self, int32_t num_nodes,
+               const nb::ndarray<int32_t, nb::shape<-1, 2>>& edges,
+               const nb::ndarray<double, nb::shape<-1>>& edge_costs,
+               const nb::ndarray<double, nb::shape<-1>>& profits,
+               const nb::ndarray<double, nb::shape<-1, -1>>& demands,
+               const nb::ndarray<double, nb::shape<-1>>& capacities, int32_t source, int32_t target,
+               const std::string& name) {
+                new (self) cptp::Problem();
+                auto e_view = edges.view();
+                auto m = static_cast<int32_t>(edges.shape(0));
+                std::vector<cptp::Edge> edge_vec(m);
+                for (int32_t i = 0; i < m; ++i) {
+                    edge_vec[i] = {e_view(i, 0), e_view(i, 1)};
+                }
+                auto ec_view = edge_costs.view();
+                auto p_view = profits.view();
+                auto d_view = demands.view();
+                auto c_view = capacities.view();
+                std::vector<std::vector<double>> rows(demands.shape(0));
+                for (size_t k = 0; k < rows.size(); ++k) {
+                    rows[k].resize(demands.shape(1));
+                    for (size_t i = 0; i < rows[k].size(); ++i) {
+                        rows[k][i] = d_view(k, i);
+                    }
+                }
+                self->build(
+                    num_nodes, edge_vec,
+                    std::vector<double>(ec_view.data(), ec_view.data() + edge_costs.shape(0)),
+                    std::vector<double>(p_view.data(), p_view.data() + profits.shape(0)),
+                    std::move(rows),
+                    std::vector<double>(c_view.data(), c_view.data() + capacities.shape(0)), source,
+                    target);
+                self->name = name;
+            },
+            "num_nodes"_a, "edges"_a, "edge_costs"_a, "profits"_a, "demands"_a, "capacities"_a,
+            "source"_a = 0, "target"_a = 0, "name"_a = "",
+            "Build with m capacity rows: demands is (m, n), capacities is (m,)");
 
     // --- Model ---
     // Input arrays are read directly from numpy (zero-copy read via span).
@@ -171,7 +242,8 @@ NB_MODULE(_cptp, m) {
                 auto view = demands.view();
                 self.add_capacity_resource({view.data(), demands.shape(0)}, limit);
             },
-            "demands"_a, "limit"_a)
+            "demands"_a, "limit"_a,
+            "Add a capacity row sum_i demands[i] * y_i <= limit; every row added is enforced")
         .def(
             "solve",
             [](cptp::Model& self, const cptp::SolverOptions& options) {

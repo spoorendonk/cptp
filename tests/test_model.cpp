@@ -152,9 +152,9 @@ TEST_CASE("Heuristic local search: swap(1,1) improves saturated seed", "[heurist
 
     std::vector<int32_t> tour = {0, 1, 0};
     std::vector<bool> in_tour;
-    double remaining_cap = 0.0;
+    cptp::heuristic::detail::Residual remaining_cap;
     REQUIRE(cptp::heuristic::detail::init_seed_state(prob, tour, in_tour, remaining_cap));
-    REQUIRE_THAT(remaining_cap, WithinAbs(0.0, 1e-12));
+    REQUIRE_THAT(remaining_cap[0], WithinAbs(0.0, 1e-12));
 
     const double before = cptp::heuristic::detail::tour_objective(prob, tour);
     cptp::heuristic::detail::local_search(prob, tour, in_tour, remaining_cap, {}, 50);
@@ -164,7 +164,7 @@ TEST_CASE("Heuristic local search: swap(1,1) improves saturated seed", "[heurist
     REQUIRE(tour == std::vector<int32_t>{0, 2, 0});
     REQUIRE(in_tour[2]);
     REQUIRE_FALSE(in_tour[1]);
-    REQUIRE_THAT(remaining_cap, WithinAbs(0.0, 1e-12));
+    REQUIRE_THAT(remaining_cap[0], WithinAbs(0.0, 1e-12));
 }
 
 TEST_CASE("Heuristic pool local search: deterministic across worker counts (tour)",

@@ -1,5 +1,7 @@
 """High-level convenience wrapper around the C++ CPTP solver."""
 
+from collections.abc import Sequence
+
 import numpy as np
 
 from cptp._cptp import Model as _Model
@@ -12,7 +14,7 @@ def solve(
     edge_costs: np.ndarray,
     profits: np.ndarray,
     demands: np.ndarray,
-    capacity: float,
+    capacity: float | Sequence[float] | np.ndarray,
     depot: int = 0,
     source: int | None = None,
     target: int | None = None,
@@ -27,8 +29,10 @@ def solve(
         edges: (m, 2) array of (tail, head) pairs.
         edge_costs: (m,) array of edge costs (can be negative).
         profits: (n,) array of node profits.
-        demands: (n,) array of node demands.
-        capacity: Vehicle capacity.
+        demands: (n,) array of node demands, or an (m, n) array with one row
+            per capacity constraint.
+        capacity: Vehicle capacity, or m capacities when demands is (m, n).
+            A solution satisfies every row: sum_i demands[k, i] y_i <= capacity[k].
         depot: Depot node index (default 0). Sets source = target = depot (tour).
         source: Source node for s-t path. Overrides depot if set.
         target: Target node for s-t path. Overrides depot if set.
@@ -53,7 +57,17 @@ def solve(
         model.set_depot(depot)
 
     model.set_profits(np.ascontiguousarray(profits, dtype=np.float64))
-    model.add_capacity_resource(np.ascontiguousarray(demands, dtype=np.float64), capacity)
+    demand_rows = np.asarray(demands, dtype=np.float64)
+    if demand_rows.ndim == 1:
+        if not isinstance(capacity, (int, float, np.integer, np.floating)):
+            raise ValueError("capacity must be a number when demands is one-dimensional")
+        model.add_capacity_resource(np.ascontiguousarray(demand_rows), float(capacity))
+    else:
+        capacities = np.atleast_1d(np.asarray(capacity, dtype=np.float64))
+        if demand_rows.ndim != 2 or capacities.shape != (demand_rows.shape[0],):
+            raise ValueError("demands must be (m, n) with one capacity per row")
+        for row, limit in zip(demand_rows, capacities, strict=True):
+            model.add_capacity_resource(np.ascontiguousarray(row), float(limit))
 
     options = [
         ("time_limit", str(time_limit)),

@@ -117,6 +117,7 @@ if(CPTP_BUILD_TESTS)
     # HiGHS integration tests (only solver-dependent tests)
     add_executable(cptp_tests
         tests/test_model.cpp
+        tests/test_multicap.cpp
         tests/test_optimal.cpp
         tests/test_path_cut_validity.cpp
         tests/test_propagator.cpp

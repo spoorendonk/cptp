@@ -37,13 +37,13 @@ double tour_objective(const Problem& prob, const std::vector<int32_t>& tour) {
 }
 
 void greedy_insert(const Problem& prob, std::vector<int32_t>& tour, std::vector<bool>& in_tour,
-                   double& remaining_cap, const std::vector<int32_t>& order,
+                   Residual& remaining_cap, const std::vector<int32_t>& order,
                    const std::vector<bool>& edge_active) {
     for (int32_t c : order) {
         if (in_tour[c]) {
             continue;
         }
-        if (prob.demand(c) > remaining_cap) {
+        if (!remaining_cap.fits(prob, c)) {
             continue;
         }
 
@@ -75,13 +75,13 @@ void greedy_insert(const Problem& prob, std::vector<int32_t>& tour, std::vector<
         if (best_pos > 0) {
             tour.insert(tour.begin() + static_cast<ptrdiff_t>(best_pos), c);
             in_tour[c] = true;
-            remaining_cap -= prob.demand(c);
+            remaining_cap.take(prob, c);
         }
     }
 }
 
 int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bool>& in_tour,
-                 double& remaining_cap, const std::vector<bool>& edge_active,
+                 Residual& remaining_cap, const std::vector<bool>& edge_active,
                  int max_iter_per_start) {
     const int32_t n = prob.num_nodes();
     // Minimum size before allowing node drop:
@@ -158,8 +158,7 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
                     continue;
                 }
 
-                const double new_remaining = remaining_cap + prob.demand(out) - prob.demand(in);
-                if (new_remaining < -kLsEpsImprove) {
+                if (!remaining_cap.fits_swap(prob, out, in, kLsEpsImprove)) {
                     continue;
                 }
 
@@ -178,7 +177,7 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
                     tour[i] = in;
                     in_tour[out] = false;
                     in_tour[in] = true;
-                    remaining_cap = new_remaining;
+                    remaining_cap.swap(prob, out, in);
                     improved = true;
                 }
             }
@@ -196,7 +195,7 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
             if (save - prob.profit(c) > kLsEpsImprove) {
                 tour.erase(tour.begin() + i);
                 in_tour[c] = false;
-                remaining_cap += prob.demand(c);
+                remaining_cap.give(prob, c);
                 improved = true;
             }
         }
@@ -209,7 +208,7 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
             if (in_tour[c]) {
                 continue;
             }
-            if (prob.demand(c) > remaining_cap) {
+            if (!remaining_cap.fits(prob, c)) {
                 continue;
             }
 
@@ -237,7 +236,7 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
             if (best_pos > 0) {
                 tour.insert(tour.begin() + static_cast<ptrdiff_t>(best_pos), c);
                 in_tour[c] = true;
-                remaining_cap -= prob.demand(c);
+                remaining_cap.take(prob, c);
                 improved = true;
             }
         }
@@ -250,7 +249,7 @@ int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bo
 }
 
 bool init_seed_state(const Problem& prob, std::span<const int32_t> tour, std::vector<bool>& in_tour,
-                     double& remaining_cap) {
+                     Residual& remaining_cap) {
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
@@ -262,25 +261,22 @@ bool init_seed_state(const Problem& prob, std::span<const int32_t> tour, std::ve
         in_tour[v] = true;
     }
 
-    remaining_cap = prob.capacity() - prob.demand(source);
-    if (!prob.is_tour()) {
-        remaining_cap -= prob.demand(target);
-    }
-    if (remaining_cap < -kLsEpsImprove) {
+    remaining_cap = Residual(prob);
+    if (!remaining_cap.at_least(-kLsEpsImprove)) {
         return false;
     }
 
     for (size_t i = 1; i + 1 < tour.size(); ++i) {
         const int32_t v = tour[i];
         if (v != source && v != target) {
-            remaining_cap -= prob.demand(v);
+            remaining_cap.take(prob, v);
         }
     }
-    return remaining_cap >= -kLsEpsImprove;
+    return remaining_cap.at_least(-kLsEpsImprove);
 }
 
 bool perturb_swap_kick(const Problem& prob, std::vector<int32_t>& tour, std::vector<bool>& in_tour,
-                       double& remaining_cap, const std::vector<bool>& edge_active,
+                       Residual& remaining_cap, const std::vector<bool>& edge_active,
                        int32_t start_index, int32_t round_index) {
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
@@ -324,8 +320,7 @@ bool perturb_swap_kick(const Problem& prob, std::vector<int32_t>& tour, std::vec
             out_nodes[static_cast<size_t>((key >> 32) % static_cast<uint64_t>(out_nodes.size()))];
         const int32_t out = tour[pos];
 
-        const double new_remaining = remaining_cap + prob.demand(out) - prob.demand(in);
-        if (new_remaining < -kLsEpsImprove) {
+        if (!remaining_cap.fits_swap(prob, out, in, kLsEpsImprove)) {
             continue;
         }
 
@@ -338,7 +333,7 @@ bool perturb_swap_kick(const Problem& prob, std::vector<int32_t>& tour, std::vec
         tour[pos] = in;
         in_tour[out] = false;
         in_tour[in] = true;
-        remaining_cap = new_remaining;
+        remaining_cap.swap(prob, out, in);
         return true;
     }
     return false;
@@ -384,7 +379,6 @@ std::pair<std::vector<int32_t>, double> single_restart(const Problem& prob,
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
-    const double Q = prob.capacity();
     const bool is_tour = prob.is_tour();
 
     // Initialize: tour for closed loop, path for open s-t
@@ -400,12 +394,8 @@ std::pair<std::vector<int32_t>, double> single_restart(const Problem& prob,
     }
     // Mandatory endpoints consume capacity too: depot once for tours,
     // source+target for paths.
-    double remaining_cap = Q - prob.demand(source);
-    if (!is_tour) {
-        remaining_cap -= prob.demand(target);
-    }
-
-    if (remaining_cap < 0.0) {
+    Residual remaining_cap(prob);
+    if (!remaining_cap.at_least(0.0)) {
         return {std::move(tour), kNoSolution};
     }
 
@@ -424,7 +414,7 @@ std::pair<std::vector<int32_t>, double> single_restart(const Problem& prob,
             if (in_tour[c]) {
                 continue;
             }
-            if (prob.demand(c) > remaining_cap) {
+            if (!remaining_cap.fits(prob, c)) {
                 continue;
             }
             double best_delta = std::numeric_limits<double>::max();
@@ -456,7 +446,7 @@ std::pair<std::vector<int32_t>, double> single_restart(const Problem& prob,
         }
         tour.insert(tour.begin() + static_cast<ptrdiff_t>(best_pos), bn);
         in_tour[bn] = true;
-        remaining_cap -= prob.demand(bn);
+        remaining_cap.take(prob, bn);
     }
 
     if (tour.size() > 2) {
@@ -474,11 +464,8 @@ std::vector<int32_t> fallback_feasible(const Problem& prob, const std::vector<bo
     const int32_t target = prob.target();
     const bool is_tour = prob.is_tour();
 
-    double remaining_cap = prob.capacity() - prob.demand(source);
-    if (!is_tour) {
-        remaining_cap -= prob.demand(target);
-    }
-    if (remaining_cap < 0.0) {
+    const Residual remaining_cap(prob);
+    if (!remaining_cap.at_least(0.0)) {
         return {};
     }
 
@@ -490,7 +477,7 @@ std::vector<int32_t> fallback_feasible(const Problem& prob, const std::vector<bo
             if (c == source) {
                 continue;
             }
-            if (prob.demand(c) > remaining_cap) {
+            if (!remaining_cap.fits(prob, c)) {
                 continue;
             }
             const double c1 = edge_cost(prob, source, c, edge_active);
@@ -522,7 +509,7 @@ std::vector<int32_t> fallback_feasible(const Problem& prob, const std::vector<bo
         if (c == source || c == target) {
             continue;
         }
-        if (prob.demand(c) > remaining_cap) {
+        if (!remaining_cap.fits(prob, c)) {
             continue;
         }
         const double c1 = edge_cost(prob, source, c, edge_active);
@@ -550,19 +537,34 @@ std::vector<TourCandidate> enumerate_small_seed_candidates(const Problem& prob,
     const int32_t target = prob.target();
     const bool is_tour = prob.is_tour();
 
-    double base_remaining = prob.capacity() - prob.demand(source);
-    if (!is_tour) {
-        base_remaining -= prob.demand(target);
-    }
-    if (base_remaining < 0.0) {
+    const Residual base_remaining(prob);
+    if (!base_remaining.at_least(0.0)) {
         return {};
     }
+    const int32_t num_rows = prob.num_capacities();
 
     std::vector<TourCandidate> candidates;
     candidates.reserve(static_cast<size_t>(customers.size()) * customers.size());
 
-    auto try_seed = [&](std::vector<int32_t> seed, double used_demand) {
-        if (used_demand > base_remaining + 1e-9) {
+    // The seed's customers a and b (-1 for none) fit under every row.
+    auto seed_fits = [&](int32_t a, int32_t b) {
+        for (int32_t k = 0; k < num_rows; ++k) {
+            double used = 0.0;
+            if (a >= 0) {
+                used = prob.demand(k, a);
+            }
+            if (b >= 0) {
+                used += prob.demand(k, b);
+            }
+            if (used > base_remaining[k] + 1e-9) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    auto try_seed = [&](std::vector<int32_t> seed, bool fits) {
+        if (!fits) {
             return;
         }
         if (!seed_uses_active_edges(prob, seed, edge_active)) {
@@ -573,16 +575,16 @@ std::vector<TourCandidate> enumerate_small_seed_candidates(const Problem& prob,
 
     // Path-only zero-customer seed.
     if (!is_tour) {
-        try_seed({source, target}, 0.0);
+        try_seed({source, target}, seed_fits(-1, -1));
     }
 
     // All single-customer seeds.
     for (int32_t c : customers) {
-        double used = prob.demand(c);
+        const bool fits = seed_fits(c, -1);
         if (is_tour) {
-            try_seed({source, c, source}, used);
+            try_seed({source, c, source}, fits);
         } else {
-            try_seed({source, c, target}, used);
+            try_seed({source, c, target}, fits);
         }
     }
 
@@ -591,13 +593,13 @@ std::vector<TourCandidate> enumerate_small_seed_candidates(const Problem& prob,
         const int32_t a = customers[i];
         for (size_t j = i + 1; j < customers.size(); ++j) {
             const int32_t b = customers[j];
-            const double used = prob.demand(a) + prob.demand(b);
+            const bool fits = seed_fits(a, b);
             if (is_tour) {
-                try_seed({source, a, b, source}, used);
-                try_seed({source, b, a, source}, used);
+                try_seed({source, a, b, source}, fits);
+                try_seed({source, b, a, source}, fits);
             } else {
-                try_seed({source, a, b, target}, used);
-                try_seed({source, b, a, target}, used);
+                try_seed({source, a, b, target}, fits);
+                try_seed({source, b, a, target}, fits);
             }
         }
     }
@@ -656,21 +658,27 @@ void validate_tour_or_throw(const Problem& prob, std::span<const int32_t> tour) 
         x_values[static_cast<size_t>(e)] += 1.0;
     }
 
-    double used = prob.demand(source);
-    if (!prob.is_tour()) {
-        used += prob.demand(target);
-    }
     std::vector<double> y_values(static_cast<size_t>(n), 0.0);
     y_values[static_cast<size_t>(source)] = 1.0;
     y_values[static_cast<size_t>(target)] = 1.0;
     for (int32_t v = 0; v < n; ++v) {
         if (seen[static_cast<size_t>(v)]) {
-            used += prob.demand(v);
             y_values[static_cast<size_t>(v)] = 1.0;
         }
     }
-    if (used > prob.capacity() + kLsEpsImprove) {
-        throw std::runtime_error("Heuristic produced invalid route: capacity violation");
+    for (int32_t k = 0; k < prob.num_capacities(); ++k) {
+        double used = prob.demand(k, source);
+        if (!prob.is_tour()) {
+            used += prob.demand(k, target);
+        }
+        for (int32_t v = 0; v < n; ++v) {
+            if (seen[static_cast<size_t>(v)]) {
+                used += prob.demand(k, v);
+            }
+        }
+        if (used > prob.capacity(k) + kLsEpsImprove) {
+            throw std::runtime_error("Heuristic produced invalid route: capacity violation");
+        }
     }
 
     // Reuse the solver's incumbent SEC validator for consistency.
@@ -855,10 +863,9 @@ ConstructionPool build_construction_pool(const Problem& prob, int max_candidates
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
-    const double Q = prob.capacity();
     std::vector<int32_t> customers;
     for (int32_t i = 0; i < n; ++i) {
-        if (i != source && i != target && prob.demand(i) <= Q) {
+        if (i != source && i != target && prob.fits_alone(i)) {
             customers.push_back(i);
         }
     }
@@ -996,7 +1003,7 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
                 }
 
                 std::vector<bool> in_tour;
-                double remaining_cap = 0.0;
+                detail::Residual remaining_cap;
                 if (!detail::init_seed_state(prob, tour, in_tour, remaining_cap)) {
                     improved[static_cast<size_t>(i)] = detail::TourCandidate{};
                     finalize_start(false, ls_iters_for_start);
@@ -1015,7 +1022,7 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
                 for (int32_t round = 0; round < detail::kIlsRounds; ++round) {
                     std::vector<int32_t> kicked = best_local.tour;
                     std::vector<bool> kicked_in_tour;
-                    double kicked_remaining_cap = 0.0;
+                    detail::Residual kicked_remaining_cap;
                     if (!detail::init_seed_state(prob, kicked, kicked_in_tour,
                                                  kicked_remaining_cap)) {
                         break;
@@ -1107,7 +1114,6 @@ HeuristicResult lp_guided_heuristic(const Problem& prob, std::span<const double>
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
-    const double Q = prob.capacity();
     (void)time_budget_ms;  // deterministic-only workflow
 
     // Build reduced graphs for selected strategies
@@ -1137,8 +1143,7 @@ HeuristicResult lp_guided_heuristic(const Problem& prob, std::span<const double>
     std::vector<std::vector<int32_t>> strategy_customers(num_strategies);
     for (int s = 0; s < num_strategies; ++s) {
         for (int32_t i = 0; i < n; ++i) {
-            if (i != source && i != target && strategies[s]->node_active[i] &&
-                prob.demand(i) <= Q) {
+            if (i != source && i != target && strategies[s]->node_active[i] && prob.fits_alone(i)) {
                 strategy_customers[s].push_back(i);
             }
         }
@@ -1197,7 +1202,7 @@ HeuristicResult lp_guided_heuristic(const Problem& prob, std::span<const double>
         for (int32_t round = 0; round < detail::kIlsRounds; ++round) {
             std::vector<int32_t> kicked = best_local.tour;
             std::vector<bool> kicked_in_tour;
-            double kicked_remaining_cap = 0.0;
+            detail::Residual kicked_remaining_cap;
             if (!detail::init_seed_state(prob, kicked, kicked_in_tour, kicked_remaining_cap)) {
                 break;
             }

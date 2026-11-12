@@ -3,6 +3,7 @@
 #include "core/problem.h"
 #include "sep/separation_oracle.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -29,6 +30,77 @@ inline constexpr double kLsEpsTie = 1e-12;
 inline constexpr double kBigEdgeCost = 1e15;
 inline constexpr int32_t kIlsRounds = 8;
 inline constexpr int32_t kKickTrials = 16;
+
+/// Remaining capacity of every capacity row of a route: rem_k = Q_k minus the
+/// row-k demand of the nodes on it. Each predicate holds when it holds for
+/// every row, so a route the heuristic keeps is feasible under all of them.
+/// With one row each one is the scalar test it replaces, operation for
+/// operation.
+class Residual {
+public:
+    Residual() = default;
+
+    /// Q_k minus the mandatory endpoints' demands: the depot once for tours,
+    /// source and target for paths.
+    explicit Residual(const Problem& prob) : rem_(prob.capacities()) {
+        const int32_t m = prob.num_capacities();
+        for (int32_t k = 0; k < m; ++k) {
+            rem_[k] = prob.capacity(k) - prob.demand(k, prob.source());
+            if (!prob.is_tour()) {
+                rem_[k] -= prob.demand(k, prob.target());
+            }
+        }
+    }
+
+    [[nodiscard]] double operator[](int32_t k) const { return rem_[k]; }
+    [[nodiscard]] int32_t size() const { return static_cast<int32_t>(rem_.size()); }
+
+    /// Every row has rem_k >= floor.
+    [[nodiscard]] bool at_least(double floor) const {
+        return std::ranges::all_of(rem_, [floor](double r) { return r >= floor; });
+    }
+
+    /// Node v can be added: d^k_v <= rem_k for every row.
+    [[nodiscard]] bool fits(const Problem& prob, int32_t v) const {
+        for (int32_t k = 0; k < size(); ++k) {
+            if (prob.demand(k, v) > rem_[k]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// Swapping out for in leaves rem_k + d^k_out - d^k_in >= -eps on every row.
+    [[nodiscard]] bool fits_swap(const Problem& prob, int32_t out, int32_t in, double eps) const {
+        for (int32_t k = 0; k < size(); ++k) {
+            if (rem_[k] + prob.demand(k, out) - prob.demand(k, in) < -eps) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void take(const Problem& prob, int32_t v) {
+        for (int32_t k = 0; k < size(); ++k) {
+            rem_[k] -= prob.demand(k, v);
+        }
+    }
+
+    void give(const Problem& prob, int32_t v) {
+        for (int32_t k = 0; k < size(); ++k) {
+            rem_[k] += prob.demand(k, v);
+        }
+    }
+
+    void swap(const Problem& prob, int32_t out, int32_t in) {
+        for (int32_t k = 0; k < size(); ++k) {
+            rem_[k] = rem_[k] + prob.demand(k, out) - prob.demand(k, in);
+        }
+    }
+
+private:
+    std::vector<double> rem_;
+};
 
 struct TourCandidate {
     std::vector<int32_t> tour;
@@ -62,13 +134,13 @@ double tour_objective(const Problem& prob, const std::vector<int32_t>& tour);
 /// Greedy insertion: insert customers in given order at their cheapest
 /// position. When edge_active is non-empty, only active edges are considered.
 void greedy_insert(const Problem& prob, std::vector<int32_t>& tour, std::vector<bool>& in_tour,
-                   double& remaining_cap, const std::vector<int32_t>& order,
+                   Residual& remaining_cap, const std::vector<int32_t>& order,
                    const std::vector<bool>& edge_active = {});
 
 /// Run local search neighborhoods until no improvement or iteration limit.
 /// When edge_active is non-empty, only active edges are considered.
 int local_search(const Problem& prob, std::vector<int32_t>& tour, std::vector<bool>& in_tour,
-                 double& remaining_cap, const std::vector<bool>& edge_active = {},
+                 Residual& remaining_cap, const std::vector<bool>& edge_active = {},
                  int max_iter_per_start = kDefaultLsMaxIterPerStart);
 
 inline bool seed_uses_active_edges(const Problem& prob, std::span<const int32_t> tour,
@@ -82,7 +154,7 @@ inline bool seed_uses_active_edges(const Problem& prob, std::span<const int32_t>
 }
 
 bool init_seed_state(const Problem& prob, std::span<const int32_t> tour, std::vector<bool>& in_tour,
-                     double& remaining_cap);
+                     Residual& remaining_cap);
 
 /// SplitMix64 for deterministic index mixing (no RNG state, no time seeding).
 inline uint64_t mix64(uint64_t x) {
@@ -102,7 +174,7 @@ inline uint64_t deterministic_kick_key(int32_t start_index, int32_t round_index,
 }
 
 bool perturb_swap_kick(const Problem& prob, std::vector<int32_t>& tour, std::vector<bool>& in_tour,
-                       double& remaining_cap, const std::vector<bool>& edge_active,
+                       Residual& remaining_cap, const std::vector<bool>& edge_active,
                        int32_t start_index, int32_t round_index);
 
 bool perturb_relocate_kick(const Problem& prob, std::vector<int32_t>& tour,
@@ -110,7 +182,7 @@ bool perturb_relocate_kick(const Problem& prob, std::vector<int32_t>& tour,
                            int32_t round_index);
 
 inline bool perturb_deterministic(const Problem& prob, std::vector<int32_t>& tour,
-                                  std::vector<bool>& in_tour, double& remaining_cap,
+                                  std::vector<bool>& in_tour, Residual& remaining_cap,
                                   const std::vector<bool>& edge_active, int32_t start_index,
                                   int32_t round_index) {
     if (perturb_swap_kick(prob, tour, in_tour, remaining_cap, edge_active, start_index,

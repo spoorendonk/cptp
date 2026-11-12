@@ -24,6 +24,12 @@ namespace cptp {
 
 namespace {
 
+/// A capacity row enters the model when 0 < Q_k < 1e17; a zero or huge
+/// capacity means the row is absent, as for the single row before.
+bool capacity_row_bounded(const Problem& prob, int32_t k) {
+    return prob.capacity(k) > 0 && prob.capacity(k) < 1e17;
+}
+
 bool should_run_rc_fixing(const RCFixingSettings& settings, bool ub_improved,
                           int64_t ub_improvements, int64_t propagator_calls,
                           bool adaptive_disabled) {
@@ -96,9 +102,13 @@ void HiGHSBridge::build_formulation() {
     col_lower[m + prob_.source()] = 1.0;
     col_lower[m + prob_.target()] = 1.0;
 
-    // Fix unreachable nodes: demand-reachability preprocessing
-    if (prob_.capacity() > 0 && prob_.capacity() < 1e17) {
-        auto reachable = preprocess::demand_reachability(prob_);
+    // Fix unreachable nodes: demand-reachability preprocessing, per bounded
+    // capacity row (unreachable under one row is unreachable under all).
+    for (int32_t k = 0; k < prob_.num_capacities(); ++k) {
+        if (!capacity_row_bounded(prob_, k)) {
+            continue;
+        }
+        auto reachable = preprocess::demand_reachability(prob_, k);
         for (int32_t i = 0; i < n; ++i) {
             if (!reachable[i] && i != prob_.source() && i != prob_.target()) {
                 col_upper[m + i] = 0.0;
@@ -207,19 +217,22 @@ void HiGHSBridge::build_formulation() {
         highs_.addRow(0.0, 0.0, static_cast<int>(indices.size()), indices.data(), values.data());
     }
 
-    // 2. Capacity constraint: sum(demand_i * y_i) <= Q
-    if (prob_.capacity() > 0 && prob_.capacity() < 1e17) {
+    // 2. Capacity constraints: sum(demand^k_i * y_i) <= Q_k, one row per k
+    for (int32_t k = 0; k < prob_.num_capacities(); ++k) {
+        if (!capacity_row_bounded(prob_, k)) {
+            continue;
+        }
         std::vector<int> indices;
         std::vector<double> values;
         for (int32_t i = 0; i < n; ++i) {
-            double d = prob_.demand(i);
+            double d = prob_.demand(k, i);
             if (d > 0) {
                 indices.push_back(m + i);
                 values.push_back(d);
             }
         }
         if (!indices.empty()) {
-            highs_.addRow(-kHighsInf, prob_.capacity(), static_cast<int>(indices.size()),
+            highs_.addRow(-kHighsInf, prob_.capacity(k), static_cast<int>(indices.size()),
                           indices.data(), values.data());
         }
     }

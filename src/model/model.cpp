@@ -327,16 +327,19 @@ void Model::build_problem() {
         return;
     }
 
-    // Use demands/capacity from first capacity resource, or defaults
-    std::vector<double> demands(num_nodes_, 0.0);
-    double capacity = 1e18;
-
+    // One capacity row per capacity resource, in the order added; with none,
+    // a single unbounded row.
+    std::vector<std::vector<double>> demand_rows;
+    std::vector<double> capacities;
     for (const auto& res : resources_) {
         if (res.type == Resource::Type::Capacity) {
-            demands = res.node_consumption;
-            capacity = res.limit;
-            break;
+            demand_rows.push_back(res.node_consumption);
+            capacities.push_back(res.limit);
         }
+    }
+    if (demand_rows.empty()) {
+        demand_rows.emplace_back(num_nodes_, 0.0);
+        capacities.push_back(1e18);
     }
 
     if (profits_.empty()) {
@@ -344,7 +347,7 @@ void Model::build_problem() {
     }
 
     problem_.build(num_nodes_, edges_, std::move(edge_costs_), std::move(profits_),
-                   std::move(demands), capacity, source_, target_);
+                   std::move(demand_rows), std::move(capacities), source_, target_);
     built_ = true;
 }
 

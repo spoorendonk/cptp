@@ -83,13 +83,15 @@ Problem load_tsplib(const std::filesystem::path& path) {
 
     std::unordered_map<std::string, std::string> header;
     int32_t dimension = 0;
-    int32_t capacity = 0;
+    // One value per capacity row: "CAPACITY : Q_1 .. Q_m" (m = 1 when absent).
+    std::vector<double> capacities;
     std::string edge_weight_type;
 
     // Coordinate, demand, and profit data
     std::vector<double> x_coords;
     std::vector<double> y_coords;
-    std::vector<double> demands;
+    // demand_rows[k][v]; DEMAND_SECTION lines are "id d_1 .. d_m".
+    std::vector<std::vector<double>> demand_rows;
     std::vector<double> profits;
     int32_t depot = 0;
     bool profit_section_used = false;
@@ -147,9 +149,18 @@ Problem load_tsplib(const std::filesystem::path& path) {
                     }
                 }
                 if (key == "CAPACITY") {
-                    capacity = std::stoi(val);
-                    if (capacity < 0) {
-                        throw std::runtime_error("TSPLIB: CAPACITY must be non-negative");
+                    capacities.clear();
+                    std::istringstream iss(val);
+                    std::string tok;
+                    while (iss >> tok) {
+                        const int32_t q = std::stoi(tok);
+                        if (q < 0) {
+                            throw std::runtime_error("TSPLIB: CAPACITY must be non-negative");
+                        }
+                        capacities.push_back(static_cast<double>(q));
+                    }
+                    if (capacities.empty()) {
+                        throw std::runtime_error("TSPLIB: CAPACITY has no value");
                     }
                 }
                 if (key == "EDGE_WEIGHT_TYPE") {
@@ -176,9 +187,26 @@ Problem load_tsplib(const std::filesystem::path& path) {
         if (section == Section::Demand) {
             std::istringstream iss(line);
             int id;
+            if (!(iss >> id)) {
+                continue;
+            }
+            std::vector<double> row;
             double d;
-            if (iss >> id >> d) {
-                demands.push_back(d);
+            while (iss >> d) {
+                row.push_back(d);
+            }
+            if (row.empty()) {
+                continue;
+            }
+            if (demand_rows.empty()) {
+                demand_rows.resize(row.size());
+            } else if (row.size() != demand_rows.size()) {
+                throw std::runtime_error(
+                    "TSPLIB: DEMAND_SECTION lines have different numbers of "
+                    "demand columns");
+            }
+            for (size_t k = 0; k < row.size(); ++k) {
+                demand_rows[k].push_back(row[k]);
             }
             continue;
         }
@@ -298,9 +326,22 @@ Problem load_tsplib(const std::filesystem::path& path) {
         }
     }
 
-    // Default demands and profits if not provided
-    if (demands.empty()) {
-        demands.assign(dimension, 0.0);
+    // Default demands and capacities if not provided; one capacity per row.
+    if (capacities.empty()) {
+        capacities.assign(demand_rows.empty() ? 1 : demand_rows.size(), 0.0);
+    }
+    if (demand_rows.empty()) {
+        demand_rows.assign(capacities.size(), std::vector<double>(dimension, 0.0));
+    }
+    if (demand_rows.size() != capacities.size()) {
+        throw std::runtime_error("TSPLIB: CAPACITY has " + std::to_string(capacities.size()) +
+                                 " values but DEMAND_SECTION has " +
+                                 std::to_string(demand_rows.size()) + " demand columns");
+    }
+    for (const auto& row : demand_rows) {
+        if (row.size() != static_cast<size_t>(dimension)) {
+            throw std::runtime_error("TSPLIB: DEMAND_SECTION must have DIMENSION lines");
+        }
     }
     // If profits were read from NODE_WEIGHT_SECTION, convert:
     // node weights are costs (positive = cost, negative = profit).
@@ -316,14 +357,16 @@ Problem load_tsplib(const std::filesystem::path& path) {
         profits.assign(dimension, 0.0);
     }
     // Depot gets demand 0
-    if (demands.size() > static_cast<size_t>(depot)) {
-        demands[depot] = 0.0;
+    for (auto& row : demand_rows) {
+        if (row.size() > static_cast<size_t>(depot)) {
+            row[depot] = 0.0;
+        }
     }
 
     Problem prob;
     prob.name = header.contains("NAME") ? header["NAME"] : path.stem().string();
-    prob.build(dimension, edges, edge_costs, profits, demands, static_cast<double>(capacity), depot,
-               depot);
+    prob.build(dimension, edges, std::move(edge_costs), std::move(profits), std::move(demand_rows),
+               std::move(capacities), depot, depot);
     return prob;
 }
 
@@ -334,21 +377,40 @@ Problem load_numeric(const std::filesystem::path& path) {
     }
 
     // Numeric format:
-    // Line 1: num_nodes num_arcs
-    // Next num_nodes lines: node_id profit demand
+    // Line 1: num_nodes num_arcs [m]       (m capacity rows, default 1)
+    // Next num_nodes lines: node_id profit demand_1 .. demand_m
     // Next num_arcs lines: tail head cost (directed arcs)
-    // Last line (optional): capacity
+    // Then (optional): capacity_1 .. capacity_m
+    // Then (optional): source target
 
-    int32_t num_nodes;
-    int32_t num_arcs;
-    f >> num_nodes >> num_arcs;
+    int32_t num_nodes = 0;
+    int32_t num_arcs = 0;
+    int32_t num_rows = 1;
+    std::string first;
+    while (std::getline(f, first) && trim(first).empty()) {
+    }
+    {
+        std::istringstream iss(first);
+        if (!(iss >> num_nodes >> num_arcs)) {
+            throw std::runtime_error("numeric: first line must be \"num_nodes num_arcs [m]\"");
+        }
+        if (int32_t rows = 0; iss >> rows) {
+            if (rows < 1) {
+                throw std::runtime_error("numeric: the number of capacity rows must be positive");
+            }
+            num_rows = rows;
+        }
+    }
 
     std::vector<double> profits(num_nodes);
-    std::vector<double> demands(num_nodes);
+    std::vector<std::vector<double>> demand_rows(num_rows, std::vector<double>(num_nodes));
 
     for (int32_t i = 0; i < num_nodes; ++i) {
         int32_t id;
-        f >> id >> profits[i] >> demands[i];
+        f >> id >> profits[i];
+        for (int32_t k = 0; k < num_rows; ++k) {
+            f >> demand_rows[k][i];
+        }
     }
 
     // Read directed arcs, convert to undirected edges (keep only i < j)
@@ -366,9 +428,15 @@ Problem load_numeric(const std::filesystem::path& path) {
         }
     }
 
-    double capacity = 1e18;
-    if (f >> capacity) {
-        // capacity was present
+    std::vector<double> capacities(num_rows, 1e18);
+    for (int32_t k = 0; k < num_rows; ++k) {
+        if (!(f >> capacities[k])) {
+            if (k > 0) {
+                throw std::runtime_error("numeric: expected " + std::to_string(num_rows) +
+                                         " capacities");
+            }
+            break;  // no capacity line: as before, the failed read leaves 0
+        }
     }
 
     // Optionally read source and target nodes (default: 0 0 = tour)
@@ -380,7 +448,8 @@ Problem load_numeric(const std::filesystem::path& path) {
 
     Problem prob;
     prob.name = path.stem().string();
-    prob.build(num_nodes, edges, edge_costs, profits, demands, capacity, source, target);
+    prob.build(num_nodes, edges, std::move(edge_costs), std::move(profits), std::move(demand_rows),
+               std::move(capacities), source, target);
     return prob;
 }
 

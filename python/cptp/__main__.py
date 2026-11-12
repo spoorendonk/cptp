@@ -8,7 +8,7 @@ from cptp._cptp import load as _load
 
 
 def _rebuild_with_endpoints(problem: Problem, source: int, target: int) -> Problem:
-    """Rebuild a Problem with overridden source/target."""
+    """Rebuild a Problem with overridden source/target, keeping every capacity row."""
     import numpy as np
 
     return Problem(
@@ -16,8 +16,8 @@ def _rebuild_with_endpoints(problem: Problem, source: int, target: int) -> Probl
         edges=np.array(problem.graph_edges()),
         edge_costs=np.array(problem.edge_costs),
         profits=np.array(problem.profits),
-        demands=np.array(problem.demands),
-        capacity=problem.capacity,
+        demands=problem.demand_rows,
+        capacities=np.array(problem.capacities),
         source=source,
         target=target,
         name=problem.name,

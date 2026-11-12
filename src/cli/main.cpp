@@ -246,8 +246,13 @@ int main(int argc, char* argv[]) try {
             for (auto e : g.edges()) {
                 edges.push_back({g.edge_source(e), g.edge_target(e)});
             }
-            problem.build(problem.num_nodes(), edges, problem.edge_costs(), problem.profits(),
-                          problem.demands(), problem.capacity(), src, tgt);
+            // Copies first: build() replaces the vectors these refer to.
+            auto edge_costs = problem.edge_costs();
+            auto profits = problem.profits();
+            auto demand_rows = problem.demand_rows();
+            auto capacities = problem.capacities();
+            problem.build(problem.num_nodes(), edges, std::move(edge_costs), std::move(profits),
+                          std::move(demand_rows), std::move(capacities), src, tgt);
         }
 
         std::cout << "Instance: " << problem.name << " (" << problem.num_nodes() << " nodes, "
@@ -256,6 +261,9 @@ int main(int argc, char* argv[]) try {
             std::cout << ", tour from depot " << problem.source();
         } else {
             std::cout << ", path " << problem.source() << " -> " << problem.target();
+        }
+        if (problem.num_capacities() > 1) {
+            std::cout << ", " << problem.num_capacities() << " capacity rows";
         }
         std::cout << ")\n";
 

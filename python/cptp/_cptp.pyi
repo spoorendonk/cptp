@@ -76,6 +76,10 @@ class Problem:
     @overload
     def __init__(self, num_nodes: int, edges: Annotated[NDArray[numpy.int32], dict(shape=(None, 2))], edge_costs: Annotated[NDArray[numpy.float64], dict(shape=(None,))], profits: Annotated[NDArray[numpy.float64], dict(shape=(None,))], demands: Annotated[NDArray[numpy.float64], dict(shape=(None,))], capacity: float, source: int = 0, target: int = 0, name: str = '') -> None: ...
 
+    @overload
+    def __init__(self, num_nodes: int, edges: Annotated[NDArray[numpy.int32], dict(shape=(None, 2))], edge_costs: Annotated[NDArray[numpy.float64], dict(shape=(None,))], profits: Annotated[NDArray[numpy.float64], dict(shape=(None,))], demands: Annotated[NDArray[numpy.float64], dict(shape=(None, None))], capacities: Annotated[NDArray[numpy.float64], dict(shape=(None,))], source: int = 0, target: int = 0, name: str = '') -> None:
+        """Build with m capacity rows: demands is (m, n), capacities is (m,)"""
+
     @property
     def name(self) -> str: ...
 
@@ -95,7 +99,16 @@ class Problem:
     def target(self) -> int: ...
 
     @property
-    def capacity(self) -> float: ...
+    def capacity(self) -> float:
+        """Capacity of row 0 (the only row when num_capacities == 1)"""
+
+    @property
+    def num_capacities(self) -> int:
+        """Number of capacity rows m; a solution satisfies all of them"""
+
+    @property
+    def capacities(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]:
+        """(m,) capacities Q_k, a read-only view"""
 
     @property
     def is_tour(self) -> bool: ...
@@ -107,7 +120,12 @@ class Problem:
     def profits(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]: ...
 
     @property
-    def demands(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]: ...
+    def demands(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None,), writable=False)]:
+        """(n,) demands of row 0, a read-only view"""
+
+    @property
+    def demand_rows(self) -> Annotated[NDArray[numpy.float64], dict(shape=(None, None))]:
+        """(m, n) demands d^k_i of every row, a copy"""
 
     def graph_edges(self) -> Annotated[NDArray[numpy.int32], dict(shape=(None, 2))]:
         """Return (m, 2) numpy array of (tail, head) pairs"""
@@ -129,7 +147,10 @@ class Model:
 
     def set_profits(self, profits: Annotated[NDArray[numpy.float64], dict(shape=(None,))]) -> None: ...
 
-    def add_capacity_resource(self, demands: Annotated[NDArray[numpy.float64], dict(shape=(None,))], limit: float) -> None: ...
+    def add_capacity_resource(self, demands: Annotated[NDArray[numpy.float64], dict(shape=(None,))], limit: float) -> None:
+        """
+        Add a capacity row sum_i demands[i] * y_i <= limit; every row added is enforced
+        """
 
     def solve(self, options: Sequence[tuple[str, str]] = []) -> SolveResult: ...
 
