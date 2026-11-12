@@ -793,20 +793,19 @@ void HiGHSBridge::install_propagator() {
                 // costs) bounds them all. z_LP + (edge_lb - z_LR), the bound
                 // used before, stands in z_LP for the Lagrangian bound
                 // base + z_LR, and overestimates whenever that is below z_LP.
+                // HiGHS has already put degenerate duals into col_dual for
+                // basic columns at a bound (computeBasicDegenerateDuals, just
+                // before the propagator). The bound survives: a tour with
+                // x_j != x*_j there costs more than the upper limit anyway,
+                // and for the others the extra d_j (x_j - x*_j) is <= 0.
                 double rc_dot_x = 0.0;
                 for (size_t j = 0; j < lp_sol.col_dual.size(); ++j) {
                     rc_dot_x += lp_sol.col_dual[j] * lp_sol.col_value[j];
                 }
                 const double base = lp.getObjective() - rc_dot_x;
 
-                // Build reduced-cost edge weights and node profits.
-                // RC for variable j = c_j - dual info. For MIP columns at LP:
-                //   rc_j = col_dual[j] (HiGHS stores reduced costs in col_dual)
-                // The Lagrangian edge cost = original_cost + rc (reduced cost acts as
-                // perturbation). Actually, the reduced cost already IS the Lagrangian
-                // cost relative to the LP basis. For labeling: use rc_j directly as the
-                // edge weight. For y-vars: rc_{m+i} as the negative profit
-                // contribution.
+                // Labeling weights: rc_e = col_dual[e] per edge, and
+                // -col_dual[m+i] as node i's profit.
                 if (ncols >= m + n) {
                     std::vector<double> rc_edge_costs(m);
                     std::vector<double> rc_profits(n);
