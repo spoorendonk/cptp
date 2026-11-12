@@ -1259,10 +1259,12 @@ SolveResult Model::solve(const SolverOptions& options) {
             std::make_unique<sep::RCISeparator>(sep::parse_capacity_rows(capacity_cut_rows)));
     }
     if (enable_multistar) {
-        bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
+        bridge.add_separator(
+            std::make_unique<sep::MultistarSeparator>(sep::parse_capacity_rows(capacity_cut_rows)));
     }
     if (enable_rglm) {
-        bridge.add_separator(std::make_unique<sep::RGLMSeparator>());
+        bridge.add_separator(
+            std::make_unique<sep::RGLMSeparator>(sep::parse_capacity_rows(capacity_cut_rows)));
     }
     if (enable_comb) {
         bridge.add_separator(std::make_unique<sep::CombSeparator>());

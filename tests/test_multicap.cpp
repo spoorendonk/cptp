@@ -6,11 +6,14 @@
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
 #include "model/model.h"
+#include "sep/multistar_separator.h"
 #include "sep/rci_separator.h"
+#include "sep/rglm_separator.h"
 #include "sep/separation_context.h"
 #include "sep/separator.h"
 
 #include <algorithm>
+#include <catch2/catch_template_test_macros.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cstdint>
@@ -334,7 +337,7 @@ LpPoint make_point(const cptp::Problem& prob) {
     return p;
 }
 
-std::vector<cptp::sep::Cut> rci_cuts(const cptp::Problem& prob, cptp::sep::CapacityRows rows) {
+std::vector<cptp::sep::Cut> cuts_of(const cptp::Problem& prob, cptp::sep::Separator& separator) {
     const auto point = make_point(prob);
     const cptp::sep::SeparationContext ctx{
         .problem = prob,
@@ -345,8 +348,37 @@ std::vector<cptp::sep::Cut> rci_cuts(const cptp::Problem& prob, cptp::sep::Capac
         .tol = 1e-6,
         .flow_tree = point.tree.get(),
     };
+    return separator.separate(ctx);
+}
+
+std::vector<cptp::sep::Cut> rci_cuts(const cptp::Problem& prob, cptp::sep::CapacityRows rows) {
     cptp::sep::RCISeparator rci(rows);
-    return rci.separate(ctx);
+    return cuts_of(prob, rci);
+}
+
+// Row 0 loose (d = 1 each, Q = 10), row 1 tight (d = 2, 2, 1, Q = 3).
+cptp::Problem make_loose_first_row() {
+    cptp::Problem prob;
+    prob.build(4, kEdges, kCosts, kProfits, std::vector<std::vector<double>>{kRows[0], kRows[1]},
+               std::vector<double>{10.0, kCaps[1]}, 0, 0);
+    return prob;
+}
+
+// Row 1 of the instance as the only row.
+cptp::Problem make_single_tight_row() {
+    cptp::Problem prob;
+    prob.build(4, kEdges, kCosts, kProfits, std::vector<std::vector<double>>{kRows[1]},
+               std::vector<double>{kCaps[1]}, 0, 0);
+    return prob;
+}
+
+void require_same_cuts(const std::vector<cptp::sep::Cut>& a, const std::vector<cptp::sep::Cut>& b) {
+    REQUIRE(a.size() == b.size());
+    for (size_t i = 0; i < a.size(); ++i) {
+        REQUIRE(a[i].indices == b[i].indices);
+        REQUIRE(a[i].values == b[i].values);
+        REQUIRE(a[i].rhs == b[i].rhs);
+    }
 }
 
 }  // namespace
@@ -373,19 +405,11 @@ TEST_CASE("Multicap: RCI separates from rows after the first", "[multicap][rci]"
 TEST_CASE("Multicap: with one row RCI is the same for every row option", "[multicap][rci]") {
     using cptp::sep::CapacityRows;
     // Row 1 of the instance as the only row, so RCI has cuts to give.
-    cptp::Problem prob;
-    prob.build(4, kEdges, kCosts, kProfits, std::vector<std::vector<double>>{kRows[1]},
-               std::vector<double>{kCaps[1]}, 0, 0);
+    const auto prob = make_single_tight_row();
     const auto all = rci_cuts(prob, CapacityRows::kAll);
     REQUIRE_FALSE(all.empty());
     for (const auto rows : {CapacityRows::kMostViolated, CapacityRows::kFirst}) {
-        const auto other = rci_cuts(prob, rows);
-        REQUIRE(other.size() == all.size());
-        for (size_t i = 0; i < all.size(); ++i) {
-            REQUIRE(other[i].indices == all[i].indices);
-            REQUIRE(other[i].values == all[i].values);
-            REQUIRE(other[i].rhs == all[i].rhs);
-        }
+        require_same_cuts(rci_cuts(prob, rows), all);
     }
 }
 
@@ -401,4 +425,46 @@ TEST_CASE("Multicap: capacity_cut_rows takes all, most_violated or first", "[mul
         REQUIRE_THAT(result.objective, WithinAbs(-18.0, 1e-6));
     }
     REQUIRE_THROWS_AS(cptp::sep::parse_capacity_rows("some"), std::invalid_argument);
+}
+
+TEMPLATE_TEST_CASE("Multicap: GLM-type cuts come from rows after the first", "[multicap][glm]",
+                   cptp::sep::MultistarSeparator, cptp::sep::RGLMSeparator) {
+    using cptp::sep::CapacityRows;
+    // At the point, S = {1, 2, 3} with x(delta(S)) = 1. Row 0 with Q = 10
+    // gives no violated multistar (0.6 < 1) or RGLM (ceil(3/10) = 1); row 1
+    // (d(S) = 5, Q = 3) gives both.
+    const auto prob = make_loose_first_row();
+    TestType first(CapacityRows::kFirst);
+    TestType all(CapacityRows::kAll);
+    TestType best(CapacityRows::kMostViolated);
+    REQUIRE(cuts_of(prob, first).empty());
+    const auto all_cuts = cuts_of(prob, all);
+    REQUIRE_FALSE(all_cuts.empty());
+    require_same_cuts(cuts_of(prob, best), all_cuts);  // one row violated: same cuts
+
+    // With one row, every option gives the same cuts.
+    const auto single = make_single_tight_row();
+    TestType single_all(CapacityRows::kAll);
+    const auto reference = cuts_of(single, single_all);
+    REQUIRE_FALSE(reference.empty());
+    for (const auto rows : {CapacityRows::kMostViolated, CapacityRows::kFirst}) {
+        TestType other(rows);
+        require_same_cuts(cuts_of(single, other), reference);
+    }
+}
+
+TEST_CASE("Multicap: most_violated keeps the most violated row's multistar", "[multicap][glm]") {
+    using cptp::sep::CapacityRows;
+    // Both rows of make_problem(2) cut S = {1, 2, 3}: row 0 by 2 - 1 = 1,
+    // row 1 by 10/3 - 1 = 7/3. all keeps both per target, most_violated row 1's.
+    const auto prob = make_problem(2);
+    cptp::sep::MultistarSeparator all(CapacityRows::kAll);
+    cptp::sep::MultistarSeparator best(CapacityRows::kMostViolated);
+    const auto all_cuts = cuts_of(prob, all);
+    const auto best_cuts = cuts_of(prob, best);
+    REQUIRE_FALSE(best_cuts.empty());
+    REQUIRE(all_cuts.size() == 2 * best_cuts.size());
+    for (const auto& cut : best_cuts) {
+        REQUIRE_THAT(cut.violation, WithinAbs(7.0 / 3.0, 1e-9));
+    }
 }
