@@ -534,9 +534,6 @@ void HiGHSBridge::install_propagator() {
     auto rc_settings = rc_settings_;
     int64_t labeling_limit = labeling_max_queue_pops_;
     const preprocess::LabelRows label_rows = label_rows_;
-    bool obj_is_integer = obj_is_integer_;
-    double mip_int_tol = 0.0;
-    highs_.getOptionValue("mip_feasibility_tolerance", mip_int_tol);
     auto rc_adaptive_disabled = std::make_shared<bool>(false);
     auto rc_low_yield_streak = std::make_shared<int32_t>(0);
 
@@ -786,14 +783,21 @@ void HiGHSBridge::install_propagator() {
                 int64_t fix0_before = stats->rc_fix0_count;
                 int64_t fix1_before = stats->rc_fix1_count;
                 const auto& lp_sol = lp.getSolution();
-                double z_LP = lp.getObjective();
-                if (obj_is_integer) {
-                    double c = std::ceil(z_LP - mip_int_tol);
-                    if (std::abs(z_LP - c) <= mip_int_tol) {
-                        z_LP = c;
-                    }
-                }
                 auto ncols = static_cast<int32_t>(lp_sol.col_dual.size());
+                // The bound behind every fixing (#114). With the LP's row
+                // duals pi and reduced costs rc, any x that satisfies the LP
+                // rows has c x = pi A x + rc x >= pi b + rc x, and
+                // pi b = z_LP - rc x* at the LP optimum x*. So every tour or
+                // path costs at least base + rc x, and a lower bound on rc x
+                // over the tours through an edge (the labeling under RC
+                // costs) bounds them all. z_LP + (edge_lb - z_LR), the bound
+                // used before, stands in z_LP for the Lagrangian bound
+                // base + z_LR, and overestimates whenever that is below z_LP.
+                double rc_dot_x = 0.0;
+                for (size_t j = 0; j < lp_sol.col_dual.size(); ++j) {
+                    rc_dot_x += lp_sol.col_dual[j] * lp_sol.col_value[j];
+                }
+                const double base = lp.getObjective() - rc_dot_x;
 
                 // Build reduced-cost edge weights and node profits.
                 // RC for variable j = c_j - dual info. For MIP columns at LP:
@@ -860,16 +864,7 @@ void HiGHSBridge::install_propagator() {
                             z_LR = rc_fwd[prob.target()];
                         }
 
-                        // Guard: skip RC fixing when the Lagrangian gap
-                        // (z_LP − z_LR) is negative or exceeds the
-                        // optimality gap.  A negative gap means z_LR > z_LP
-                        // (labeling looser than LP); a large positive gap
-                        // means the non-elementary excess overestimates
-                        // the true per-edge penalty.
-                        double lagrangian_gap = z_LP - z_LR;
-                        double optimality_gap = ub - z_LP;
-                        if (z_LR < kInf && lagrangian_gap >= 0.0 &&
-                            lagrangian_gap < optimality_gap + 1e-6) {
+                        if (z_LR < kInf) {
                             // Trigger C: Fix edges to 0
                             for (int32_t e = 0; e < m; ++e) {
                                 if (domain.col_upper_[e] < 0.5 || domain.col_lower_[e] > 0.5) {
@@ -889,8 +884,7 @@ void HiGHSBridge::install_propagator() {
                                         : kInf;
                                 double edge_lb = std::min(lb1, lb2);
 
-                                double excess = edge_lb - z_LR;
-                                if (z_LP + excess > ub + 1e-6) {
+                                if (base + edge_lb > ub + 1e-6) {
                                     domain.changeBound(HighsBoundType::kUpper, e, 0.0,
                                                        HighsDomain::Reason::unspecified());
                                     stats->rc_fix0_count++;
@@ -975,8 +969,7 @@ void HiGHSBridge::install_propagator() {
                                     if (z_LR_minus[idx] >= kInf) {
                                         continue;
                                     }
-                                    double gap = z_LR_minus[idx] - z_LR;
-                                    if (z_LP + gap > ub + 1e-6) {
+                                    if (base + z_LR_minus[idx] > ub + 1e-6) {
                                         int32_t node_i = candidates[idx];
                                         domain.changeBound(HighsBoundType::kLower, m + node_i, 1.0,
                                                            HighsDomain::Reason::unspecified());

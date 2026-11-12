@@ -257,3 +257,43 @@ TEST_CASE("rc_fixing on_ub_improvement: B-n45-k6-54", "[prove][rc_fixing][slow]"
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }
+
+TEST_CASE("rc_fixing keeps the optimum: P-n70-k10-12 with 5 rows (#114)", "[rc_fixing]") {
+    // The default solve fixed 831 edges at the root with z_LP standing in
+    // for the Lagrangian bound, and proved -34692 optimal. -40385 is the
+    // optimum (every labeling_rows value and capacity_cut_rows option).
+    for (const char* rc : {"adaptive", "root_only"}) {
+        auto prob =
+            cptp::io::load("benchmarks/instances/multicap/spprclib/m5/P-n70-k10-12-m5.sppcc");
+        cptp::Model model;
+        model.set_problem(std::move(prob));
+        auto opts = kQuiet;
+        opts.emplace_back("time_limit", "120");
+        opts.emplace_back("threads", "1");
+        opts.emplace_back("rc_fixing", rc);
+        const auto r = model.solve(opts);
+        INFO("rc_fixing = " << rc);
+        INFO("status " << static_cast<int>(r.status) << ", objective " << r.objective << ", time "
+                       << r.time_seconds);
+        REQUIRE(r.is_optimal());
+        REQUIRE_THAT(r.objective, WithinAbs(-40385.0, 1e-6));
+    }
+}
+
+TEST_CASE("rc_fixing keeps the optimum: P-n55-k7-116 with 10 rows, surrogate labeling (#114)",
+          "[rc_fixing]") {
+    // Under labeling_rows=surrogate the old bound fixed 1458 edges and
+    // proved -4000 optimal; -12155 is the optimum.
+    auto prob = cptp::io::load("benchmarks/instances/multicap/spprclib/m10/P-n55-k7-116-m10.sppcc");
+    cptp::Model model;
+    model.set_problem(std::move(prob));
+    auto opts = kQuiet;
+    opts.emplace_back("time_limit", "120");
+    opts.emplace_back("threads", "1");
+    opts.emplace_back("labeling_rows", "surrogate");
+    const auto r = model.solve(opts);
+    INFO("status " << static_cast<int>(r.status) << ", objective " << r.objective << ", time "
+                   << r.time_seconds);
+    REQUIRE(r.is_optimal());
+    REQUIRE_THAT(r.objective, WithinAbs(-12155.0, 1e-6));
+}
