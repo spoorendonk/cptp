@@ -68,6 +68,9 @@ def solve(
         capacities = np.atleast_1d(np.asarray(capacity, dtype=np.float64))
         if demand_rows.ndim != 2 or capacities.shape != (demand_rows.shape[0],):
             raise ValueError("demands must be (m, n) with one capacity per row")
+        if demand_rows.shape[0] == 0:
+            # m = 0 would add no row and solve uncapacitated.
+            raise ValueError("demands must have at least one capacity row")
         for row, limit in zip(demand_rows, capacities, strict=True):
             model.add_capacity_resource(np.ascontiguousarray(row), float(limit))
 

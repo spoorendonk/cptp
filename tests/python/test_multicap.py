@@ -120,3 +120,45 @@ def test_solve_one_dimensional_demands_unchanged() -> None:
     )
     assert result.is_optimal()
     assert result.objective == pytest.approx(-20.0)
+
+
+def test_model_strided_capacity_column() -> None:
+    """A column of an (n, m) array is read element by element, not as raw memory."""
+    by_node = np.ascontiguousarray(ROWS.T)  # (n, m): columns are strided views
+    model = Model()
+    model.set_graph(4, EDGES, np.repeat(COSTS, 2)[::2])
+    model.set_depot(0)
+    model.set_profits(np.repeat(PROFITS, 2)[::2])
+    for k in range(3):
+        model.add_capacity_resource(by_node[:, k], float(CAPS[k]))
+    result = model.solve(OPTS)
+    assert result.is_optimal()
+    assert result.objective == pytest.approx(-18.0)
+
+
+def test_problem_one_dimensional_strided_demands() -> None:
+    by_node = np.ascontiguousarray(ROWS.T)
+    prob = Problem(
+        num_nodes=4,
+        edges=EDGES,
+        edge_costs=COSTS,
+        profits=PROFITS,
+        demands=by_node[:, 1],
+        capacity=float(CAPS[1]),
+        source=0,
+        target=0,
+    )
+    np.testing.assert_array_equal(prob.demands, ROWS[1])
+
+
+def test_solve_rejects_zero_rows() -> None:
+    with pytest.raises(ValueError, match="at least one capacity row"):
+        solve(
+            num_nodes=4,
+            edges=EDGES,
+            edge_costs=COSTS,
+            profits=PROFITS,
+            demands=np.zeros((0, 4)),
+            capacity=[],
+            time_limit=30.0,
+        )

@@ -150,10 +150,12 @@ Problem load_tsplib(const std::filesystem::path& path) {
                 }
                 if (key == "CAPACITY") {
                     capacities.clear();
+                    // Leading integers, one per capacity row; reading stops at
+                    // the first other token, so trailing text such as
+                    // "100 (vehicles)" is ignored, as the single stoi did.
                     std::istringstream iss(val);
-                    std::string tok;
-                    while (iss >> tok) {
-                        const int32_t q = std::stoi(tok);
+                    int32_t q = 0;
+                    while (iss >> q) {
                         if (q < 0) {
                             throw std::runtime_error("TSPLIB: CAPACITY must be non-negative");
                         }
@@ -414,6 +416,11 @@ Problem load_numeric(const std::filesystem::path& path) {
             f >> demand_rows[k][i];
         }
     }
+    if (!f) {
+        throw std::runtime_error("numeric: expected " + std::to_string(num_nodes) +
+                                 " node lines of \"id profit\" and " + std::to_string(num_rows) +
+                                 " demands");
+    }
 
     // Read directed arcs, convert to undirected edges (keep only i < j)
     std::vector<Edge> edges;
@@ -433,14 +440,15 @@ Problem load_numeric(const std::filesystem::path& path) {
     std::vector<double> capacities(num_rows, 1e18);
     for (int32_t k = 0; k < num_rows; ++k) {
         if (!(f >> capacities[k])) {
-            if (k > 0) {
+            // The format is untagged, so with m > 1 the capacity line is
+            // required: a missing one followed by "s t" would be read as
+            // capacities, and a short one would leave rows unlimited.
+            if (num_rows > 1) {
                 throw std::runtime_error("numeric: expected " + std::to_string(num_rows) +
                                          " capacities");
             }
-            // No capacity line: at end of file row 0 keeps the "no limit"
-            // 1e18, as before; a non-numeric token reads as 0. The format is
-            // untagged, so with m > 1 the capacity line is required: a
-            // missing one followed by "s t" would be read as capacities.
+            // m = 1 without a capacity line: row 0 keeps the "no limit" 1e18,
+            // as before; a non-numeric token reads as 0.
             break;
         }
     }

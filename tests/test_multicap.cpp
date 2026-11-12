@@ -229,6 +229,27 @@ TEST_CASE("Multicap: TSPLIB loader reads m capacities and m demand columns", "[m
     std::filesystem::remove(open);
     REQUIRE(unlimited.num_capacities() == 1);
     REQUIRE(unlimited.capacity() >= 1e17);
+
+    // Trailing text after the capacity is ignored, as it was for m = 1.
+    const auto trailing = write_temp("cptp_multicap_trailing.vrp",
+                                     "NAME : trailing\nTYPE : CVRP\nDIMENSION : 3\n"
+                                     "EDGE_WEIGHT_TYPE : EUC_2D\nCAPACITY : 100 (vehicles)\n"
+                                     "NODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n"
+                                     "DEMAND_SECTION\n1 0\n2 2\n3 1\n"
+                                     "DEPOT_SECTION\n1\n-1\nEOF\n");
+    const auto one_row = cptp::io::load_tsplib(trailing);
+    std::filesystem::remove(trailing);
+    REQUIRE(one_row.num_capacities() == 1);
+    REQUIRE(one_row.capacity() == 100.0);
+
+    // A CAPACITY without a leading number is still an error.
+    const auto none = write_temp("cptp_multicap_none.vrp",
+                                 "NAME : none\nTYPE : CVRP\nDIMENSION : 3\n"
+                                 "EDGE_WEIGHT_TYPE : EUC_2D\nCAPACITY : many\n"
+                                 "NODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n"
+                                 "DEPOT_SECTION\n1\n-1\nEOF\n");
+    REQUIRE_THROWS_AS(cptp::io::load_tsplib(none), std::runtime_error);
+    std::filesystem::remove(none);
 }
 
 TEST_CASE("Multicap: numeric loader reads m rows", "[multicap][io]") {
@@ -252,4 +273,15 @@ TEST_CASE("Multicap: numeric loader reads m rows", "[multicap][io]") {
         write_temp("cptp_multicap_short.txt", "2 2 2\n0 0 0 0\n1 5 2 3\n0 1 1\n1 0 1\n4\n");
     REQUIRE_THROWS_AS(cptp::io::load_numeric(short_caps), std::runtime_error);
     std::filesystem::remove(short_caps);
+
+    // With m > 1 a missing capacity line is an error, not "no limit".
+    const auto no_caps =
+        write_temp("cptp_multicap_nocaps.txt", "2 2 2\n0 0 0 0\n1 5 2 3\n0 1 1\n1 0 1\n");
+    REQUIRE_THROWS_AS(cptp::io::load_numeric(no_caps), std::runtime_error);
+    std::filesystem::remove(no_caps);
+
+    // Truncated node lines are an error.
+    const auto truncated = write_temp("cptp_multicap_truncated.txt", "3 0 2\n0 0 0 0\n1 5 2\n");
+    REQUIRE_THROWS_AS(cptp::io::load_numeric(truncated), std::runtime_error);
+    std::filesystem::remove(truncated);
 }

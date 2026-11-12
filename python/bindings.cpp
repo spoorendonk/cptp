@@ -143,10 +143,12 @@ NB_MODULE(_cptp, m) {
             "__init__",
             [](cptp::Problem* self, int32_t num_nodes,
                const nb::ndarray<int32_t, nb::shape<-1, 2>>& edges,
-               const nb::ndarray<double, nb::shape<-1>>& edge_costs,
-               const nb::ndarray<double, nb::shape<-1>>& profits,
-               const nb::ndarray<double, nb::shape<-1>>& demands, double capacity, int32_t source,
-               int32_t target, const std::string& name) {
+               // c_contig: the 1-D arrays are read as data()..data()+n, so a
+               // strided view (e.g. D[:, k]) is converted to a dense copy first.
+               const nb::ndarray<double, nb::shape<-1>, nb::c_contig>& edge_costs,
+               const nb::ndarray<double, nb::shape<-1>, nb::c_contig>& profits,
+               const nb::ndarray<double, nb::shape<-1>, nb::c_contig>& demands, double capacity,
+               int32_t source, int32_t target, const std::string& name) {
                 new (self) cptp::Problem();
                 auto e_view = edges.view();
                 auto m = static_cast<int32_t>(edges.shape(0));
@@ -215,7 +217,7 @@ NB_MODULE(_cptp, m) {
         .def(
             "set_graph",
             [](cptp::Model& self, int32_t n, const nb::ndarray<int32_t, nb::shape<-1, 2>>& edges,
-               const nb::ndarray<double, nb::shape<-1>>& costs) {
+               const nb::ndarray<double, nb::shape<-1>, nb::c_contig>& costs) {
                 auto e_view = edges.view();
                 auto c_view = costs.view();
                 auto num_edges = static_cast<int32_t>(edges.shape(0));
@@ -233,14 +235,15 @@ NB_MODULE(_cptp, m) {
         .def("set_depot", &cptp::Model::set_depot)
         .def(
             "set_profits",
-            [](cptp::Model& self, const nb::ndarray<double, nb::shape<-1>>& profits) {
+            [](cptp::Model& self, const nb::ndarray<double, nb::shape<-1>, nb::c_contig>& profits) {
                 auto view = profits.view();
                 self.set_profits({view.data(), profits.shape(0)});
             },
             "profits"_a)
         .def(
             "add_capacity_resource",
-            [](cptp::Model& self, const nb::ndarray<double, nb::shape<-1>>& demands, double limit) {
+            [](cptp::Model& self, const nb::ndarray<double, nb::shape<-1>, nb::c_contig>& demands,
+               double limit) {
                 auto view = demands.view();
                 self.add_capacity_resource({view.data(), demands.shape(0)}, limit);
             },
