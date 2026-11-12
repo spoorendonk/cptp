@@ -249,8 +249,11 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     // --- Labeling work limit ---
     int64_t labeling_max_queue_pops = 1'000'000;
-    // Capacity rows the labeling bounds come from (#101); `first` until #92's
-    // measurement chooses the default.
+    // Capacity rows the labeling bounds come from (#101). `first` by
+    // measurement (#104: 10 multicap smoke instances x m = 2, 5, 10, median
+    // ratios vs first): `all` gains only at m = 10 (more fixings on 5/10, at
+    // 1.18x total time), `surrogate` changes nothing at ~1.0x, and `vector`
+    // costs 3x at m = 10 with labelings of up to 972 s (#115).
     std::string labeling_rows = "first";
 
     // --- Cut families ---
