@@ -248,6 +248,9 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     // --- Labeling work limit ---
     int64_t labeling_max_queue_pops = 1'000'000;
+    // Capacity rows the labeling bounds come from (#101); `first` until #92's
+    // measurement chooses the default.
+    std::string labeling_rows = "first";
 
     // --- Cut families ---
     bool enable_sec = true;
@@ -417,6 +420,11 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "labeling_max_queue_pops") {
             labeling_max_queue_pops = std::stoll(value);
+            continue;
+        }
+        if (key == "labeling_rows") {
+            preprocess::parse_label_rows(value);  // reject an unknown value here
+            labeling_rows = value;
             continue;
         }
         // --- Cut families ---
@@ -607,6 +615,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         "threads{}",
         physical_cores, logical_threads, preproc_thread_limit, simd_str);
 
+    const auto label_rows = preprocess::parse_label_rows(labeling_rows);
     std::vector<std::string> nondefault_settings;
     if (random_seed != 0) {
         nondefault_settings.push_back("random_seed=" + std::to_string(random_seed));
@@ -618,6 +627,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (labeling_max_queue_pops != 1'000'000) {
         nondefault_settings.push_back("labeling_max_queue_pops=" +
                                       std::to_string(labeling_max_queue_pops));
+    }
+    if (labeling_rows != "first") {
+        nondefault_settings.push_back("labeling_rows=" + labeling_rows);
     }
     if (all_pairs_bounds) {
         nondefault_settings.emplace_back("all_pairs_bounds=on");
@@ -860,12 +872,14 @@ SolveResult Model::solve(const SolverOptions& options) {
             logger_.log("  capacity-aware labeling (source={}, target={})", source, target);
             if (source != target) {
                 std::jthread t_fwd([&] {
-                    fwd_bounds =
-                        preprocess::labeling_from(problem_, source, labeling_max_queue_pops);
+                    fwd_bounds = preprocess::labeling_from(problem_, source,
+                                                           labeling_max_queue_pops, label_rows);
                 });
-                bwd_bounds = preprocess::labeling_from(problem_, target, labeling_max_queue_pops);
+                bwd_bounds = preprocess::labeling_from(problem_, target, labeling_max_queue_pops,
+                                                       label_rows);
             } else {
-                fwd_bounds = preprocess::labeling_from(problem_, source, labeling_max_queue_pops);
+                fwd_bounds = preprocess::labeling_from(problem_, source, labeling_max_queue_pops,
+                                                       label_rows);
                 bwd_bounds = fwd_bounds;
             }
             if (fwd_bounds.empty() || bwd_bounds.empty()) {
@@ -966,7 +980,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                 parallel::parallel_for(
                     0, n,
                     [&](int s) {
-                        auto row = preprocess::forward_labeling(problem_, s);
+                        auto row = preprocess::labeling_from(problem_, s, 0, label_rows);
                         std::ranges::copy(row, all_pairs.begin() + static_cast<ptrdiff_t>(s) * n);
                     },
                     preproc_thread_limit);
@@ -1061,6 +1075,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_upper_bound(warm_start_ub);
     bridge.set_rc_fixing(rc_settings);
     bridge.set_labeling_max_queue_pops(labeling_max_queue_pops);
+    bridge.set_label_rows(label_rows);
     bridge.set_edge_elimination(edge_elimination);
     bridge.set_edge_elimination_nodes(edge_elimination_nodes);
     bridge.set_heuristic_node_interval(heu_lpg_node_interval);

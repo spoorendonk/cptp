@@ -3,6 +3,7 @@
 #include "core/problem.h"
 #include "core/solution.h"
 #include "Highs.h"
+#include "preprocess/edge_elimination.h"
 #include "sep/separation_context.h"
 #include "sep/separation_oracle.h"
 #include "sep/separator.h"
@@ -108,6 +109,7 @@ public:
     /// Configure Lagrangian reduced-cost fixing in the propagator.
     void set_rc_fixing(RCFixingSettings settings) { rc_settings_ = settings; }
     void set_labeling_max_queue_pops(int64_t limit) { labeling_max_queue_pops_ = limit; }
+    void set_label_rows(preprocess::LabelRows rows) { label_rows_ = rows; }
     void set_edge_elimination(bool enable) { edge_elimination_enabled_ = enable; }
 
     /// True if all objective coefficients are integer-valued (detected in
@@ -205,6 +207,7 @@ private:
     bool propagator_installed_ = false;
     bool obj_is_integer_ = false;  // true if all obj coefficients are integral
     int64_t labeling_max_queue_pops_ = 0;
+    preprocess::LabelRows label_rows_ = preprocess::LabelRows::kFirst;
     RCFixingSettings rc_settings_;
 
     // Cut statistics (updated from callback)

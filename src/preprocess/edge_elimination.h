@@ -1,11 +1,15 @@
 #pragma once
 
 #include "core/problem.h"
+#include "sep/separator.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace cptp::preprocess {
@@ -17,30 +21,49 @@ struct Label {
     double demand;  // accumulated demand along path
 };
 
-/// Capacity-aware labeling from a given root node, with custom edge costs and
-/// node profits.
+/// Which capacity rows the labeling bounds come from (#101).
+enum class LabelRows {
+    kFirst,  ///< row 0 only (the single-row behaviour)
+    kAll,    ///< row 0 and every row k >= 1 with Q_k < kInfiniteCapacity, combined
+};
+
+/// Parse the `labeling_rows` option: "first" or "all".
+inline LabelRows parse_label_rows(std::string_view value) {
+    if (value == "first") {
+        return LabelRows::kFirst;
+    }
+    if (value == "all") {
+        return LabelRows::kAll;
+    }
+    throw std::invalid_argument("labeling_rows must be first or all, got '" + std::string(value) +
+                                "'");
+}
+
+/// Capacity-aware labeling from a given root node under capacity row k alone,
+/// with custom edge costs and node profits.
 ///
 /// For each node v, computes the minimum net cost f[v] to reach v from root
-/// via any (possibly non-elementary) path that respects vehicle capacity.
+/// via any (possibly non-elementary) path that respects row k's capacity.
 ///
 /// Net cost = sum of edge costs along path - sum of profits of visited nodes
 /// (excluding root profit, which is always collected... see seed below).
 ///
-/// Returns f[v] for each node. f[root] = -profits[root].
-inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
-                                         std::span<const double> edge_costs,
-                                         std::span<const double> profits,
-                                         int64_t max_queue_pops = 0) {
+/// Returns f[v] for each node, f[root] = -profits[root]; empty when the
+/// budget of max_queue_pops (0 = none) runs out.
+inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32_t k,
+                                        std::span<const double> edge_costs,
+                                        std::span<const double> profits,
+                                        int64_t max_queue_pops = 0) {
     const int32_t n = prob.num_nodes();
     const auto& graph = prob.graph();
-    const double Q = prob.capacity();
+    const double Q = prob.capacity(k);
     constexpr double kInf = std::numeric_limits<double>::infinity();
 
     std::vector<std::vector<Label>> labels(n);
     std::vector<double> best_cost(n, kInf);
 
     double root_cost = -profits[root];
-    double root_demand = prob.demand(root);
+    double root_demand = prob.demand(k, root);
     labels[root].push_back({root_cost, root_demand});
     best_cost[root] = root_cost;
 
@@ -66,7 +89,7 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
         for (auto e : graph.incident_edges(u)) {
             int32_t v = graph.other_endpoint(e, u);
 
-            double new_demand = lbl.demand + prob.demand(v);
+            double new_demand = lbl.demand + prob.demand(k, v);
             if (new_demand > Q) {
                 continue;
             }
@@ -100,10 +123,40 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
     return best_cost;
 }
 
+/// Capacity-aware labeling from root (see labeling_row) over the rows `rows`
+/// names. Each row's f_k[v] is a lower bound on the net cost of reaching v
+/// under all rows (it relaxes the others), so their maximum is one too:
+/// f[v] = max_k f_k[v]. Row 0 alone is the single-row labeling. Empty when
+/// any row's labeling runs out of budget (max_queue_pops per row).
+inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
+                                         std::span<const double> edge_costs,
+                                         std::span<const double> profits,
+                                         int64_t max_queue_pops = 0,
+                                         LabelRows rows = LabelRows::kFirst) {
+    auto best = labeling_row(prob, root, 0, edge_costs, profits, max_queue_pops);
+    if (rows == LabelRows::kFirst || best.empty()) {
+        return best;
+    }
+    for (int32_t k = 1; k < prob.num_capacities(); ++k) {
+        if (prob.capacity(k) >= sep::kInfiniteCapacity) {
+            continue;  // no limit: its labeling is never above row 0's
+        }
+        const auto row = labeling_row(prob, root, k, edge_costs, profits, max_queue_pops);
+        if (row.empty()) {
+            return {};
+        }
+        for (size_t v = 0; v < best.size(); ++v) {
+            best[v] = std::max(best[v], row[v]);
+        }
+    }
+    return best;
+}
+
 /// Capacity-aware labeling using the problem's own costs.
 inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
-                                         int64_t max_queue_pops = 0) {
-    return labeling_from(prob, root, prob.edge_costs(), prob.profits(), max_queue_pops);
+                                         int64_t max_queue_pops = 0,
+                                         LabelRows rows = LabelRows::kFirst) {
+    return labeling_from(prob, root, prob.edge_costs(), prob.profits(), max_queue_pops, rows);
 }
 
 /// Forward labeling from a given source node (wrapper for labeling_from).

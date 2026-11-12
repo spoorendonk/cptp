@@ -7,6 +7,7 @@
 #include "heuristic/primal_heuristic.h"
 #include "model/hyperplane.h"
 #include "model/model.h"
+#include "preprocess/edge_elimination.h"
 #include "sep/multistar_separator.h"
 #include "sep/rci_separator.h"
 #include "sep/rglm_separator.h"
@@ -530,4 +531,65 @@ TEST_CASE("Multicap: rows with Q_k = 0 or no limit give no hyperplane", "[multic
     REQUIRE(gen.rows() == std::vector<int32_t>{0, 3});
     REQUIRE(names_of(hyperplanes_at_half(prob, "demand")) ==
             std::vector<std::string>{"demand", "demand_row3"});
+}
+
+TEST_CASE("Multicap: labeling over all rows fixes an edge row 0 alone does not",
+          "[multicap][labeling]") {
+    using cptp::preprocess::LabelRows;
+    // Tour from depot 0 over customers 1 (profit 5) and 2 (profit 1); edges
+    // (0,1) cost 10, (0,2) and (1,2) cost 1. Row 0 (d = 1, 1; Q = 2) admits
+    // both, row 1 (d = 2, 2; Q = 3) only one, and each fits alone, so demand
+    // reachability fixes nothing. The best tour is empty (0), so UB = 0.
+    // Row 0 reaches 1 cheaply via 2: f[1] = 2 - 6 = -4, f[2] = 0, and edge
+    // (1,2) has lb = -4 + 1 + 0 = -3. Row 1 must go direct: f[1] = 10 - 5 = 5,
+    // lb = 5 + 1 + 0 = 6 > 0.
+    cptp::Problem prob;
+    prob.build(3, std::vector<cptp::Edge>{{0, 1}, {0, 2}, {1, 2}},
+               std::vector<double>{10.0, 1.0, 1.0}, std::vector<double>{0.0, 5.0, 1.0},
+               std::vector<std::vector<double>>{{0.0, 1.0, 1.0}, {0.0, 2.0, 2.0}},
+               std::vector<double>{2.0, 3.0}, 0, 0);
+    const auto first = cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kFirst);
+    const auto all = cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kAll);
+    REQUIRE_THAT(first[1], WithinAbs(-4.0, 1e-9));
+    REQUIRE_THAT(all[1], WithinAbs(5.0, 1e-9));
+    for (int32_t v = 0; v < prob.num_nodes(); ++v) {
+        REQUIRE(all[v] >= first[v]);
+    }
+    const double depot_profit = prob.profit(0);
+    const auto elim_first =
+        cptp::preprocess::edge_elimination(prob, first, first, 0.0, depot_profit);
+    const auto elim_all = cptp::preprocess::edge_elimination(prob, all, all, 0.0, depot_profit);
+    constexpr int32_t kEdge12 = 2;
+    REQUIRE_FALSE(elim_first[kEdge12]);
+    REQUIRE(elim_all[kEdge12]);
+}
+
+TEST_CASE("Multicap: with one row the labeling is the same for both row options",
+          "[multicap][labeling]") {
+    using cptp::preprocess::LabelRows;
+    const auto prob = make_problem(1);
+    for (int32_t root = 0; root < prob.num_nodes(); ++root) {
+        REQUIRE(cptp::preprocess::labeling_from(prob, root, 0, LabelRows::kAll) ==
+                cptp::preprocess::labeling_from(prob, root, 0, LabelRows::kFirst));
+    }
+}
+
+TEST_CASE("Multicap: labeling_rows = all keeps every row's optimum", "[multicap][labeling]") {
+    struct Case {
+        int32_t rows;
+        double objective;
+    };
+    for (const auto& c : {Case{1, -29.0}, Case{2, -20.0}, Case{3, -18.0}}) {
+        INFO("m = " << c.rows);
+        cptp::Model model;
+        fill_model(model, c.rows);
+        model.set_depot(0);
+        auto opts = kQuiet;
+        opts.emplace_back("labeling_rows", "all");
+        const auto result = model.solve(opts);
+        REQUIRE(result.is_optimal());
+        REQUIRE_THAT(result.objective, WithinAbs(c.objective, 1e-6));
+        require_tour_fits(model.problem(), result.tour);
+    }
+    REQUIRE_THROWS_AS(cptp::preprocess::parse_label_rows("every"), std::invalid_argument);
 }

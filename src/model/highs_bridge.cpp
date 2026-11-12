@@ -533,6 +533,7 @@ void HiGHSBridge::install_propagator() {
     auto stats = stats_;
     auto rc_settings = rc_settings_;
     int64_t labeling_limit = labeling_max_queue_pops_;
+    const preprocess::LabelRows label_rows = label_rows_;
     bool obj_is_integer = obj_is_integer_;
     double mip_int_tol = 0.0;
     highs_.getOptionValue("mip_feasibility_tolerance", mip_int_tol);
@@ -823,16 +824,18 @@ void HiGHSBridge::install_propagator() {
                     std::vector<double> rc_bwd;
                     if (prob.is_tour()) {
                         rc_fwd = preprocess::labeling_from(prob, prob.source(), rc_edge_costs,
-                                                           rc_profits, labeling_limit);
+                                                           rc_profits, labeling_limit, label_rows);
                         rc_bwd = rc_fwd;
                     } else {
                         {
                             std::jthread t_fwd([&] {
-                                rc_fwd = preprocess::labeling_from(
-                                    prob, prob.source(), rc_edge_costs, rc_profits, labeling_limit);
+                                rc_fwd = preprocess::labeling_from(prob, prob.source(),
+                                                                   rc_edge_costs, rc_profits,
+                                                                   labeling_limit, label_rows);
                             });
-                            rc_bwd = preprocess::labeling_from(prob, prob.target(), rc_edge_costs,
-                                                               rc_profits, labeling_limit);
+                            rc_bwd =
+                                preprocess::labeling_from(prob, prob.target(), rc_edge_costs,
+                                                          rc_profits, labeling_limit, label_rows);
                         }
                     }
                     stats->rc_label_runs += prob.is_tour() ? 1 : 2;
@@ -943,7 +946,7 @@ void HiGHSBridge::install_propagator() {
 
                                         auto fwd_i = preprocess::labeling_from(
                                             prob, prob.source(), rc_edge_costs, mod_profits,
-                                            labeling_limit);
+                                            labeling_limit, label_rows);
 
                                         if (fwd_i.empty()) {
                                             return;  // budget exhausted
