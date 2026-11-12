@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 #include <vector>
 
 namespace cptp::sep {
@@ -43,7 +44,7 @@ double compute_violation(const RCICandidate& c, double Q, double tol) {
 /// For non-bottleneck cuts, the depot may be on either side.
 /// S is always the side NOT containing the depot.
 RCICandidate make_candidate(const gomory_hu_tree& tree, int32_t cut_node, const Problem& prob,
-                            const SeparationContext& ctx) {
+                            std::span<const double> d, const SeparationContext& ctx) {
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
     const int32_t depot = prob.source();
@@ -65,8 +66,8 @@ RCICandidate make_candidate(const gomory_hu_tree& tree, int32_t cut_node, const 
 
         if (in_S && i != depot && (is_tour || i != path_target)) {
             c.in_S[i] = true;
-            c.d_S += prob.demand(i);
-            c.served_demand += prob.demand(i) * ctx.y_values[i];
+            c.d_S += d[i];
+            c.served_demand += d[i] * ctx.y_values[i];
         }
     }
 
@@ -87,11 +88,12 @@ RCICandidate make_candidate(const gomory_hu_tree& tree, int32_t cut_node, const 
 }
 
 /// Incrementally update candidate when adding node j to S.
-void add_node(RCICandidate& c, int32_t j, const Problem& prob, const SeparationContext& ctx) {
+void add_node(RCICandidate& c, int32_t j, const Problem& prob, std::span<const double> d,
+              const SeparationContext& ctx) {
     const auto& graph = prob.graph();
     c.in_S[j] = true;
-    c.d_S += prob.demand(j);
-    c.served_demand += prob.demand(j) * ctx.y_values[j];
+    c.d_S += d[j];
+    c.served_demand += d[j] * ctx.y_values[j];
 
     for (int32_t e : graph.incident_edges(j)) {
         int32_t other = graph.other_endpoint(e, j);
@@ -106,11 +108,12 @@ void add_node(RCICandidate& c, int32_t j, const Problem& prob, const SeparationC
 }
 
 /// Incrementally update candidate when removing node j from S.
-void remove_node(RCICandidate& c, int32_t j, const Problem& prob, const SeparationContext& ctx) {
+void remove_node(RCICandidate& c, int32_t j, const Problem& prob, std::span<const double> d,
+                 const SeparationContext& ctx) {
     const auto& graph = prob.graph();
     c.in_S[j] = false;
-    c.d_S -= prob.demand(j);
-    c.served_demand -= prob.demand(j) * ctx.y_values[j];
+    c.d_S -= d[j];
+    c.served_demand -= d[j] * ctx.y_values[j];
 
     for (int32_t e : graph.incident_edges(j)) {
         int32_t other = graph.other_endpoint(e, j);
@@ -126,8 +129,8 @@ void remove_node(RCICandidate& c, int32_t j, const Problem& prob, const Separati
 
 /// Run add/drop local search on a candidate.
 /// Returns the best violation found.
-double add_drop_search(RCICandidate& c, const Problem& prob, const SeparationContext& ctx, double Q,
-                       double tol) {
+double add_drop_search(RCICandidate& c, const Problem& prob, std::span<const double> d,
+                       const SeparationContext& ctx, double Q, double tol) {
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
     const int32_t depot = prob.source();
@@ -152,17 +155,17 @@ double add_drop_search(RCICandidate& c, const Problem& prob, const SeparationCon
                     continue;
                 }
 
-                remove_node(c, i, prob, ctx);
+                remove_node(c, i, prob, d, ctx);
                 double v = compute_violation(c, Q, tol);
                 if (v > best_drop_viol + tol) {
                     best_drop_viol = v;
                     best_drop = i;
                 }
-                add_node(c, i, prob, ctx);
+                add_node(c, i, prob, d, ctx);
             }
 
             if (best_drop >= 0) {
-                remove_node(c, best_drop, prob, ctx);
+                remove_node(c, best_drop, prob, d, ctx);
                 best_viol = best_drop_viol;
                 drop_improved = true;
                 improved = true;
@@ -193,17 +196,17 @@ double add_drop_search(RCICandidate& c, const Problem& prob, const SeparationCon
                     continue;
                 }
 
-                add_node(c, i, prob, ctx);
+                add_node(c, i, prob, d, ctx);
                 double v = compute_violation(c, Q, tol);
                 if (v > best_add_viol + tol) {
                     best_add_viol = v;
                     best_add = i;
                 }
-                remove_node(c, i, prob, ctx);
+                remove_node(c, i, prob, d, ctx);
             }
 
             if (best_add >= 0) {
-                add_node(c, best_add, prob, ctx);
+                add_node(c, best_add, prob, d, ctx);
                 best_viol = best_add_viol;
                 add_improved = true;
                 improved = true;
@@ -215,8 +218,8 @@ double add_drop_search(RCICandidate& c, const Problem& prob, const SeparationCon
 }
 
 /// Build a Cut from a finalized candidate, choosing the sparser form.
-Cut build_cut(const RCICandidate& c, const Problem& prob, const SeparationContext& ctx, double Q,
-              double tol) {
+Cut build_cut(const RCICandidate& c, const Problem& prob, std::span<const double> d,
+              const SeparationContext& ctx, double Q, double tol) {
     const auto& graph = prob.graph();
     const int32_t n = prob.num_nodes();
 
@@ -259,7 +262,7 @@ Cut build_cut(const RCICandidate& c, const Problem& prob, const SeparationContex
             if (!c.in_S[i]) {
                 continue;
             }
-            double q_i = prob.demand(i);
+            double q_i = d[i];
             double coeff = -(1.0 - q_i / Q_r);
             if (std::abs(coeff) > tol) {
                 cut.indices.push_back(ctx.y_offset + i);
@@ -283,7 +286,7 @@ Cut build_cut(const RCICandidate& c, const Problem& prob, const SeparationContex
             if (!c.in_S[i]) {
                 continue;
             }
-            double q_i = prob.demand(i);
+            double q_i = d[i];
             if (q_i <= 0) {
                 continue;
             }
@@ -305,12 +308,22 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     const auto& prob = ctx.problem;
     const int32_t n = prob.num_nodes();
     const double tol = ctx.tol;
-    const double Q = prob.capacity();
     const int32_t depot = prob.source();
     const bool is_tour = prob.is_tour();
     const int32_t path_target = prob.target();
 
-    if (Q <= 0 || !ctx.flow_tree) {
+    // Rows that can give a cut: Q_k > 0 (as row 0 alone was before) and
+    // bounded (an unbounded row has ceil(d(S)/Q_k) <= 1, so no RCI).
+    std::vector<int32_t> rows;
+    const int32_t num_rows = rows_ == CapacityRows::kFirst ? 1 : prob.num_capacities();
+    for (int32_t k = 0; k < num_rows; ++k) {
+        const double Q = prob.capacity(k);
+        if (Q > 0 && Q < kInfiniteCapacity) {
+            rows.push_back(k);
+        }
+    }
+
+    if (rows.empty() || !ctx.flow_tree) {
         return {};
     }
 
@@ -339,7 +352,8 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     }
 
     // Step 2: Parallel evaluation and add/drop local search.
-    // Each candidate produces at most one cut.
+    // Each candidate produces at most one cut per row (kAll), or one cut
+    // from its most violated row (kMostViolated, kFirst).
     struct CutResult {
         Cut cut;
         double violation;
@@ -348,29 +362,40 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
 
     parallel::parallel_for(0, static_cast<int>(candidates.size()), [&](int idx) {
         auto& cr = candidates[static_cast<size_t>(idx)];
+        auto& out = per_candidate[static_cast<size_t>(idx)];
 
-        auto c = make_candidate(tree, cr.node, prob, ctx);
+        for (const int32_t row : rows) {
+            const double Q = prob.capacity(row);
+            const std::span<const double> d = prob.demands(row);
 
-        double Q_r = std::fmod(c.d_S, Q);
-        if (Q_r <= tol) {
-            return;
-        }
-        double k = std::ceil(c.d_S / Q);
-        if (k <= 1.0) {
-            return;
-        }
+            auto c = make_candidate(tree, cr.node, prob, d, ctx);
 
-        double viol = compute_violation(c, Q, tol);
+            double Q_r = std::fmod(c.d_S, Q);
+            if (Q_r <= tol) {
+                continue;
+            }
+            double k = std::ceil(c.d_S / Q);
+            if (k <= 1.0) {
+                continue;
+            }
 
-        // Run add/drop on violated candidates to strengthen.
-        if (viol > tol) {
-            viol = add_drop_search(c, prob, ctx, Q, tol);
-        }
+            double viol = compute_violation(c, Q, tol);
 
-        if (viol > tol) {
-            auto cut = build_cut(c, prob, ctx, Q, tol);
+            // Run add/drop on violated candidates to strengthen.
+            if (viol > tol) {
+                viol = add_drop_search(c, prob, d, ctx, Q, tol);
+            }
 
-            per_candidate[static_cast<size_t>(idx)].push_back({std::move(cut), viol});
+            if (viol <= tol) {
+                continue;
+            }
+            if (rows_ != CapacityRows::kAll && !out.empty()) {
+                if (viol <= out.front().violation) {
+                    continue;
+                }
+                out.clear();
+            }
+            out.push_back({build_cut(c, prob, d, ctx, Q, tol), viol});
         }
     });
 

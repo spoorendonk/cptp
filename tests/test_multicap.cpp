@@ -1,16 +1,23 @@
 // m capacity rows end to end (#90): build, loaders, heuristic residuals, and
 // solves where a solution must satisfy every row.
+#include "core/digraph.h"
+#include "core/gomory_hu.h"
 #include "core/io.h"
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
 #include "model/model.h"
+#include "sep/rci_separator.h"
+#include "sep/separation_context.h"
+#include "sep/separator.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -284,4 +291,114 @@ TEST_CASE("Multicap: numeric loader reads m rows", "[multicap][io]") {
     const auto truncated = write_temp("cptp_multicap_truncated.txt", "3 0 2\n0 0 0 0\n1 5 2\n");
     REQUIRE_THROWS_AS(cptp::io::load_numeric(truncated), std::runtime_error);
     std::filesystem::remove(truncated);
+}
+
+namespace {
+
+// A point where every customer is served and x(delta({1, 2, 3})) = 1 is the
+// smallest cut, so {1, 2, 3} is a Gomory-Hu candidate: x01 = x03 = x13 = 0.5,
+// x12 = x23 = 1 (each customer has degree 2).
+struct LpPoint {
+    std::vector<double> x;
+    std::vector<double> y{1.0, 1.0, 1.0, 1.0};
+    std::unique_ptr<cptp::gomory_hu_tree> tree;
+};
+
+double point_value(int32_t u, int32_t v) {
+    if ((u == 1 && v == 2) || (u == 2 && v == 3)) {
+        return 1.0;
+    }
+    if ((u == 0 && v == 1) || (u == 0 && v == 3) || (u == 1 && v == 3)) {
+        return 0.5;
+    }
+    return 0.0;
+}
+
+LpPoint make_point(const cptp::Problem& prob) {
+    LpPoint p;
+    const auto& g = prob.graph();
+    p.x.assign(static_cast<size_t>(prob.num_edges()), 0.0);
+    cptp::digraph_builder builder(prob.num_nodes());
+    for (auto e : g.edges()) {
+        const int32_t u = g.edge_source(e);
+        const int32_t v = g.edge_target(e);
+        const double xe = point_value(std::min(u, v), std::max(u, v));
+        if (xe > 0.0) {
+            p.x[static_cast<size_t>(e)] = xe;
+            builder.add_arc(u, v, xe);
+            builder.add_arc(v, u, xe);
+        }
+    }
+    auto [sg, cap] = builder.build();
+    p.tree = std::make_unique<cptp::gomory_hu_tree>(sg, cap, prob.source());
+    return p;
+}
+
+std::vector<cptp::sep::Cut> rci_cuts(const cptp::Problem& prob, cptp::sep::CapacityRows rows) {
+    const auto point = make_point(prob);
+    const cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = point.x,
+        .y_values = point.y,
+        .x_offset = 0,
+        .y_offset = prob.num_edges(),
+        .tol = 1e-6,
+        .flow_tree = point.tree.get(),
+    };
+    cptp::sep::RCISeparator rci(rows);
+    return rci.separate(ctx);
+}
+
+}  // namespace
+
+TEST_CASE("Multicap: RCI separates from rows after the first", "[multicap][rci]") {
+    using cptp::sep::CapacityRows;
+    // Row 0 (d = 1 each, Q = 3) gives no RCI: no S has d(S) > Q. Row 1
+    // (d = 2, 2, 1, Q = 3) cuts S = {1, 2, 3}: d(S) = 5 needs two vehicles.
+    const auto one_row = make_problem(1);
+    REQUIRE(rci_cuts(one_row, CapacityRows::kAll).empty());
+
+    const auto two_rows = make_problem(2);
+    REQUIRE(rci_cuts(two_rows, CapacityRows::kFirst).empty());
+    const auto all = rci_cuts(two_rows, CapacityRows::kAll);
+    const auto best = rci_cuts(two_rows, CapacityRows::kMostViolated);
+    REQUIRE_FALSE(all.empty());
+    REQUIRE_FALSE(best.empty());
+    REQUIRE(best.size() <= all.size());
+    for (const auto& cut : all) {
+        REQUIRE(cut.violation > 1e-6);
+    }
+}
+
+TEST_CASE("Multicap: with one row RCI is the same for every row option", "[multicap][rci]") {
+    using cptp::sep::CapacityRows;
+    // Row 1 of the instance as the only row, so RCI has cuts to give.
+    cptp::Problem prob;
+    prob.build(4, kEdges, kCosts, kProfits, std::vector<std::vector<double>>{kRows[1]},
+               std::vector<double>{kCaps[1]}, 0, 0);
+    const auto all = rci_cuts(prob, CapacityRows::kAll);
+    REQUIRE_FALSE(all.empty());
+    for (const auto rows : {CapacityRows::kMostViolated, CapacityRows::kFirst}) {
+        const auto other = rci_cuts(prob, rows);
+        REQUIRE(other.size() == all.size());
+        for (size_t i = 0; i < all.size(); ++i) {
+            REQUIRE(other[i].indices == all[i].indices);
+            REQUIRE(other[i].values == all[i].values);
+            REQUIRE(other[i].rhs == all[i].rhs);
+        }
+    }
+}
+
+TEST_CASE("Multicap: capacity_cut_rows takes all, most_violated or first", "[multicap][rci]") {
+    for (const char* value : {"all", "most_violated", "first"}) {
+        cptp::Model model;
+        fill_model(model, 3);
+        auto options = kQuiet;
+        options.emplace_back("capacity_cut_rows", value);
+        const auto result = model.solve(options);
+        INFO(value);
+        REQUIRE(result.is_optimal());
+        REQUIRE_THAT(result.objective, WithinAbs(-18.0, 1e-6));
+    }
+    REQUIRE_THROWS_AS(cptp::sep::parse_capacity_rows("some"), std::invalid_argument);
 }

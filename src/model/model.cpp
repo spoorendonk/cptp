@@ -425,6 +425,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t max_cuts_comb = -1;
     int32_t max_cuts_rglm = -1;
     int32_t max_cuts_spi = -1;
+    // Capacity rows the capacity cut families build cuts from (#91).
+    std::string capacity_cut_rows = "all";
 
     // --- Other ---
     std::string branch_hyper = "off";
@@ -584,6 +586,11 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "enable_rci") {
             enable_rci = parse_bool(value);
+            continue;
+        }
+        if (key == "capacity_cut_rows") {
+            sep::parse_capacity_rows(value);  // reject an unknown value here
+            capacity_cut_rows = value;
             continue;
         }
         if (key == "enable_multistar") {
@@ -884,6 +891,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     if (!enable_rci) {
         nondefault_settings.emplace_back("enable_rci=off");
+    }
+    if (capacity_cut_rows != "all") {
+        nondefault_settings.push_back("capacity_cut_rows=" + capacity_cut_rows);
     }
     if (!enable_multistar) {
         nondefault_settings.emplace_back("enable_multistar=off");
@@ -1245,7 +1255,8 @@ SolveResult Model::solve(const SolverOptions& options) {
         bridge.add_separator(std::make_unique<sep::SECSeparator>());
     }
     if (enable_rci) {
-        bridge.add_separator(std::make_unique<sep::RCISeparator>());
+        bridge.add_separator(
+            std::make_unique<sep::RCISeparator>(sep::parse_capacity_rows(capacity_cut_rows)));
     }
     if (enable_multistar) {
         bridge.add_separator(std::make_unique<sep::MultistarSeparator>());
