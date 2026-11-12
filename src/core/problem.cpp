@@ -46,6 +46,13 @@ void Problem::build(int32_t num_nodes, std::span<const Edge> edges, std::vector<
         if (row.size() != static_cast<size_t>(num_nodes)) {
             throw std::invalid_argument("demands size must equal num_nodes");
         }
+        // The labeling bounds (preprocess/edge_elimination.h) terminate only
+        // because demand never falls along a path.
+        for (double d : row) {
+            if (!(d >= 0.0)) {  // also rejects NaN
+                throw std::invalid_argument("demands must be non-negative");
+            }
+        }
     }
     if (edge_costs.size() != edges.size()) {
         throw std::invalid_argument("edge_costs size must equal edges size");

@@ -159,21 +159,26 @@ inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32
 /// f[v] = max_k f_k[v]. Row 0 alone is the single-row labeling. Empty when
 /// row 0's labeling comes back empty (labeling_row); a row k >= 1 that does
 /// is skipped, since the maximum over the other rows is still a bound, so
-/// kAll is never weaker than kFirst.
+/// kAll is never weaker than kFirst. Rows k >= 1 get their own budget,
+/// later_rows_max_queue_pops (-1 = max_queue_pops), so a caller that runs row
+/// 0 unbounded need not run the others unbounded too.
 inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                                          std::span<const double> edge_costs,
                                          std::span<const double> profits,
                                          int64_t max_queue_pops = 0,
-                                         LabelRows rows = LabelRows::kFirst) {
+                                         LabelRows rows = LabelRows::kFirst,
+                                         int64_t later_rows_max_queue_pops = -1) {
     auto best = labeling_row(prob, root, 0, edge_costs, profits, max_queue_pops);
     if (rows == LabelRows::kFirst || best.empty()) {
         return best;
     }
+    const int64_t later_pops =
+        later_rows_max_queue_pops < 0 ? max_queue_pops : later_rows_max_queue_pops;
     for (int32_t k = 1; k < prob.num_capacities(); ++k) {
         if (prob.capacity(k) >= sep::kInfiniteCapacity) {
             continue;  // no limit: its labeling is never above row 0's
         }
-        const auto row = labeling_row(prob, root, k, edge_costs, profits, max_queue_pops);
+        const auto row = labeling_row(prob, root, k, edge_costs, profits, later_pops);
         if (row.empty()) {
             continue;  // budget or zero-demand negative cycle: no bound from row k
         }
@@ -187,8 +192,10 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
 /// Capacity-aware labeling using the problem's own costs.
 inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                                          int64_t max_queue_pops = 0,
-                                         LabelRows rows = LabelRows::kFirst) {
-    return labeling_from(prob, root, prob.edge_costs(), prob.profits(), max_queue_pops, rows);
+                                         LabelRows rows = LabelRows::kFirst,
+                                         int64_t later_rows_max_queue_pops = -1) {
+    return labeling_from(prob, root, prob.edge_costs(), prob.profits(), max_queue_pops, rows,
+                         later_rows_max_queue_pops);
 }
 
 /// Forward labeling from a given source node (wrapper for labeling_from).
@@ -274,6 +281,9 @@ inline std::vector<bool> edge_elimination(const Problem& prob, double upper_boun
 
     // Forward labeling from source
     auto f_s = labeling_from(prob, prob.source());
+    if (f_s.empty()) {
+        return eliminated;  // zero-demand negative cycle: no bounds
+    }
 
     if (prob.is_tour()) {
         // Tour: f_s[u] + c(u,v) + f_s[v] + profit(depot)
@@ -297,6 +307,9 @@ inline std::vector<bool> edge_elimination(const Problem& prob, double upper_boun
     } else {
         // Path: need labeling from both source and target
         auto f_t = labeling_from(prob, prob.target());
+        if (f_t.empty()) {
+            return eliminated;
+        }
 
         for (auto e : graph.edges()) {
             int32_t u = graph.edge_source(e);

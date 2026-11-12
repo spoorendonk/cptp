@@ -592,6 +592,23 @@ TEST_CASE("Multicap: a zero-demand negative cycle skips its row and terminates",
     REQUIRE(all == cptp::preprocess::labeling_from(rows01, 0, 0, LabelRows::kAll));
 }
 
+TEST_CASE("Multicap: negative demands are rejected, a looping row 0 eliminates nothing",
+          "[multicap][labeling]") {
+    cptp::Problem bad;
+    REQUIRE_THROWS_AS(bad.build(4, kEdges, kCosts, kProfits,
+                                std::vector<std::vector<double>>{{0.0, 1.0, -1.0, 1.0}},
+                                std::vector<double>{3.0}, 0, 0),
+                      std::invalid_argument);
+    // kRows[2] as row 0: the zero-demand walk 0-2-0 costs -8, so there are
+    // no labeling bounds and the self-contained elimination fixes no edge.
+    cptp::Problem loop;
+    loop.build(4, kEdges, kCosts, kProfits, std::vector<std::vector<double>>{kRows[2]},
+               std::vector<double>{kCaps[2]}, 0, 0);
+    REQUIRE(cptp::preprocess::labeling_from(loop, 0).empty());
+    const auto elim = cptp::preprocess::edge_elimination(loop, 0.0);
+    REQUIRE(std::ranges::none_of(elim, [](bool b) { return b; }));
+}
+
 TEST_CASE("Multicap: zero-demand cycles that are not negative keep their row",
           "[multicap][labeling]") {
     using cptp::preprocess::LabelRows;

@@ -980,11 +980,15 @@ SolveResult Model::solve(const SolverOptions& options) {
                 all_pairs.assign(static_cast<size_t>(n) * n, kInf);
                 // An empty row (row 0 has a zero-demand negative cycle) would
                 // leave kInf, "unreachable", for its source: drop all pairs.
+                // Row 0 runs unbounded, as the root labeling showed it ends;
+                // rows k >= 1 keep the root's budget, since the root run skips
+                // a row that exhausts it and so proves nothing about it.
                 std::atomic<bool> any_empty = false;
                 parallel::parallel_for(
                     0, n,
                     [&](int s) {
-                        auto row = preprocess::labeling_from(problem_, s, 0, label_rows);
+                        auto row = preprocess::labeling_from(problem_, s, 0, label_rows,
+                                                             labeling_max_queue_pops);
                         if (row.empty()) {
                             any_empty = true;
                             return;
