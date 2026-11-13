@@ -348,8 +348,8 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     }
 
     // Step 2: Parallel evaluation and add/drop local search.
-    // Each candidate produces at most one cut per row (kAll), or one cut
-    // from its most violated row (kMostViolated, kFirst).
+    // Each candidate produces at most one cut per row (kAll, kFirst), or one
+    // cut from its most violated row (kMostViolated).
     struct CutResult {
         Cut cut;
         double violation;

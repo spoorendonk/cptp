@@ -509,6 +509,31 @@ TEMPLATE_TEST_CASE("Multicap: the surrogate row cuts where no single row does", 
     require_same_cuts(cuts_of(single, with_surrogate), reference);
 }
 
+TEMPLATE_TEST_CASE("Multicap: under first the surrogate's cuts come next to row 0's",
+                   "[multicap][rci]", cptp::sep::RCISeparator, cptp::sep::RGLMSeparator) {
+    using cptp::sep::CapacityRows;
+    // The example at t = 0.9: row 0 now cuts S too (by 41t - 36 for RCI) and
+    // the surrogate by more (5t - 2). first keeps row 0's cuts and adds the
+    // surrogate's; most_violated keeps one per candidate.
+    constexpr double kScale = 0.9;
+    const auto prob = make_surrogate_example();
+    TestType first(CapacityRows::kFirst);
+    const auto row0 = cuts_of(prob, first, kScale);
+    REQUIRE_FALSE(row0.empty());
+    TestType first_surrogate(CapacityRows::kFirst, true);
+    const auto both = cuts_of(prob, first_surrogate, kScale);
+    REQUIRE(both.size() > row0.size());
+    for (const auto& cut : row0) {
+        const bool kept = std::ranges::any_of(both, [&](const cptp::sep::Cut& other) {
+            return other.indices == cut.indices && other.values == cut.values &&
+                   other.rhs == cut.rhs;
+        });
+        REQUIRE(kept);
+    }
+    TestType best_surrogate(CapacityRows::kMostViolated, true);
+    REQUIRE(cuts_of(prob, best_surrogate, kScale).size() < both.size());
+}
+
 TEST_CASE("Multicap: capacity_cut_surrogate keeps every row's optimum", "[multicap][rci]") {
     struct Case {
         int32_t rows;

@@ -46,7 +46,8 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
 
         auto [flow, reachable] = ctx.flow_tree->min_cut(target);
 
-        // One cut per row (kAll), or the most violated row's (otherwise).
+        // One cut per row (kAll, kFirst), or the most violated row's
+        // (kMostViolated).
         Cut best;
         bool have_best = false;
 
