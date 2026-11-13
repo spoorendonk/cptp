@@ -9,8 +9,8 @@ namespace cptp::sep {
 /// With m capacity rows, cuts come from each bounded row's d^k and Q_k as
 /// `rows` selects.
 /// With `surrogate`, one more row next to them: the surrogate row of all
-/// bounded rows (surrogate_row, #112), which under kMostViolated competes
-/// with the others.
+/// bounded rows (surrogate_row, #112). Under kMostViolated it competes with
+/// the others; under kAll and kFirst its cuts are added to theirs.
 class RGLMSeparator : public Separator {
 public:
     explicit RGLMSeparator(CapacityRows rows = CapacityRows::kAll, bool surrogate = false)

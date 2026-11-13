@@ -154,7 +154,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
             if (cut.indices.empty()) {
                 continue;
             }
-            if (rows_ == CapacityRows::kAll) {
+            if (rows_ != CapacityRows::kMostViolated) {
                 all_cuts.push_back(std::move(cut));
             } else if (!have_best || cut.violation > best.violation) {
                 best = std::move(cut);

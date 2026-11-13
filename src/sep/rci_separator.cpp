@@ -385,7 +385,7 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
             if (viol <= tol) {
                 continue;
             }
-            if (rows_ != CapacityRows::kAll && !out.empty()) {
+            if (rows_ == CapacityRows::kMostViolated && !out.empty()) {
                 if (viol <= out.front().violation) {
                     continue;
                 }

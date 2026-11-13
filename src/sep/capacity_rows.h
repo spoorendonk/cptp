@@ -73,4 +73,8 @@ inline std::vector<CapacityRowView> capacity_row_views(const Problem& prob, Capa
     return views;
 }
 
+/// The views would point into a temporary.
+std::vector<CapacityRowView> capacity_row_views(const Problem& prob, CapacityRows rows,
+                                                const SurrogateRow&& surrogate) = delete;
+
 }  // namespace cptp::sep

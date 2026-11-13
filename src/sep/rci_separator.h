@@ -11,8 +11,8 @@ namespace cptp::sep {
 /// With m capacity rows, cuts are built from each row's d^k and Q_k as
 /// `rows` selects (unbounded rows, Q_k >= kInfiniteCapacity, give none).
 /// With `surrogate`, one more row next to them: the surrogate row of all
-/// bounded rows (surrogate_row, #112), which under kMostViolated competes
-/// with the others.
+/// bounded rows (surrogate_row, #112). Under kMostViolated it competes with
+/// the others; under kAll and kFirst its cuts are added to theirs.
 class RCISeparator : public Separator {
 public:
     explicit RCISeparator(CapacityRows rows = CapacityRows::kAll, bool surrogate = false)
