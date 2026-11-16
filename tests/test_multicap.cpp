@@ -900,6 +900,11 @@ TEST_CASE("The numeric loader rejects a capacity or source/target that does not 
     REQUIRE(path.source() == 2);
     REQUIRE(path.target() == 1);
 
+    const auto frac = write_temp("cptp_numeric_fractional_capacity.txt", arcs + "2.5\n");
+    const auto half = cptp::io::load_numeric(frac);
+    std::filesystem::remove(frac);
+    REQUIRE(half.capacities() == std::vector<double>{2.5});
+
     // No capacity line at all is still "no limit", and a tour.
     const auto none = write_temp("cptp_numeric_no_capacity.txt", arcs);
     const auto prob = cptp::io::load_numeric(none);

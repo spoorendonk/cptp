@@ -1,11 +1,10 @@
 #include "core/io.h"
 
 #include <algorithm>
-#include <cerrno>
 #include <charconv>
 #include <cmath>
-#include <cstdlib>
 #include <fstream>
+#include <locale>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -55,12 +54,13 @@ std::optional<int32_t> parse_int(const std::string& token) {
     return v;
 }
 
-/// The whole token as a finite double, or nothing.
+/// The whole token as a finite double, or nothing. Read as operator>> reads
+/// one, in the classic locale: strtod would follow a host's setlocale.
 std::optional<double> parse_double(const std::string& token) {
-    errno = 0;
-    char* end = nullptr;
-    const double v = std::strtod(token.c_str(), &end);
-    if (end != token.c_str() + token.size() || errno == ERANGE || !std::isfinite(v)) {
+    std::istringstream iss(token);
+    iss.imbue(std::locale::classic());
+    double v = 0.0;
+    if (!(iss >> v) || !iss.eof() || !std::isfinite(v)) {
         return std::nullopt;
     }
     return v;
