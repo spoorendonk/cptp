@@ -808,7 +808,7 @@ TEST_CASE("The TSPLIB loader rejects a DEPOT_SECTION line that is not an int", "
         "NODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n"
         "DEMAND_SECTION\n1 0\n2 1\n3 1\n"
         "DEPOT_SECTION\n";
-    for (const std::string id : {"abc", "99999999999"}) {
+    for (const std::string id : {"abc", "99999999999", "1.5", "2x", "30 40"}) {
         INFO("depot line " << id);
         const auto path = write_temp("cptp_depot_not_int.vrp", head + id + "\n-1\nEOF\n");
         REQUIRE_THROWS_MATCHES(

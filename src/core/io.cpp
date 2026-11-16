@@ -216,7 +216,7 @@ Problem load_tsplib(const std::filesystem::path& path) {
         if (section == Section::Depot) {
             int d;
             std::istringstream iss(line);
-            if (!(iss >> d)) {
+            if (std::string extra; !(iss >> d) || (iss >> extra)) {
                 throw std::runtime_error("TSPLIB: DEPOT_SECTION line \"" + line +
                                          "\" is not an int id");
             }
