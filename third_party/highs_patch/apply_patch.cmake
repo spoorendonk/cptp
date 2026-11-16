@@ -37,17 +37,13 @@ endfunction()
 set(MIP_DIR "${SOURCE_DIR}/highs/mip")
 set(SRC_PREFIX "mip")
 
-# Copy HighsUserSeparator.h and .cpp
-file(COPY "${PATCH_DIR}/HighsUserSeparator.h"
-     DESTINATION "${MIP_DIR}/")
-file(COPY "${PATCH_DIR}/HighsUserSeparator.cpp"
-     DESTINATION "${MIP_DIR}/")
-
-# Copy HighsUserPropagator.h and .cpp
-file(COPY "${PATCH_DIR}/HighsUserPropagator.h"
-     DESTINATION "${MIP_DIR}/")
-file(COPY "${PATCH_DIR}/HighsUserPropagator.cpp"
-     DESTINATION "${MIP_DIR}/")
+# Copy HighsUserSeparator and HighsUserPropagator (.h and .cpp). configure_file
+# gives the copy a fresh mtime; file(COPY) would keep the source's, and a
+# source older than its object (cp -p, rsync -t, tar) would not be rebuilt.
+foreach(_name IN ITEMS HighsUserSeparator.h HighsUserSeparator.cpp
+                       HighsUserPropagator.h HighsUserPropagator.cpp)
+    configure_file("${PATCH_DIR}/${_name}" "${MIP_DIR}/${_name}" COPYONLY)
+endforeach()
 
 # ── 1. Patch cmake/sources.cmake: add HighsUserSeparator to source lists ──
 file(READ "${SOURCE_DIR}/cmake/sources.cmake" SOURCES_CONTENT)
