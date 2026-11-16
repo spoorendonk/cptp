@@ -144,6 +144,12 @@ void HiGHSBridge::build_formulation() {
         !fwd_bounds_.empty() && !bwd_bounds_.empty()) {
         auto eliminated = preprocess::edge_elimination(prob_, fwd_bounds_, bwd_bounds_,
                                                        upper_bound_, correction_);
+        if (!edge_lb_.empty()) {
+            const auto by_edge = preprocess::edge_elimination(prob_, edge_lb_, upper_bound_);
+            for (size_t e = 0; e < eliminated.size(); ++e) {
+                eliminated[e] = eliminated[e] || by_edge[e];
+            }
+        }
         int32_t edge_elim_count = 0;
         for (auto e : graph.edges()) {
             if (eliminated[e] && col_upper[e] > 0.0) {
@@ -599,6 +605,7 @@ void HiGHSBridge::install_propagator() {
     auto prop_fwd = fwd_bounds_;
     auto prop_bwd = bwd_bounds_;
     auto prop_corr = correction_;
+    auto prop_edge_lb = edge_lb_;
     // Hyperplane columns z_h = a_h . y (#137), whose reduced costs fold into y's.
     auto hyperplanes = hyperplanes_;
 
@@ -678,6 +685,9 @@ void HiGHSBridge::install_propagator() {
                 double lb1 = f[u] + ec[e] + b[v] + corr;
                 double lb2 = f[v] + ec[e] + b[u] + corr;
                 double lb = std::min(lb1, lb2);
+                if (!prop_edge_lb.empty()) {
+                    lb = std::max(lb, prop_edge_lb[static_cast<size_t>(e)]);
+                }
 
                 if (lb > ub + 1e-6) {
                     domain.changeBound(HighsBoundType::kUpper, e, 0.0,

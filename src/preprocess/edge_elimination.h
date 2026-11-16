@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -16,12 +17,21 @@
 
 namespace cptp::preprocess {
 
+/// No predecessor: the root label, which may extend to any neighbour.
+inline constexpr int32_t kNoPred = -1;
+
 /// Label for the capacity-aware labeling.
 /// Tracks net cost (edge costs - collected profits) and accumulated demand.
 struct Label {
-    double cost;    // net cost = sum(edge_costs) - sum(profits along path)
-    double demand;  // accumulated demand along path
+    double cost;             // net cost = sum(edge_costs) - sum(profits along path)
+    double demand;           // accumulated demand along path
+    int32_t pred = kNoPred;  // node before this one (2-cycle elimination)
 };
+
+/// Each node's final Pareto front of a labeling, as (cost, demand) labels:
+/// every walk the labeling relaxes reaches the node at a cost and a demand
+/// no lower than some label of it (#144).
+using LabelFronts = std::vector<std::vector<Label>>;
 
 /// Which capacity rows the labeling bounds come from (#101).
 enum class LabelRows {
@@ -47,6 +57,17 @@ inline LabelRows parse_label_rows(std::string_view value) {
     }
     throw std::invalid_argument("labeling_rows must be first, all, surrogate or vector, got '" +
                                 std::string(value) + "'");
+}
+
+/// Parse the `labeling_join` option (#144): "min" (each labeling half at its
+/// cheapest label) or "load" (the halves joined by load, edge_lower_bounds);
+/// true for "load".
+inline bool parse_join_by_load(std::string_view value) {
+    if (value == "min" || value == "load") {
+        return value == "load";
+    }
+    throw std::invalid_argument("labeling_join must be min or load, got '" + std::string(value) +
+                                "'");
 }
 
 /// Whether the zero-demand nodes of the row `demand` carry a closed walk of negative net cost
@@ -138,10 +159,26 @@ private:
 /// cycle (has_zero_demand_negative_cycle), on which the labeling would not
 /// terminate. An early stop gives no bound rather than a partial one, whose
 /// f[v] would be too high.
+///
+/// With two_cycle (#144) no walk goes straight back to the node it came from
+/// (u -> v -> u), so f[v] bounds the 2-cycle-free walks, which still include
+/// every elementary path. A label keeps its predecessor; one label dominates
+/// another at the same node when it is <= in cost and demand and has the same
+/// predecessor (or none, the root's), and two <= labels with different
+/// predecessors dominate together, since one of them can always go where the
+/// dominated one would. Only the one-label rule erases a live label.
+///
+/// When `fronts` is given, (*fronts)[v] is node v's final Pareto front (its
+/// live labels, LabelFronts) after a complete run, and empty after an early
+/// stop.
 inline std::vector<double> labeling_demand(
     const Problem& prob, int32_t root, std::span<const double> demand, double Q,
     std::span<const double> edge_costs, std::span<const double> profits, int64_t max_queue_pops = 0,
-    LabelingDeadline deadline = kNoLabelingDeadline, bool* timed_out = nullptr) {
+    LabelingDeadline deadline = kNoLabelingDeadline, bool* timed_out = nullptr,
+    bool two_cycle = false, LabelFronts* fronts = nullptr) {
+    if (fronts != nullptr) {
+        fronts->clear();
+    }
     if (has_zero_demand_negative_cycle(prob, demand, edge_costs, profits)) {
         return {};
     }
@@ -170,7 +207,7 @@ inline std::vector<double> labeling_demand(
         queue.push_back(id);
     };
 
-    push(root, {-profits[root], demand[root]});
+    push(root, {-profits[root], demand[root], kNoPred});
     DeadlineCheck out_of_time(deadline, timed_out);
 
     size_t head = 0;
@@ -187,6 +224,9 @@ inline std::vector<double> labeling_demand(
 
         for (auto e : graph.incident_edges(u)) {
             const int32_t v = graph.other_endpoint(e, u);
+            if (two_cycle && v == lbl.pred) {
+                continue;  // u -> v -> u
+            }
 
             const double new_demand = lbl.demand + demand[v];
             if (new_demand > Q) {
@@ -200,10 +240,20 @@ inline std::vector<double> labeling_demand(
                 return {};  // out of time — no bound, as for the budget
             }
             bool dominated = false;
+            int32_t other_pred = kNoPred;  // pred of a <= label that cannot dominate alone
             for (const int32_t other : at_v) {
                 const Label& existing = pool[static_cast<size_t>(other)];
-                if (existing.cost <= new_cost && existing.demand <= new_demand) {
+                if (existing.cost > new_cost || existing.demand > new_demand) {
+                    continue;
+                }
+                if (!two_cycle || existing.pred == u || existing.pred == kNoPred) {
                     dominated = true;
+                    break;
+                }
+                if (other_pred == kNoPred) {
+                    other_pred = existing.pred;
+                } else if (existing.pred != other_pred) {
+                    dominated = true;  // two preds: one of them goes wherever the new one would
                     break;
                 }
             }
@@ -213,17 +263,28 @@ inline std::vector<double> labeling_demand(
 
             std::erase_if(at_v, [&](int32_t other) {
                 const Label& ex = pool[static_cast<size_t>(other)];
-                if (new_cost <= ex.cost && new_demand <= ex.demand) {
+                if (new_cost <= ex.cost && new_demand <= ex.demand &&
+                    (!two_cycle || ex.pred == u)) {
                     dead[static_cast<size_t>(other)] = 1;
                     return true;
                 }
                 return false;
             });
 
-            push(v, {new_cost, new_demand});
+            push(v, {new_cost, new_demand, u});
         }
     }
 
+    if (fronts != nullptr) {
+        fronts->resize(static_cast<size_t>(n));
+        for (size_t v = 0; v < live.size(); ++v) {
+            auto& front = (*fronts)[v];
+            front.reserve(live[v].size());
+            for (const int32_t id : live[v]) {
+                front.push_back(pool[static_cast<size_t>(id)]);
+            }
+        }
+    }
     return best_cost;
 }
 
@@ -232,9 +293,10 @@ inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32
                                         std::span<const double> edge_costs,
                                         std::span<const double> profits, int64_t max_queue_pops = 0,
                                         LabelingDeadline deadline = kNoLabelingDeadline,
-                                        bool* timed_out = nullptr) {
+                                        bool* timed_out = nullptr, bool two_cycle = false,
+                                        LabelFronts* fronts = nullptr) {
     return labeling_demand(prob, root, prob.demands(k), prob.capacity(k), edge_costs, profits,
-                           max_queue_pops, deadline, timed_out);
+                           max_queue_pops, deadline, timed_out, two_cycle, fronts);
 }
 
 /// The surrogate capacity row (#102), shared with the capacity separators
@@ -408,15 +470,18 @@ inline std::vector<double> labeling_vector(const Problem& prob, int32_t root,
 /// label count goes to `stats` when given. Every labeling stops at
 /// `deadline` (#143): row 0 then gives no bound, so neither does
 /// labeling_from, and a later row is skipped (row 0 alone then);
-/// stats->timed_out records either.
+/// stats->timed_out records either. two_cycle (#144) applies to every
+/// single-row labeling (labeling_demand), not to the vector one, and
+/// `fronts` gets row 0's fronts.
 inline std::vector<double> labeling_from(
     const Problem& prob, int32_t root, std::span<const double> edge_costs,
     std::span<const double> profits, int64_t max_queue_pops = 0, LabelRows rows = LabelRows::kFirst,
     int64_t later_rows_max_queue_pops = -1, LabelingStats* stats = nullptr,
-    LabelingDeadline deadline = kNoLabelingDeadline) {
+    LabelingDeadline deadline = kNoLabelingDeadline, bool two_cycle = false,
+    LabelFronts* fronts = nullptr) {
     bool* const timed_out = stats != nullptr ? &stats->timed_out : nullptr;
-    auto best =
-        labeling_row(prob, root, 0, edge_costs, profits, max_queue_pops, deadline, timed_out);
+    auto best = labeling_row(prob, root, 0, edge_costs, profits, max_queue_pops, deadline,
+                             timed_out, two_cycle, fronts);
     if (rows == LabelRows::kFirst || best.empty()) {
         return best;
     }
@@ -435,8 +500,9 @@ inline std::vector<double> labeling_from(
         if (surrogate.demand.empty()) {
             return best;
         }
-        const auto row = labeling_demand(prob, root, surrogate.demand, surrogate.capacity,
-                                         edge_costs, profits, later_pops, deadline, timed_out);
+        const auto row =
+            labeling_demand(prob, root, surrogate.demand, surrogate.capacity, edge_costs, profits,
+                            later_pops, deadline, timed_out, two_cycle);
         for (size_t v = 0; v < row.size(); ++v) {  // empty row: row 0 alone
             best[v] = std::max(best[v], row[v]);
         }
@@ -446,8 +512,8 @@ inline std::vector<double> labeling_from(
         if (prob.capacity(k) >= sep::kInfiniteCapacity) {
             continue;  // no limit: its labeling is never above row 0's
         }
-        const auto row =
-            labeling_row(prob, root, k, edge_costs, profits, later_pops, deadline, timed_out);
+        const auto row = labeling_row(prob, root, k, edge_costs, profits, later_pops, deadline,
+                                      timed_out, two_cycle);
         if (row.empty()) {
             continue;  // budget, deadline or zero-demand negative cycle: no bound from row k
         }
@@ -464,9 +530,10 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                                          LabelRows rows = LabelRows::kFirst,
                                          int64_t later_rows_max_queue_pops = -1,
                                          LabelingStats* stats = nullptr,
-                                         LabelingDeadline deadline = kNoLabelingDeadline) {
+                                         LabelingDeadline deadline = kNoLabelingDeadline,
+                                         bool two_cycle = false, LabelFronts* fronts = nullptr) {
     return labeling_from(prob, root, prob.edge_costs(), prob.profits(), max_queue_pops, rows,
-                         later_rows_max_queue_pops, stats, deadline);
+                         later_rows_max_queue_pops, stats, deadline, two_cycle, fronts);
 }
 
 /// Forward labeling from a given source node (wrapper for labeling_from).
@@ -532,6 +599,112 @@ inline std::vector<bool> edge_elimination(const Problem& prob, const std::vector
         }
     }
 
+    return eliminated;
+}
+
+/// A node's front as a staircase: demand ascending, cost strictly
+/// descending. Each kept label is the cheapest of the front at its demand or
+/// below, so the cheapest label within a demand budget is the last that fits.
+inline std::vector<Label> staircase(std::vector<Label> front) {
+    std::ranges::sort(front, [](const Label& a, const Label& b) {
+        return a.demand < b.demand || (a.demand == b.demand && a.cost < b.cost);
+    });
+    std::vector<Label> out;
+    for (const Label& l : front) {
+        if (out.empty() || l.cost < out.back().cost) {
+            out.push_back(l);
+        }
+    }
+    return out;
+}
+
+/// Cheapest a.cost + b.cost over labels a of `a`, b of `b` (staircases) with
+/// a.demand + b.demand <= cap; +inf when no pair fits.
+inline double join_staircases(std::span<const Label> a, std::span<const Label> b, double cap) {
+    double best = std::numeric_limits<double>::infinity();
+    size_t j = b.size();
+    for (const Label& x : a) {  // demand ascending, so the budget left for b shrinks
+        while (j > 0 && x.demand + b[j - 1].demand > cap) {
+            --j;
+        }
+        if (j == 0) {
+            break;
+        }
+        best = std::min(best, x.cost + b[j - 1].cost);
+    }
+    return best;
+}
+
+/// Lower bound lb_e on the net cost of any tour or path using edge e, from
+/// the labeling bounds f (source -> v) and b (v -> target): the better
+/// orientation of f[u] + c_e + b[v] + correction, +inf when neither side
+/// reaches (correction as edge_elimination).
+///
+/// With row 0's fronts from source and target (front_f, front_b; non-null
+/// and non-empty, LabelFronts), the two halves are also joined by load
+/// (#144): a path source -> u and one v -> target that together form a
+/// tour or path carry at most Q_0 of row 0, plus the depot's demand, which
+/// both halves of a tour count. So
+///   lb_e >= min over a in F_s(u), b in F_t(v), a.demand + b.demand <= cap
+///           of a.cost + c_e + b.cost + correction,
+/// with cap = Q_0 + d_0(depot) for a tour and Q_0 for a path, again over
+/// both orientations. lb_e is the larger of the two bounds: f and b may
+/// come from more rows than row 0 (labeling_from).
+inline std::vector<double> edge_lower_bounds(const Problem& prob, std::span<const double> f,
+                                             std::span<const double> b, double correction,
+                                             const LabelFronts* front_f = nullptr,
+                                             const LabelFronts* front_b = nullptr) {
+    const auto& graph = prob.graph();
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    std::vector<double> lb(static_cast<size_t>(prob.num_edges()), kInf);
+    for (auto e : graph.edges()) {
+        const int32_t u = graph.edge_source(e);
+        const int32_t v = graph.edge_target(e);
+        const double c = prob.edge_cost(e);
+        lb[static_cast<size_t>(e)] = std::min(f[u] + c + b[v], f[v] + c + b[u]) + correction;
+    }
+    if (front_f == nullptr || front_b == nullptr || front_f->empty() || front_b->empty()) {
+        return lb;
+    }
+    // A little slack: the halves' loads are sums in a different order than
+    // the tour's, so a tour at exactly Q_0 must not be cut off by rounding.
+    const double exact_cap =
+        prob.capacity(0) + (prob.is_tour() ? prob.demand(0, prob.source()) : 0.0);
+    const double cap = exact_cap + 1e-9 * std::max(1.0, std::abs(exact_cap));
+    auto stairs = [](const LabelFronts& fronts) {
+        std::vector<std::vector<Label>> out;
+        out.reserve(fronts.size());
+        for (const auto& front : fronts) {
+            out.push_back(staircase(front));
+        }
+        return out;
+    };
+    const auto sf = stairs(*front_f);
+    const auto sb = front_f == front_b ? sf : stairs(*front_b);
+    for (auto e : graph.edges()) {
+        const int32_t u = graph.edge_source(e);
+        const int32_t v = graph.edge_target(e);
+        const double c = prob.edge_cost(e);
+        const double joined =
+            std::min(join_staircases(sf[u], sb[v], cap), join_staircases(sf[v], sb[u], cap)) + c +
+            correction;
+        auto& x = lb[static_cast<size_t>(e)];
+        x = std::max(x, joined);
+    }
+    return lb;
+}
+
+/// Edge elimination from per-edge lower bounds (edge_lower_bounds):
+/// eliminated[e] when lb_e > upper_bound, none when the bound is +inf.
+inline std::vector<bool> edge_elimination(const Problem& prob, std::span<const double> edge_lb,
+                                          double upper_bound) {
+    std::vector<bool> eliminated(static_cast<size_t>(prob.num_edges()), false);
+    if (upper_bound >= std::numeric_limits<double>::infinity()) {
+        return eliminated;
+    }
+    for (size_t e = 0; e < eliminated.size(); ++e) {
+        eliminated[e] = edge_lb[e] > upper_bound + 1e-6;
+    }
     return eliminated;
 }
 

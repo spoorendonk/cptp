@@ -1443,3 +1443,176 @@ TEST_CASE("Labeling: every live label is extended (#111)", "[labeling]") {
         }
     }
 }
+
+namespace {
+
+// The exact minimum net cost of a walk from root to each node at each load
+// under one row, as brute_force_labeling, indexed g[d][v]. With two_cycle the
+// walk never goes u -> v -> u: the DP then runs over (load, node, predecessor).
+std::vector<std::vector<double>> brute_force_loads(const cptp::Problem& prob, int32_t root,
+                                                   bool two_cycle) {
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    const int32_t n = prob.num_nodes();
+    const auto q = static_cast<size_t>(prob.capacity());
+    const auto& graph = prob.graph();
+    const auto none = static_cast<size_t>(n);  // the root's predecessor
+    // h[d][v][p], p == none for the root label
+    std::vector h(q + 1, std::vector(static_cast<size_t>(n), std::vector<double>(none + 1, kInf)));
+    h[static_cast<size_t>(prob.demand(root))][static_cast<size_t>(root)][none] = -prob.profit(root);
+    for (size_t d = 0; d <= q; ++d) {
+        for (int32_t u = 0; u < n; ++u) {
+            for (size_t p = 0; p <= none; ++p) {
+                const double cost = h[d][static_cast<size_t>(u)][p];
+                if (cost >= kInf) {
+                    continue;
+                }
+                for (auto e : graph.incident_edges(u)) {
+                    const int32_t v = graph.other_endpoint(e, u);
+                    if (two_cycle && static_cast<size_t>(v) == p) {
+                        continue;
+                    }
+                    const size_t dv = d + static_cast<size_t>(prob.demand(v));
+                    if (dv > q) {
+                        continue;
+                    }
+                    auto& next = h[dv][static_cast<size_t>(v)][static_cast<size_t>(u)];
+                    next = std::min(next, cost + prob.edge_cost(e) - prob.profit(v));
+                }
+            }
+        }
+    }
+    std::vector g(q + 1, std::vector<double>(static_cast<size_t>(n), kInf));
+    for (size_t d = 0; d <= q; ++d) {
+        for (size_t v = 0; v < static_cast<size_t>(n); ++v) {
+            g[d][v] = *std::ranges::min_element(h[d][v]);
+        }
+    }
+    return g;
+}
+
+// The exact load-consistent join of two such tables over edge e = (u, v):
+// min over d1 + d2 <= cap of gf[d1][u] + c_e + gb[d2][v] + correction, both
+// orientations.
+double brute_force_join(const cptp::Problem& prob, int32_t e,
+                        const std::vector<std::vector<double>>& gf,
+                        const std::vector<std::vector<double>>& gb, double cap, double correction) {
+    const auto& graph = prob.graph();
+    const auto u = static_cast<size_t>(graph.edge_source(e));
+    const auto v = static_cast<size_t>(graph.edge_target(e));
+    double best = std::numeric_limits<double>::infinity();
+    for (size_t d1 = 0; d1 < gf.size(); ++d1) {
+        for (size_t d2 = 0; d2 < gb.size(); ++d2) {
+            if (static_cast<double>(d1 + d2) > cap) {
+                continue;
+            }
+            best = std::min({best, gf[d1][u] + gb[d2][v], gf[d1][v] + gb[d2][u]});
+        }
+    }
+    return best + prob.edge_cost(e) + correction;
+}
+
+}  // namespace
+
+TEST_CASE("Labeling: load join and 2-cycle elimination match an exact DP (#144)", "[labeling]") {
+    // Random complete graphs with integer demands >= 1, as the #111 test, for
+    // a tour (s = t = 0) and a path (s = 0, t = 6), with and without 2-cycle
+    // elimination: f is the DP's per-node minimum and every edge's bound is
+    // the exact join of the two halves' loads.
+    constexpr double kInf = std::numeric_limits<double>::infinity();
+    std::mt19937 rng(144);
+    std::uniform_int_distribution<int> cost(1, 20);
+    std::uniform_int_distribution<int> profit(0, 30);
+    std::uniform_int_distribution<int> dem(1, 4);
+    constexpr int32_t kNodes = 7;
+    constexpr double kQ = 12.0;
+    for (int trial = 0; trial < 200; ++trial) {
+        std::vector<cptp::Edge> edges;
+        std::vector<double> costs;
+        for (int32_t u = 0; u < kNodes; ++u) {
+            for (int32_t v = u + 1; v < kNodes; ++v) {
+                edges.push_back({u, v});
+                costs.push_back(cost(rng));
+            }
+        }
+        std::vector<double> profits(kNodes);
+        std::vector<double> demands(kNodes);
+        for (int32_t v = 0; v < kNodes; ++v) {
+            profits[static_cast<size_t>(v)] = profit(rng);
+            demands[static_cast<size_t>(v)] = dem(rng);
+        }
+        for (const int32_t target : {0, kNodes - 1}) {
+            cptp::Problem prob;
+            prob.build(kNodes, edges, costs, profits, std::vector<std::vector<double>>{demands},
+                       std::vector<double>{kQ}, 0, target);
+            const bool tour = prob.is_tour();
+            const double correction = tour ? prob.profit(0) : 0.0;
+            const double cap = kQ + (tour ? prob.demand(0) : 0.0);
+            for (const bool two_cycle : {false, true}) {
+                INFO("trial " << trial << " target " << target << " two_cycle " << two_cycle);
+                cptp::preprocess::LabelFronts ff;
+                cptp::preprocess::LabelFronts fb;
+                const auto f = cptp::preprocess::labeling_row(
+                    prob, 0, 0, prob.edge_costs(), prob.profits(), 0,
+                    cptp::preprocess::kNoLabelingDeadline, nullptr, two_cycle, &ff);
+                const auto b =
+                    tour ? f
+                         : cptp::preprocess::labeling_row(
+                               prob, target, 0, prob.edge_costs(), prob.profits(), 0,
+                               cptp::preprocess::kNoLabelingDeadline, nullptr, two_cycle, &fb);
+                const auto gf = brute_force_loads(prob, 0, two_cycle);
+                const auto gb = tour ? gf : brute_force_loads(prob, target, two_cycle);
+                for (size_t v = 0; v < static_cast<size_t>(kNodes); ++v) {
+                    INFO("node " << v);
+                    double want = kInf;
+                    for (const auto& level : gf) {
+                        want = std::min(want, level[v]);
+                    }
+                    REQUIRE_THAT(f[v], WithinAbs(want, 1e-9));
+                }
+                const auto lb = cptp::preprocess::edge_lower_bounds(prob, f, b, correction, &ff,
+                                                                    tour ? &ff : &fb);
+                for (auto e : prob.graph().edges()) {
+                    INFO("edge " << e);
+                    const double want = brute_force_join(prob, e, gf, gb, cap, correction);
+                    if (want >= kInf) {
+                        REQUIRE(lb[static_cast<size_t>(e)] >= kInf);
+                    } else {
+                        REQUIRE_THAT(lb[static_cast<size_t>(e)], WithinAbs(want, 1e-9));
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("Multicap: labeling_join = load and labeling_2cycle keep the optimum (#144)",
+          "[multicap][labeling]") {
+    struct Case {
+        int32_t rows;
+        double objective;
+    };
+    for (const auto& c : {Case{1, -29.0}, Case{2, -20.0}, Case{3, -18.0}}) {
+        INFO("m = " << c.rows);
+        for (const char* join : {"min", "load"}) {
+            for (const char* two_cycle : {"false", "true"}) {
+                INFO("labeling_join = " << join << ", labeling_2cycle = " << two_cycle);
+                cptp::Model model;
+                fill_model(model, c.rows);
+                model.set_depot(0);
+                auto opts = kQuiet;
+                opts.emplace_back("labeling_join", join);
+                opts.emplace_back("labeling_2cycle", two_cycle);
+                const auto result = model.solve(opts);
+                REQUIRE(result.is_optimal());
+                REQUIRE_THAT(result.objective, WithinAbs(c.objective, 1e-6));
+                require_tour_fits(model.problem(), result.tour);
+            }
+        }
+    }
+    cptp::Model model;
+    fill_model(model, 1);
+    model.set_depot(0);
+    auto opts = kQuiet;
+    opts.emplace_back("labeling_join", "max");
+    REQUIRE_THROWS_AS(model.solve(opts), std::invalid_argument);
+}

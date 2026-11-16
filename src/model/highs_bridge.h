@@ -128,6 +128,11 @@ public:
     /// (path).
     void set_labeling_bounds(std::vector<double> f, std::vector<double> b, double correction);
 
+    /// Per-edge lower bounds (preprocess::edge_lower_bounds, #144) that edge
+    /// elimination and the propagator's sweep use alongside f and b: an
+    /// edge's bound is the larger of the two. Empty: f and b alone.
+    void set_edge_lower_bounds(std::vector<double> edge_lb) { edge_lb_ = std::move(edge_lb); }
+
     /// Set all-pairs labeling bounds for stronger domain propagation (Trigger B).
     /// dist is a flat n×n matrix: d(s,v) = dist[s*n + v].
     void set_all_pairs_bounds(std::vector<double> dist);
@@ -215,6 +220,7 @@ private:
     std::vector<double> fwd_bounds_;               // f[v]: forward bounds (source → v)
     std::vector<double> bwd_bounds_;               // b[v]: backward bounds (v → target)
     double correction_ = 0.0;                      // profit(source) if tour, 0 if path
+    std::vector<double> edge_lb_;                  // per-edge bounds, or empty (#144)
     std::vector<int8_t> fixed_y_;                  // optional fixed y-vars: -1 unset, 0/1 fixed
     std::vector<detail::Hyperplane> hyperplanes_;  // one z column each, after x and y
 

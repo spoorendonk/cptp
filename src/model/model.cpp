@@ -250,6 +250,16 @@ SolveResult Model::solve(const SolverOptions& options) {
     // with more fixings on one instance only, and `vector` costs 3x at m = 10
     // with labelings of up to 972 s (#115).
     std::string labeling_rows = "first";
+    // How edge elimination joins the labeling's two halves (#144): `min`
+    // takes each half at its cheapest label, `load` joins row 0's fronts so
+    // the halves together fit Q_0. labeling_2cycle forbids u -> v -> u in the
+    // single-row labelings. By measurement (#144: 10 binding multicap
+    // instances, m = 2, Mac mini): `load` eliminates edges at the warm-start
+    // UB on 6/10 (up to 1273/1770) at 0.98-1.37x labeling time (median ~1.1x,
+    // at most +4 ms); 2-cycle elimination eliminates more still, but its
+    // labeling takes up to 73x as long (13 s on B-n57-k7-20), so it is off.
+    bool join_by_load = true;
+    bool labeling_2cycle = false;
 
     // --- Cut families ---
     bool enable_sec = true;
@@ -412,6 +422,14 @@ SolveResult Model::solve(const SolverOptions& options) {
         if (key == "labeling_rows") {
             preprocess::parse_label_rows(value);  // reject an unknown value here
             labeling_rows = value;
+            continue;
+        }
+        if (key == "labeling_join") {
+            join_by_load = preprocess::parse_join_by_load(value);
+            continue;
+        }
+        if (key == "labeling_2cycle") {
+            labeling_2cycle = parse_bool(value);
             continue;
         }
         // --- Cut families ---
@@ -628,6 +646,12 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (labeling_rows != "first") {
         nondefault_settings.push_back("labeling_rows=" + labeling_rows);
     }
+    if (!join_by_load) {
+        nondefault_settings.emplace_back("labeling_join=min");
+    }
+    if (labeling_2cycle) {
+        nondefault_settings.emplace_back("labeling_2cycle=on");
+    }
     if (all_pairs_bounds) {
         nondefault_settings.emplace_back("all_pairs_bounds=on");
     }
@@ -834,6 +858,8 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     std::vector<double> fwd_bounds;
     std::vector<double> bwd_bounds;
+    // Per-edge elimination bounds (edge_lower_bounds), from stage 1's labelings.
+    std::vector<double> edge_lb;
     std::vector<double> all_pairs;
     heuristic::HeuristicResult warm_start{{}, std::numeric_limits<double>::infinity()};
     double warm_start_ub = std::numeric_limits<double>::infinity();
@@ -854,19 +880,21 @@ SolveResult Model::solve(const SolverOptions& options) {
             logger_.log("  capacity-aware labeling (source={}, target={})", source, target);
             preprocess::LabelingStats fwd_stats;
             preprocess::LabelingStats bwd_stats;
+            preprocess::LabelFronts fwd_fronts;
+            preprocess::LabelFronts bwd_fronts;
             if (source != target) {
                 std::jthread t_fwd([&] {
-                    fwd_bounds =
-                        preprocess::labeling_from(problem_, source, labeling_max_queue_pops,
-                                                  label_rows, -1, &fwd_stats, labeling_deadline);
+                    fwd_bounds = preprocess::labeling_from(
+                        problem_, source, labeling_max_queue_pops, label_rows, -1, &fwd_stats,
+                        labeling_deadline, labeling_2cycle, join_by_load ? &fwd_fronts : nullptr);
                 });
-                bwd_bounds =
-                    preprocess::labeling_from(problem_, target, labeling_max_queue_pops, label_rows,
-                                              -1, &bwd_stats, labeling_deadline);
+                bwd_bounds = preprocess::labeling_from(
+                    problem_, target, labeling_max_queue_pops, label_rows, -1, &bwd_stats,
+                    labeling_deadline, labeling_2cycle, join_by_load ? &bwd_fronts : nullptr);
             } else {
-                fwd_bounds =
-                    preprocess::labeling_from(problem_, source, labeling_max_queue_pops, label_rows,
-                                              -1, &fwd_stats, labeling_deadline);
+                fwd_bounds = preprocess::labeling_from(
+                    problem_, source, labeling_max_queue_pops, label_rows, -1, &fwd_stats,
+                    labeling_deadline, labeling_2cycle, join_by_load ? &fwd_fronts : nullptr);
                 bwd_bounds = fwd_bounds;
             }
             if (label_rows == preprocess::LabelRows::kVector) {
@@ -901,6 +929,10 @@ SolveResult Model::solve(const SolverOptions& options) {
                         "  later rows' labeling stopped at time_limit — their bounds "
                         "dropped");
                 }
+                // The fronts are filled only under join_by_load; empty ones join nothing.
+                edge_lb = preprocess::edge_lower_bounds(
+                    problem_, fwd_bounds, bwd_bounds, correction, &fwd_fronts,
+                    source != target ? &bwd_fronts : &fwd_fronts);
                 logger_.log(
                     "  fwd_reachable={}/{}  bwd_reachable={}/{}  fwd[target]={}  "
                     "time={:.3f}s",
@@ -950,10 +982,8 @@ SolveResult Model::solve(const SolverOptions& options) {
 
         logger_.log("Preprocess:");
         Timer stage3_timer;
-        if (edge_elimination && std::isfinite(construction_ub) && !fwd_bounds.empty() &&
-            !bwd_bounds.empty()) {
-            auto eliminated = preprocess::edge_elimination(problem_, fwd_bounds, bwd_bounds,
-                                                           construction_ub, correction);
+        if (edge_elimination && std::isfinite(construction_ub) && !edge_lb.empty()) {
+            auto eliminated = preprocess::edge_elimination(problem_, edge_lb, construction_ub);
             stage3_elim_edges =
                 static_cast<int32_t>(std::count(eliminated.begin(), eliminated.end(), true));
             stage3_elim_ratio =
@@ -997,7 +1027,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                         }
                         auto row = preprocess::labeling_from(problem_, s, 0, label_rows,
                                                              labeling_max_queue_pops, nullptr,
-                                                             labeling_deadline);
+                                                             labeling_deadline, labeling_2cycle);
                         if (row.empty()) {
                             any_empty = true;
                             return;
@@ -1071,9 +1101,8 @@ SolveResult Model::solve(const SolverOptions& options) {
         logger_.log("Preprocess restart:");
         Timer stage5_timer;
         if (edge_elimination && std::isfinite(warm_start_ub) &&
-            warm_start_ub < construction_ub - 1e-9 && !fwd_bounds.empty() && !bwd_bounds.empty()) {
-            auto eliminated = preprocess::edge_elimination(problem_, fwd_bounds, bwd_bounds,
-                                                           warm_start_ub, correction);
+            warm_start_ub < construction_ub - 1e-9 && !edge_lb.empty()) {
+            auto eliminated = preprocess::edge_elimination(problem_, edge_lb, warm_start_ub);
             stage5_elim_edges =
                 static_cast<int32_t>(std::count(eliminated.begin(), eliminated.end(), true));
             stage5_elim_ratio =
@@ -1127,6 +1156,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     bridge.set_labeling_bounds(std::move(fwd_bounds), std::move(bwd_bounds), correction);
+    bridge.set_edge_lower_bounds(std::move(edge_lb));
     if (all_pairs_bounds) {
         bridge.set_all_pairs_bounds(std::move(all_pairs));
     }
