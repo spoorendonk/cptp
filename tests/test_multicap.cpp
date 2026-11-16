@@ -27,6 +27,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using Catch::Matchers::WithinAbs;
@@ -754,6 +755,32 @@ TEST_CASE("Multicap: Model and loaders reject a negative demand", "[multicap][io
                                     "0 0\n");
     REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(numeric), std::invalid_argument, negative);
     std::filesystem::remove(numeric);
+}
+
+TEST_CASE("Problem::build and the TSPLIB loader reject a source/target out of range", "[io]") {
+    // #124: DEPOT_SECTION 5 with DIMENSION 3 stored source = target = 4.
+    const auto range = Catch::Matchers::Message("source and target must be in [0, num_nodes)");
+    const auto rows = std::vector<std::vector<double>>{kRows[0]};
+    const auto caps = std::vector<double>{kCaps[0]};
+    for (const auto& [s, t] :
+         {std::pair{4, 4}, std::pair{0, 4}, std::pair{4, 0}, std::pair{-1, 0}, std::pair{0, -1}}) {
+        INFO("source " << s << ", target " << t);
+        cptp::Problem bad;
+        REQUIRE_THROWS_MATCHES(bad.build(4, kEdges, kCosts, kProfits, rows, caps, s, t),
+                               std::invalid_argument, range);
+    }
+    cptp::Problem path;
+    path.build(4, kEdges, kCosts, kProfits, rows, caps, 0, 3);
+    REQUIRE(path.target() == 3);
+
+    const auto tsplib = write_temp("cptp_depot_out_of_range.vrp",
+                                   "NAME : depot\nTYPE : CVRP\nDIMENSION : 3\n"
+                                   "EDGE_WEIGHT_TYPE : EUC_2D\nCAPACITY : 1\n"
+                                   "NODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n"
+                                   "DEMAND_SECTION\n1 0\n2 1\n3 1\n"
+                                   "DEPOT_SECTION\n5\n-1\nEOF\n");
+    REQUIRE_THROWS_MATCHES(cptp::io::load_tsplib(tsplib), std::invalid_argument, range);
+    std::filesystem::remove(tsplib);
 }
 
 TEST_CASE("Multicap: zero-demand cycles that are not negative keep their row",

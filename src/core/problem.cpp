@@ -31,6 +31,10 @@ void Problem::build(int32_t num_nodes, std::span<const Edge> edges, std::vector<
     if (profits.size() != static_cast<size_t>(num_nodes)) {
         throw std::invalid_argument("profits size must equal num_nodes");
     }
+    // demand(k, v), profit(v) and the y columns are indexed by source/target.
+    if (source < 0 || source >= num_nodes || target < 0 || target >= num_nodes) {
+        throw std::invalid_argument("source and target must be in [0, num_nodes)");
+    }
     if (demand_rows.empty()) {
         throw std::invalid_argument("at least one demand row is required");
     }
