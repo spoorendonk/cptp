@@ -115,6 +115,26 @@ void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge,
         });
 }
 
+RCFixingStrategy parse_rc_fixing(const std::string& value) {
+    if (value == "off") {
+        return RCFixingStrategy::off;
+    }
+    if (value == "root_only") {
+        return RCFixingStrategy::root_only;
+    }
+    if (value == "on_ub_improvement") {
+        return RCFixingStrategy::on_ub_improvement;
+    }
+    if (value == "periodic") {
+        return RCFixingStrategy::periodic;
+    }
+    if (value == "adaptive") {
+        return RCFixingStrategy::adaptive;
+    }
+    throw std::invalid_argument(
+        "rc_fixing must be off, root_only, on_ub_improvement, periodic or adaptive, not " + value);
+}
+
 }  // namespace
 
 Model::Model() = default;
@@ -406,22 +426,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         // --- RC fixing ---
         if (key == "rc_fixing") {
-            if (value == "root_only") {
-                rc_settings.strategy = RCFixingStrategy::root_only;
-            } else if (value == "on_ub_improvement") {
-                rc_settings.strategy = RCFixingStrategy::on_ub_improvement;
-            } else if (value == "periodic") {
-                rc_settings.strategy = RCFixingStrategy::periodic;
-            } else if (value == "adaptive") {
-                rc_settings.strategy = RCFixingStrategy::adaptive;
-            } else if (value == "off") {
-                rc_settings.strategy = RCFixingStrategy::off;
-            } else {
-                throw std::invalid_argument(
-                    "rc_fixing must be off, root_only, on_ub_improvement, periodic or "
-                    "adaptive, not " +
-                    value);
-            }
+            rc_settings.strategy = parse_rc_fixing(value);
             continue;
         }
         if (key == "rc_fixing_interval") {
