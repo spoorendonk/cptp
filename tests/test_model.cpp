@@ -1,6 +1,7 @@
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
 #include "model/model.h"
+#include "model/options.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -638,6 +639,40 @@ TEST_CASE("Model: connectivity still enforced when SEC cut generation is disable
     // very negative objective (about -175). Connected solutions are >= 0.
     REQUIRE(r_on.objective >= 0.0);
     REQUIRE(r_off.objective >= 0.0);
+}
+
+TEST_CASE("Bool options take true/false, 1/0 or on/off in any case and reject the rest",
+          "[model][options]") {
+    for (const char* v : {"true", "1", "on", "ON", "True"}) {
+        INFO(v);
+        REQUIRE(cptp::parse_bool_option("enable_rglm", v));
+    }
+    for (const char* v : {"false", "0", "off", "Off", "FALSE"}) {
+        INFO(v);
+        REQUIRE_FALSE(cptp::parse_bool_option("enable_rglm", v));
+    }
+    for (const char* v : {"yes", "no", "ture", "", "2"}) {
+        INFO(v);
+        REQUIRE_THROWS_AS(cptp::parse_bool_option("enable_rglm", v), std::invalid_argument);
+    }
+
+    // Model::solve goes through the same parser: "Off" is accepted, "yes" is
+    // an error rather than a silent false.
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    std::vector<double> costs = {5.0, 3.0, 4.0};
+    std::vector<double> profits = {0.0, 10.0, 8.0};
+    std::vector<double> demands = {0.0, 2.0, 3.0};
+    model.set_graph(3, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 5.0);
+    auto opts_ok = kQuiet;
+    opts_ok.emplace_back("enable_rglm", "Off");
+    REQUIRE(model.solve(opts_ok).is_optimal());
+    auto opts_bad = kQuiet;
+    opts_bad.emplace_back("capacity_cut_surrogate", "yes");
+    REQUIRE_THROWS_AS(model.solve(opts_bad), std::invalid_argument);
 }
 
 TEST_CASE(

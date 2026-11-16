@@ -2,6 +2,7 @@
 
 #include "model/highs_bridge.h"
 #include "model/hyperplane.h"
+#include "model/options.h"
 #include "parallel/parallel.h"
 
 #include <algorithm>
@@ -293,9 +294,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::map<std::string, std::string> accepted_highs_options;
     bool threads_option_explicit = false;
 
-    auto parse_bool = [](const std::string& v) { return v == "true" || v == "1"; };
-
     for (const auto& [key, value] : options) {
+        auto parse_bool = [&key](const std::string& v) { return parse_bool_option(key, v); };
         if (key == "presolve") {
             if (value != "off" && value != "false" && value != "0") {
                 logger_.log(

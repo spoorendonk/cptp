@@ -17,6 +17,8 @@ static void print_usage(const char* prog) {
               << "Usage: " << prog
               << " <instance> [--source <node>] [--target <node>] [--<option> <value> "
                  "...]\n"
+              << "\nBoolean options (shown as true/false) also take 1/0 or on/off, in any "
+                 "case;\nany other value is an error.\n"
               //
               << "\nGeneral:\n"
               << "  --source <node>                          Source node (overrides "
