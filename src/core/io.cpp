@@ -311,47 +311,69 @@ Problem load_tsplib(const std::filesystem::path& path) {
         throw std::runtime_error("TSPLIB: missing DIMENSION");
     }
 
-    // Build distance matrix
-    std::vector<std::vector<double>> dist(dimension, std::vector<double>(dimension, 0.0));
-
+    // Nothing is sized by DIMENSION until the data sections have shown that
+    // many entries (#134): a header alone allocates nothing.
+    const auto n = static_cast<size_t>(dimension);
+    std::vector<double> flat;
+    std::string format;
     if (!edge_weight_matrix.empty()) {
-        // Explicit weights (FULL_MATRIX, LOWER_DIAG_ROW, etc.)
-        // For simplicity, handle FULL_MATRIX and LOWER_DIAG_ROW
-        auto format =
+        format =
             header.contains("EDGE_WEIGHT_FORMAT") ? header["EDGE_WEIGHT_FORMAT"] : "FULL_MATRIX";
+        for (const auto& row : edge_weight_matrix) {
+            flat.insert(flat.end(), row.begin(), row.end());
+        }
+        size_t needed = 0;
         if (format == "FULL_MATRIX") {
-            // Flatten all rows
-            std::vector<double> flat;
-            for (auto& row : edge_weight_matrix) {
-                for (double v : row) {
-                    flat.push_back(v);
-                }
-            }
-            for (int i = 0; i < dimension; ++i) {
-                for (int j = 0; j < dimension; ++j) {
-                    dist[i][j] = flat[i * dimension + j];
-                }
-            }
+            needed = n * n;
         } else if (format == "LOWER_DIAG_ROW" || format == "LOWER_ROW") {
-            std::vector<double> flat;
-            for (auto& row : edge_weight_matrix) {
-                for (double v : row) {
-                    flat.push_back(v);
-                }
-            }
-            int k = 0;
-            for (int i = 0; i < dimension; ++i) {
-                for (int j = 0; j <= i; ++j) {
-                    dist[i][j] = flat[k];
-                    dist[j][i] = flat[k];
-                    ++k;
-                }
-            }
+            needed = n * (n + 1) / 2;
+        } else {
+            throw std::runtime_error("TSPLIB: EDGE_WEIGHT_FORMAT " + format + " is not supported");
+        }
+        // More is allowed: an unknown section after the weights (such as
+        // DISPLAY_DATA_SECTION) is read on as weights.
+        if (flat.size() < needed) {
+            throw std::runtime_error("TSPLIB: EDGE_WEIGHT_SECTION has " +
+                                     std::to_string(flat.size()) + " weights, " + format +
+                                     " with DIMENSION " + std::to_string(dimension) + " needs " +
+                                     std::to_string(needed));
         }
     } else if (!x_coords.empty()) {
-        // Compute from coordinates
-        for (int i = 0; i < dimension; ++i) {
-            for (int j = 0; j < dimension; ++j) {
+        if (x_coords.size() < n) {
+            throw std::runtime_error("TSPLIB: NODE_COORD_SECTION has " +
+                                     std::to_string(x_coords.size()) + " nodes, DIMENSION is " +
+                                     std::to_string(dimension));
+        }
+    } else {
+        throw std::runtime_error("TSPLIB: no EDGE_WEIGHT_SECTION or NODE_COORD_SECTION");
+    }
+    if (!profits.empty() && profits.size() < n) {
+        throw std::runtime_error(
+            "TSPLIB: " +
+            std::string(profit_section_used ? "PROFIT_SECTION" : "NODE_WEIGHT_SECTION") + " has " +
+            std::to_string(profits.size()) + " values, DIMENSION is " + std::to_string(dimension));
+    }
+
+    // Build distance matrix
+    std::vector<std::vector<double>> dist(n, std::vector<double>(n, 0.0));
+    if (format == "FULL_MATRIX") {
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t j = 0; j < n; ++j) {
+                dist[i][j] = flat[(i * n) + j];
+            }
+        }
+    } else if (!format.empty()) {  // LOWER_DIAG_ROW or LOWER_ROW
+        size_t k = 0;
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t j = 0; j <= i; ++j) {
+                dist[i][j] = flat[k];
+                dist[j][i] = flat[k];
+                ++k;
+            }
+        }
+    } else {
+        for (size_t i = 0; i < n; ++i) {
+            for (size_t j = 0; j < n; ++j) {
                 dist[i][j] = euc2d(x_coords[i], y_coords[i], x_coords[j], y_coords[j]);
             }
         }
@@ -360,8 +382,8 @@ Problem load_tsplib(const std::filesystem::path& path) {
     // Build edges: complete undirected graph (i < j)
     std::vector<Edge> edges;
     std::vector<double> edge_costs;
-    edges.reserve(dimension * (dimension - 1) / 2);
-    edge_costs.reserve(dimension * (dimension - 1) / 2);
+    edges.reserve(n * (n - 1) / 2);
+    edge_costs.reserve(n * (n - 1) / 2);
 
     for (int32_t i = 0; i < dimension; ++i) {
         for (int32_t j = i + 1; j < dimension; ++j) {

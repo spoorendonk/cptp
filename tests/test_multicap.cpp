@@ -826,6 +826,70 @@ TEST_CASE("The TSPLIB loader rejects a DEPOT_SECTION line that is not an int", "
     REQUIRE(prob.target() == 1);
 }
 
+TEST_CASE("The TSPLIB loader sizes nothing by DIMENSION before its data", "[io]") {
+    // #134: DIMENSION 200000 with no data allocated a 200000^2 matrix, and a
+    // short FULL_MATRIX section was read out of bounds.
+    const auto rejects = [](const std::string& name, const std::string& text,
+                            const std::string& message) {
+        INFO(name);
+        const auto path = write_temp(name, text);
+        REQUIRE_THROWS_MATCHES(cptp::io::load_tsplib(path), std::runtime_error,
+                               Catch::Matchers::Message(message));
+        std::filesystem::remove(path);
+    };
+    const std::string head = "NAME : t\nTYPE : CVRP\n";
+    const std::string coords = "NODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n";
+    rejects("cptp_tsplib_huge_no_data.vrp", head + "DIMENSION : 200000\nEOF\n",
+            "TSPLIB: no EDGE_WEIGHT_SECTION or NODE_COORD_SECTION");
+    rejects("cptp_tsplib_huge_coords.vrp", head + "DIMENSION : 200000\n" + coords + "EOF\n",
+            "TSPLIB: NODE_COORD_SECTION has 3 nodes, DIMENSION is 200000");
+    rejects("cptp_tsplib_max_coords.vrp", head + "DIMENSION : 2147483647\n" + coords + "EOF\n",
+            "TSPLIB: NODE_COORD_SECTION has 3 nodes, DIMENSION is 2147483647");
+    rejects("cptp_tsplib_short_coords.vrp", head + "DIMENSION : 4\n" + coords + "EOF\n",
+            "TSPLIB: NODE_COORD_SECTION has 3 nodes, DIMENSION is 4");
+
+    const std::string full = head + "DIMENSION : 3\nEDGE_WEIGHT_TYPE : EXPLICIT\n";
+    rejects("cptp_tsplib_short_full.vrp",
+            full + "EDGE_WEIGHT_FORMAT : FULL_MATRIX\nEDGE_WEIGHT_SECTION\n0 1 2\n1 0 3\nEOF\n",
+            "TSPLIB: EDGE_WEIGHT_SECTION has 6 weights, FULL_MATRIX with DIMENSION 3 needs 9");
+    rejects("cptp_tsplib_short_default_full.vrp", full + "EDGE_WEIGHT_SECTION\n0 1 2\nEOF\n",
+            "TSPLIB: EDGE_WEIGHT_SECTION has 3 weights, FULL_MATRIX with DIMENSION 3 needs 9");
+    rejects("cptp_tsplib_huge_full.vrp",
+            head + "DIMENSION : 2147483647\nEDGE_WEIGHT_SECTION\n0 1 2\nEOF\n",
+            "TSPLIB: EDGE_WEIGHT_SECTION has 3 weights, FULL_MATRIX with DIMENSION 2147483647 "
+            "needs 4611686014132420609");
+    rejects("cptp_tsplib_short_lower.vrp",
+            full + "EDGE_WEIGHT_FORMAT : LOWER_DIAG_ROW\nEDGE_WEIGHT_SECTION\n0\n1 0\n2 3\nEOF\n",
+            "TSPLIB: EDGE_WEIGHT_SECTION has 5 weights, LOWER_DIAG_ROW with DIMENSION 3 needs 6");
+    rejects("cptp_tsplib_upper_row.vrp",
+            full + "EDGE_WEIGHT_FORMAT : UPPER_ROW\nEDGE_WEIGHT_SECTION\n1 2\n3\nEOF\n",
+            "TSPLIB: EDGE_WEIGHT_FORMAT UPPER_ROW is not supported");
+    rejects("cptp_tsplib_short_node_weights.vrp",
+            head + "DIMENSION : 3\n" + coords + "NODE_WEIGHT_SECTION\n0 -1\nEOF\n",
+            "TSPLIB: NODE_WEIGHT_SECTION has 2 values, DIMENSION is 3");
+    rejects("cptp_tsplib_short_profits.vrp",
+            head + "DIMENSION : 3\n" + coords + "PROFIT_SECTION\n1 0\n2 5\nEOF\n",
+            "TSPLIB: PROFIT_SECTION has 2 values, DIMENSION is 3");
+
+    // A full section loads, and weights past it (an unknown section read on)
+    // are ignored.
+    const auto ok = write_temp("cptp_tsplib_full_ok.vrp",
+                               full +
+                                   "EDGE_WEIGHT_SECTION\n0 1 2\n1 0 3\n2 3 0\n"
+                                   "DISPLAY_DATA_SECTION\n1 0 0\n2 1 0\n3 0 1\nEOF\n");
+    const auto prob = cptp::io::load_tsplib(ok);
+    std::filesystem::remove(ok);
+    REQUIRE(prob.num_nodes() == 3);
+    REQUIRE(prob.edge_costs() == std::vector<double>{1.0, 2.0, 3.0});
+    const auto lower =
+        write_temp("cptp_tsplib_lower_ok.vrp", full +
+                                                   "EDGE_WEIGHT_FORMAT : LOWER_DIAG_ROW\n"
+                                                   "EDGE_WEIGHT_SECTION\n0\n1 0\n2 3 0\nEOF\n");
+    const auto lower_prob = cptp::io::load_tsplib(lower);
+    std::filesystem::remove(lower);
+    REQUIRE(lower_prob.edge_costs() == std::vector<double>{1.0, 2.0, 3.0});
+}
+
 TEST_CASE("The numeric loader rejects a source with no target", "[io]") {
     // #127: a lone trailing "2" loaded as an s-t path from node 2 to node 0.
     const std::string body =
