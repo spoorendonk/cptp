@@ -1187,18 +1187,23 @@ SolveResult Model::solve(const SolverOptions& options) {
     // Clear static callbacks/state to avoid leaking between solves
     HighsUserSeparator::clearCallback();
 
+    // On a kError return HiGHS invalidates its info and solution (in
+    // Highs::returnFromOptimizeModel, kMemoryLimit included), so there is no
+    // incumbent to extract, and extract_result would read the kNotset an early
+    // failure leaves as an interrupted run and index an empty col_value.
+    if (run_status == HighsStatus::kError) {
+        // HiGHS logs the cause itself.
+        logger_.log("Error: HiGHS run failed");
+        SolveResult failed;
+        failed.status = SolveResult::Status::Error;
+        failed.time_seconds = total_elapsed_seconds;
+        failed.hyperplane_columns = bridge.num_hyperplane_columns();
+        return failed;
+    }
+
     auto result = bridge.extract_result();
     result.time_seconds = total_elapsed_seconds;
     result.hyperplane_columns = bridge.num_hyperplane_columns();
-    // A kError run that never reached the MIP solver (mip_node_count stays at
-    // its unset -1) leaves the model status kNotset, which extract_result reads
-    // as an interrupted run. A MIP that ran and then stopped with kError (e.g.
-    // kMemoryLimit) keeps its incumbent and the status extract_result gave it.
-    if (run_status == HighsStatus::kError && highs.getInfo().mip_node_count < 0) {
-        // HiGHS logs the cause itself.
-        logger_.log("Error: HiGHS run failed before the MIP solve");
-        result.status = SolveResult::Status::Error;
-    }
 
     return result;
 }

@@ -957,6 +957,29 @@ TEST_CASE("Model: solves with different thread counts in one process", "[model][
     }
 }
 
+// A HiGHS run that fails reports Error, not the time limit HiGHS's leftover
+// kNotset model status would read as (#141). Highs::run writes the model file
+// before solving and returns kError when it cannot.
+TEST_CASE("Model: a failed HiGHS run reports Error", "[model][options]") {
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    model.set_graph(4, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 7.0);
+
+    const cptp::SolverOptions opts = {{"time_limit", "30"},
+                                      {"output_flag", "false"},
+                                      {"write_model_file", "/nonexistent-dir-cptp-141/model.mps"}};
+    auto r = model.solve(opts);
+    REQUIRE(r.status == cptp::SolveResult::Status::Error);
+    REQUIRE_FALSE(r.has_solution());
+    REQUIRE(r.tour.empty());
+}
+
 TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][branching]") {
     std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
