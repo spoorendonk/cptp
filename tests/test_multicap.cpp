@@ -800,6 +800,32 @@ TEST_CASE("The TSPLIB loader rejects a DEPOT_SECTION id below 1", "[io]") {
     }
 }
 
+TEST_CASE("The numeric loader rejects a source with no target", "[io]") {
+    // #127: a lone trailing "2" loaded as an s-t path from node 2 to node 0.
+    const std::string body =
+        "3 6\n"
+        "0 0 0\n1 5 2\n2 4 1\n"
+        "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n2 1 1\n"
+        "4\n";
+    const auto lone = write_temp("cptp_numeric_lone_source.txt", body + "2\n");
+    REQUIRE_THROWS_MATCHES(
+        cptp::io::load_numeric(lone), std::runtime_error,
+        Catch::Matchers::Message("numeric: expected \"source target\", found a source only"));
+    std::filesystem::remove(lone);
+
+    const auto pair = write_temp("cptp_numeric_source_target.txt", body + "2 1\n");
+    const auto path = cptp::io::load_numeric(pair);
+    std::filesystem::remove(pair);
+    REQUIRE(path.source() == 2);
+    REQUIRE(path.target() == 1);
+
+    const auto none = write_temp("cptp_numeric_no_source.txt", body);
+    const auto tour = cptp::io::load_numeric(none);
+    std::filesystem::remove(none);
+    REQUIRE(tour.source() == 0);
+    REQUIRE(tour.target() == 0);
+}
+
 TEST_CASE("Problem::build rejects an edge endpoint out of range", "[io]") {
     // #125: edge (1, 5) with num_nodes 4 wrote past static_graph's degree array.
     const auto range = Catch::Matchers::Message("edge endpoints must be in [0, num_nodes)");

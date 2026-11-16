@@ -459,8 +459,12 @@ Problem load_numeric(const std::filesystem::path& path) {
     // Optionally read source and target nodes (default: 0 0 = tour)
     int32_t source = 0;
     int32_t target = 0;
-    if (f >> source >> target) {
-        // source/target were present
+    if (f >> source) {
+        if (!(f >> target)) {
+            throw std::runtime_error("numeric: expected \"source target\", found a source only");
+        }
+    } else {
+        source = 0;  // no source line: a tour from node 0
     }
 
     Problem prob;
