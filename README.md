@@ -107,6 +107,28 @@ Per-instance results are in `benchmarks/cptp.csv`; see `benchmarks/` for reprodu
 
 **Per-component ablation.** `benchmarks/run_ablation.sh` re-runs the solver over the benchmark sets under several cut/fixing configurations (SEC-only, capacity cuts, Comb/RGLM, reduced-cost fixing on/off, SPI on/off) and writes one row per (config, instance) to `benchmarks/ablation.csv`.
 
+### Known issues in earlier results
+
+Two bugs, both present since the first commit (5dcf2b2, 2026-03-10), could
+cut off an optimal solution and so report a suboptimal objective as optimal:
+
+- **Reduced-cost fixing ([#114](https://github.com/spoorendonk/cptp/issues/114)).**
+  The fixing test built an edge's bound on z_LP where the valid base is the
+  Lagrangian bound z_LP − rc·x\*, so it could fix out edges the optimum
+  uses. RC fixing is on by default (`rc_fixing=adaptive`). Fixed in cf191b2.
+- **Labeling bounds ([#111](https://github.com/spoorendonk/cptp/issues/111)).**
+  The scalar labeling queued labels by their index in a node's list, and
+  dominance pruning shifted those indices, so a live label could go
+  unextended. The bounds then came out too high, which the edge/node
+  elimination and the in-tree RC fixing trust. Fixed in 4cc1ee4.
+
+Every result produced before cf191b2 (2026-11-12) may therefore hold wrong
+optima. That includes the table above, every version of
+`benchmarks/cptp.csv` and `benchmarks/ablation.csv`, the v0.1.0 and v0.2.0
+releases, and the tables of the arXiv v1 / EJCO submission (2026-07-05).
+They have not been rerun. Regenerate any result you rely on from cf191b2 or
+later, the first commit with both fixes.
+
 ## Tests
 
 Tests use multiple threads by default (parallel separation is exercised).
