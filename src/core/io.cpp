@@ -468,6 +468,14 @@ Problem load_numeric(const std::filesystem::path& path) {
         }
     }
 
+    // After a failed read: true at end of file (the optional part is absent),
+    // false when a token is left that did not parse.
+    const auto at_end = [&f] {
+        f.clear();
+        f >> std::ws;
+        return f.eof();
+    };
+
     std::vector<double> capacities(num_rows, 1e18);
     for (int32_t k = 0; k < num_rows; ++k) {
         if (!(f >> capacities[k])) {
@@ -478,8 +486,11 @@ Problem load_numeric(const std::filesystem::path& path) {
                 throw std::runtime_error("numeric: expected " + std::to_string(num_rows) +
                                          " capacities");
             }
-            // m = 1 without a capacity line: row 0 keeps the "no limit" 1e18,
-            // as before; a non-numeric token reads as 0.
+            if (!at_end()) {
+                throw std::runtime_error("numeric: the capacity is not a number");
+            }
+            // m = 1 without a capacity line: row 0 has no limit.
+            capacities[0] = 1e18;
             break;
         }
     }
@@ -489,9 +500,16 @@ Problem load_numeric(const std::filesystem::path& path) {
     int32_t target = 0;
     if (f >> source) {
         if (!(f >> target)) {
-            throw std::runtime_error("numeric: expected \"source target\", found a source only");
+            if (at_end()) {
+                throw std::runtime_error(
+                    "numeric: expected \"source target\", found a source only");
+            }
+            throw std::runtime_error("numeric: the target is not an int");
         }
     } else {
+        if (!at_end()) {
+            throw std::runtime_error("numeric: the source is not an int");
+        }
         source = 0;  // no source line: a tour from node 0
     }
 

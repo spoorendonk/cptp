@@ -852,6 +852,38 @@ TEST_CASE("The numeric loader rejects a source with no target", "[io]") {
     REQUIRE(tour.target() == 0);
 }
 
+TEST_CASE("The numeric loader rejects a capacity or source/target that does not parse", "[io]") {
+    // #130: a failed read fell back to "no limit" or a tour from node 0.
+    const std::string arcs =
+        "3 6\n"
+        "0 0 0\n1 5 2\n2 4 1\n"
+        "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n2 1 1\n";
+    const auto rejects = [](const std::string& name, const std::string& text,
+                            const std::string& message) {
+        INFO(name);
+        const auto path = write_temp(name, text);
+        REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(path), std::runtime_error,
+                               Catch::Matchers::Message(message));
+        std::filesystem::remove(path);
+    };
+    const std::string bad_source = "numeric: the source is not an int";
+    rejects("cptp_numeric_text_source.txt", arcs + "4\nabc 1\n", bad_source);
+    rejects("cptp_numeric_overflow_source.txt", arcs + "4\n99999999999 1\n", bad_source);
+    rejects("cptp_numeric_text_target.txt", arcs + "4\n2 x\n", "numeric: the target is not an int");
+    // With m = 1 a capacity token that is not a number hid the "s t" line.
+    const std::string bad_capacity = "numeric: the capacity is not a number";
+    rejects("cptp_numeric_text_capacity.txt", arcs + "abc\n0 2\n", bad_capacity);
+    rejects("cptp_numeric_text_capacity_end.txt", arcs + "abc\n", bad_capacity);
+
+    // No capacity line at all is still "no limit", and a tour.
+    const auto none = write_temp("cptp_numeric_no_capacity.txt", arcs);
+    const auto prob = cptp::io::load_numeric(none);
+    std::filesystem::remove(none);
+    REQUIRE(prob.capacities() == std::vector<double>{1e18});
+    REQUIRE(prob.source() == 0);
+    REQUIRE(prob.target() == 0);
+}
+
 TEST_CASE("The numeric loader rejects a short arc list", "[io]") {
     // #128: num_arcs = 6 with 5 arc lines read an uninitialized head.
     const auto expected =
