@@ -33,13 +33,14 @@ class HyperplaneCandidates {
 public:
     HyperplaneCandidates(const Problem& problem, int32_t y_offset, std::string mode);
 
-    /// Every hyperplane of the mode, in a fixed order.
+    /// Every hyperplane of the mode, in a fixed order, each once.
     [[nodiscard]] std::vector<Hyperplane> columns() const;
 
     /// The capacity rows the demand-weighted hyperplanes come from.
     [[nodiscard]] const std::vector<int32_t>& rows() const { return rows_; }
 
-    /// The rows left out of rows() because their demands are not all integer.
+    /// The rows left out of rows() because their demands are not all integer,
+    /// when the mode has demand-weighted hyperplanes (clusters, demand, all).
     [[nodiscard]] const std::vector<int32_t>& skipped_rows() const { return skipped_rows_; }
 
 private:

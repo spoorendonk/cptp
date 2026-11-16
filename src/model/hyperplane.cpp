@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <set>
 #include <utility>
 
 namespace cptp::detail {
@@ -16,12 +17,19 @@ HyperplaneCandidates::HyperplaneCandidates(const Problem& problem, int32_t y_off
     const int32_t n = n_;
     const auto& graph = problem.graph();
 
-    // Integer demands give an integer z at an integer y (same 1e-9 test as
-    // the bridge's integer-objective check).
+    // Integer coefficients give an integer z at an integer y (same 1e-9 test
+    // as the bridge's integer-objective check). Only the demands that become
+    // coefficients count: those of non-source nodes with d > 0.
     auto integer_demands = [&](int32_t k) {
-        return std::ranges::all_of(problem.demands(k),
-                                   [](double d) { return std::abs(d - std::round(d)) < 1e-9; });
+        const auto& d = problem.demands(k);
+        for (int32_t i = 0; i < n; ++i) {
+            if (i != source_ && d[i] > 0 && std::abs(d[i] - std::round(d[i])) >= 1e-9) {
+                return false;
+            }
+        }
+        return true;
     };
+    const bool demand_weighted = uses("clusters") || uses("demand");
     for (int32_t k = 0; k < problem.num_capacities(); ++k) {
         const double q = problem.capacity(k);
         if (k > 0 && (q <= 0 || q >= sep::kInfiniteCapacity)) {
@@ -29,7 +37,7 @@ HyperplaneCandidates::HyperplaneCandidates(const Problem& problem, int32_t y_off
         }
         if (integer_demands(k)) {
             rows_.push_back(k);
-        } else {
+        } else if (demand_weighted) {
             skipped_rows_.push_back(k);
         }
     }
@@ -130,7 +138,7 @@ HyperplaneCandidates::HyperplaneCandidates(const Problem& problem, int32_t y_off
 }
 
 std::vector<Hyperplane> HyperplaneCandidates::columns() const {
-    std::vector<Hyperplane> result;
+    std::vector<Hyperplane> found;
 
     // Row 0 keeps its one-row names; row k >= 1 gets "_row<k>".
     auto suffix = [this](size_t r) {
@@ -143,7 +151,7 @@ std::vector<Hyperplane> HyperplaneCandidates::columns() const {
             c.indices = {y_off_ + pi, y_off_ + pj};
             c.values = {1.0, 1.0};
             c.name = "pair_" + std::to_string(pi) + "_" + std::to_string(pj);
-            result.push_back(std::move(c));
+            found.push_back(std::move(c));
         }
     }
     if (uses("clusters")) {
@@ -160,7 +168,7 @@ std::vector<Hyperplane> HyperplaneCandidates::columns() const {
                     }
                 }
                 if (!c.indices.empty()) {
-                    result.push_back(std::move(c));
+                    found.push_back(std::move(c));
                 }
             }
         }
@@ -180,7 +188,7 @@ std::vector<Hyperplane> HyperplaneCandidates::columns() const {
                 }
             }
             if (!c.indices.empty()) {
-                result.push_back(std::move(c));
+                found.push_back(std::move(c));
             }
         }
     }
@@ -195,7 +203,23 @@ std::vector<Hyperplane> HyperplaneCandidates::columns() const {
             c.values.push_back(1.0);
         }
         if (!c.indices.empty()) {
-            result.push_back(std::move(c));
+            found.push_back(std::move(c));
+        }
+    }
+    // The same hyperplane can come from two families (a two-node cluster and
+    // its pair; demand and cardinality under unit demands): keep the first,
+    // since a second column would only repeat its row.
+    std::vector<Hyperplane> result;
+    std::set<std::vector<std::pair<int32_t, double>>> seen;
+    for (auto& h : found) {
+        std::vector<std::pair<int32_t, double>> key;
+        key.reserve(h.indices.size());
+        for (size_t j = 0; j < h.indices.size(); ++j) {
+            key.emplace_back(h.indices[j], h.values[j]);
+        }
+        std::ranges::sort(key);
+        if (seen.insert(std::move(key)).second) {
+            result.push_back(std::move(h));
         }
     }
     return result;

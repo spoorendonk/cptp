@@ -598,13 +598,16 @@ std::vector<std::string> names_of(const std::vector<cptp::detail::Hyperplane>& h
 
 TEST_CASE("Multicap: demand hyperplanes come from every bounded row", "[multicap][branching]") {
     const auto prob = make_problem(2);
-    const auto hs = hyperplanes_of(prob, "all");
-    const auto names = names_of(hs);
-    // One cluster {1, 2, 3}, weighed by each row's demands.
-    for (const char* name : {"cluster_0", "cluster_0_row1", "demand", "demand_row1"}) {
-        INFO(name);
-        REQUIRE(std::ranges::count(names, std::string(name)) == 1);
-    }
+    // One cluster {1, 2, 3}, weighed by each row's demands. Each family on its
+    // own: under "all", row 0's unit demands make cluster_0, demand and
+    // cardinality one hyperplane, kept once.
+    REQUIRE(names_of(hyperplanes_of(prob, "clusters")) ==
+            std::vector<std::string>{"cluster_0", "cluster_0_row1"});
+    const auto hs = hyperplanes_of(prob, "demand");
+    REQUIRE(names_of(hs) == std::vector<std::string>{"demand", "demand_row1"});
+    // Under "all" demand_row1 is cluster_0_row1 again, and the one pair is (1, 2).
+    REQUIRE(names_of(hyperplanes_of(prob, "all")) ==
+            std::vector<std::string>{"pair_1_2", "cluster_0", "cluster_0_row1"});
     const auto row1 =
         std::ranges::find(hs, std::string("demand_row1"), &cptp::detail::Hyperplane::name);
     REQUIRE(row1 != hs.end());

@@ -22,7 +22,8 @@ namespace {
 
 // Tour from depot 0 over customers 1..3. Pairs: 1's nearest customer is 2
 // (cost 6), and 2 and 3 pair with an already paired node, so one pair (1, 2).
-// Clusters: seeded by 2 (demand 4), grown to {2, 3, 1}, so one cluster.
+// Clusters: seeded by 2 (demand 4), grown to {2, 3, 1}, so one cluster, the
+// same hyperplane as demand: "all" keeps it once.
 const std::vector<cptp::Edge> kEdges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
 const std::vector<double> kCosts = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
 const std::vector<double> kProfits = {0.0, 20.0, 15.0, 10.0};
@@ -54,7 +55,7 @@ TEST_CASE("Hyperplane columns: each mode adds its columns and keeps the off opti
     REQUIRE(off.hyperplane_columns == 0);
     for (const auto [mode, columns] :
          {ModeColumns{"pairs", 1}, ModeColumns{"clusters", 1}, ModeColumns{"demand", 1},
-          ModeColumns{"cardinality", 1}, ModeColumns{"all", 4}}) {
+          ModeColumns{"cardinality", 1}, ModeColumns{"all", 3}}) {
         INFO("branch_hyper=" << mode);
         const auto r = solve(demands, 7.0, mode);
         REQUIRE(r.hyperplane_columns == columns);
@@ -98,7 +99,7 @@ TEST_CASE("Hyperplane columns: a completed warm start satisfies every row",
     bridge.set_hyperplanes(
         cptp::detail::HyperplaneCandidates(prob, bridge.y_offset(), "all").columns());
     bridge.build_formulation();
-    REQUIRE(bridge.num_hyperplane_columns() == 4);
+    REQUIRE(bridge.num_hyperplane_columns() == 3);
 
     // Tour 0-1-2-0 over edges 0 (0,1), 1 (0,2) and 3 (1,2); y_0 = y_1 = y_2 = 1.
     const auto m = static_cast<int32_t>(kEdges.size());
@@ -113,9 +114,9 @@ TEST_CASE("Hyperplane columns: a completed warm start satisfies every row",
 
     const HighsLp& lp = highs.getLp();
     REQUIRE(static_cast<HighsInt>(sol.size()) == lp.num_col_);
-    // pair_1_2 = 2, cluster_0 = 3 + 4, demand = 3 + 4, cardinality = 2.
+    // pair_1_2 = 2, cluster_0 = 3 + 4 (demand is the same), cardinality = 2.
     const std::vector<double> z(sol.begin() + m + 4, sol.end());
-    REQUIRE(z == std::vector<double>{2.0, 7.0, 7.0, 2.0});
+    REQUIRE(z == std::vector<double>{2.0, 7.0, 2.0});
 
     HighsSparseMatrix a = lp.a_matrix_;
     a.ensureColwise();  // addRow may leave the LP's matrix row-wise
