@@ -92,6 +92,22 @@ TEST_CASE("B-n45-k6-54 optimal with parallel requested", "[optimal][slow]") {
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }
 
+// Hyperplane branching adds LP rows of origin kBranching (HiGHS patch 4a/4b).
+// The LP-row switches in HighsLpRelaxation.cpp must handle that origin: a
+// missed case falls off the switch and returns garbage, which B&B then reads.
+// On this instance branch_hyper changes the search (860 nodes against 1076
+// with it off, threads=1, HiGHS v1.16.0, macOS arm64) and the optimum must hold.
+TEST_CASE("B-n45-k6-54 optimal with hyperplane branching", "[optimal][slow][hyperplane]") {
+    auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n45-k6-54.sppcc");
+    cptp::Model model;
+    model.set_problem(std::move(prob));
+    cptp::SolverOptions opts = {
+        {"output_flag", "false"}, {"time_limit", "60"}, {"threads", "1"}, {"branch_hyper", "all"}};
+    auto r = model.solve(opts);
+    REQUIRE(r.is_optimal());
+    REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
+}
+
 // The benchmark pipeline reads per-phase timings and fixing counts from
 // SolveResult; verify they are wired and internally consistent. Runs with
 // fixing + propagation enabled so the propagator/rc-fixing paths are active.
