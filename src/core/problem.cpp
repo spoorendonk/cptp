@@ -66,6 +66,10 @@ void Problem::build(int32_t num_nodes, std::span<const Edge> edges, std::vector<
     for (size_t i = 0; i < edges.size(); ++i) {
         int32_t u = edges[i].tail;
         int32_t v = edges[i].head;
+        // static_graph indexes its degree array by both endpoints.
+        if (u < 0 || u >= num_nodes || v < 0 || v >= num_nodes) {
+            throw std::invalid_argument("edge endpoints must be in [0, num_nodes)");
+        }
         if (u > v) {
             std::swap(u, v);
         }

@@ -783,6 +783,22 @@ TEST_CASE("Problem::build and the TSPLIB loader reject a source/target out of ra
     std::filesystem::remove(tsplib);
 }
 
+TEST_CASE("Problem::build rejects an edge endpoint out of range", "[io]") {
+    // #125: edge (1, 5) with num_nodes 4 wrote past static_graph's degree array.
+    const auto range = Catch::Matchers::Message("edge endpoints must be in [0, num_nodes)");
+    const auto rows = std::vector<std::vector<double>>{kRows[0]};
+    const auto caps = std::vector<double>{kCaps[0]};
+    for (const auto& [u, v] :
+         {std::pair{1, 5}, std::pair{5, 1}, std::pair{1, 4}, std::pair{-1, 2}, std::pair{2, -1}}) {
+        INFO("edge (" << u << ", " << v << ")");
+        auto edges = kEdges;
+        edges.back() = {u, v};
+        cptp::Problem bad;
+        REQUIRE_THROWS_MATCHES(bad.build(4, edges, kCosts, kProfits, rows, caps, 0, 0),
+                               std::invalid_argument, range);
+    }
+}
+
 TEST_CASE("Multicap: zero-demand cycles that are not negative keep their row",
           "[multicap][labeling]") {
     using cptp::preprocess::LabelRows;
