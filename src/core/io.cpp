@@ -216,12 +216,18 @@ Problem load_tsplib(const std::filesystem::path& path) {
         if (section == Section::Depot) {
             int d;
             std::istringstream iss(line);
-            if (iss >> d) {
-                if (d >= 1) {
-                    depot = d - 1;     // TSPLIB is 1-indexed
-                } else if (d != -1) {  // -1 terminates the section
-                    throw std::runtime_error("TSPLIB: DEPOT_SECTION id must be at least 1");
-                }
+            if (!(iss >> d)) {
+                throw std::runtime_error("TSPLIB: DEPOT_SECTION line \"" + line +
+                                         "\" is not an int id");
+            }
+            if (d >= 1) {
+                depot = d - 1;  // TSPLIB is 1-indexed
+            } else if (d == -1) {
+                // -1 terminates the section; what follows is not depot ids
+                // (an unknown section's data, for one), so go back to header.
+                section = Section::Header;
+            } else {
+                throw std::runtime_error("TSPLIB: DEPOT_SECTION id must be at least 1");
             }
             continue;
         }

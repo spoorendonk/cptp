@@ -800,6 +800,32 @@ TEST_CASE("The TSPLIB loader rejects a DEPOT_SECTION id below 1", "[io]") {
     }
 }
 
+TEST_CASE("The TSPLIB loader rejects a DEPOT_SECTION line that is not an int", "[io]") {
+    // #129: an id that failed to parse was skipped, leaving the depot at node 0.
+    const std::string head =
+        "NAME : depot\nTYPE : CVRP\nDIMENSION : 3\n"
+        "EDGE_WEIGHT_TYPE : EUC_2D\nCAPACITY : 1\n"
+        "NODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n"
+        "DEMAND_SECTION\n1 0\n2 1\n3 1\n"
+        "DEPOT_SECTION\n";
+    for (const std::string id : {"abc", "99999999999"}) {
+        INFO("depot line " << id);
+        const auto path = write_temp("cptp_depot_not_int.vrp", head + id + "\n-1\nEOF\n");
+        REQUIRE_THROWS_MATCHES(
+            cptp::io::load_tsplib(path), std::runtime_error,
+            Catch::Matchers::Message("TSPLIB: DEPOT_SECTION line \"" + id + "\" is not an int id"));
+        std::filesystem::remove(path);
+    }
+
+    // The section ends at -1: an unknown section after it is not read as ids.
+    const auto after = write_temp("cptp_depot_then_display.vrp",
+                                  head + "2\n-1\nDISPLAY_DATA_SECTION\n1 0 0\n2 1 0\n3 0 1\nEOF\n");
+    const auto prob = cptp::io::load_tsplib(after);
+    std::filesystem::remove(after);
+    REQUIRE(prob.source() == 1);
+    REQUIRE(prob.target() == 1);
+}
+
 TEST_CASE("The numeric loader rejects a source with no target", "[io]") {
     // #127: a lone trailing "2" loaded as an s-t path from node 2 to node 0.
     const std::string body =
