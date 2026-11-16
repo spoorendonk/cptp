@@ -5,6 +5,7 @@
 #include "sep/separator.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -192,10 +193,18 @@ inline std::vector<double> labeling_row(const Problem& prob, int32_t root, int32
 /// (#112): see sep::surrogate_row.
 using sep::surrogate_row;
 
-/// Labels the vector labeling (labeling_vector) created, for the log.
+/// Labels the vector labeling (labeling_vector) created, and whether it
+/// stopped at its deadline, for the log.
 struct LabelingStats {
     int64_t labels = 0;
+    bool timed_out = false;
 };
+
+/// When a labeling stops: the solve's time limit (#115). The pop budget alone
+/// does not bound the vector labeling's work, since each pop scans every live
+/// label at each neighbour, so it can run far past time_limit.
+using LabelingDeadline = std::chrono::steady_clock::time_point;
+inline constexpr LabelingDeadline kNoLabelingDeadline = LabelingDeadline::max();
 
 /// Capacity-aware labeling from root with vector labels: each label carries
 /// its load on every row with Q_k < kInfiniteCapacity, a label extends only
@@ -206,15 +215,18 @@ struct LabelingStats {
 ///
 /// Labels live in one pool under stable ids, a dominated one marked dead,
 /// and the queue holds ids, so every label live when popped is extended.
-/// Empty when the budget of max_queue_pops (0 = none) runs out, when no row
-/// is bounded, or when the nodes with zero demand on every bounded row carry
-/// a negative cycle (has_zero_demand_negative_cycle on the row sums): only
-/// those cycles add no load.
+/// Empty when the budget of max_queue_pops (0 = none) runs out, when the
+/// deadline passes (stats->timed_out set), when no row is bounded, or when
+/// the nodes with zero demand on every bounded row carry a negative cycle
+/// (has_zero_demand_negative_cycle on the row sums): only those cycles add
+/// no load. An early stop gives no bound rather than a partial one, whose
+/// f[v] would be too high.
 inline std::vector<double> labeling_vector(const Problem& prob, int32_t root,
                                            std::span<const double> edge_costs,
                                            std::span<const double> profits,
                                            int64_t max_queue_pops = 0,
-                                           LabelingStats* stats = nullptr) {
+                                           LabelingStats* stats = nullptr,
+                                           LabelingDeadline deadline = kNoLabelingDeadline) {
     const int32_t n = prob.num_nodes();
     const auto& graph = prob.graph();
     constexpr double kInf = std::numeric_limits<double>::infinity();
@@ -267,6 +279,26 @@ inline std::vector<double> labeling_vector(const Problem& prob, int32_t root,
     }
     push(root, -profits[root], loads);
 
+    // The clock is read once per kDeadlineCheckWork labels scanned, the
+    // labeling's real work, so the check costs little and still fires within
+    // a fraction of a second when one pop scans long live lists.
+    constexpr int64_t kDeadlineCheckWork = int64_t{1} << 14;
+    int64_t work = 0;
+    int64_t next_check = 0;
+    auto past_deadline = [&] {
+        if (deadline == kNoLabelingDeadline || work < next_check) {
+            return false;
+        }
+        next_check = work + kDeadlineCheckWork;
+        if (std::chrono::steady_clock::now() < deadline) {
+            return false;
+        }
+        if (stats != nullptr) {
+            stats->timed_out = true;
+        }
+        return true;
+    };
+
     size_t head = 0;
     while (head < queue.size()) {
         if (max_queue_pops > 0 && static_cast<int64_t>(head) >= max_queue_pops) {
@@ -310,6 +342,10 @@ inline std::vector<double> labeling_vector(const Problem& prob, int32_t root,
                 return true;
             };
             auto& at_v = live[static_cast<size_t>(v)];
+            work += static_cast<int64_t>(at_v.size()) + 1;
+            if (past_deadline()) {
+                return {};  // out of time — no bound, as for the budget
+            }
             bool dominated = false;
             for (const int32_t other : at_v) {
                 const size_t ob = static_cast<size_t>(other) * stride;
@@ -347,11 +383,13 @@ inline std::vector<double> labeling_vector(const Problem& prob, int32_t root,
 /// 0 unbounded need not run the others unbounded too. kSurrogate combines
 /// row 0 with the surrogate row (surrogate_row) the same way, under that
 /// budget, and kVector with the vector labeling (labeling_vector), whose
-/// label count goes to `stats` when given.
+/// label count goes to `stats` when given and which stops at `deadline`
+/// (row 0 alone then).
 inline std::vector<double> labeling_from(
     const Problem& prob, int32_t root, std::span<const double> edge_costs,
     std::span<const double> profits, int64_t max_queue_pops = 0, LabelRows rows = LabelRows::kFirst,
-    int64_t later_rows_max_queue_pops = -1, LabelingStats* stats = nullptr) {
+    int64_t later_rows_max_queue_pops = -1, LabelingStats* stats = nullptr,
+    LabelingDeadline deadline = kNoLabelingDeadline) {
     auto best = labeling_row(prob, root, 0, edge_costs, profits, max_queue_pops);
     if (rows == LabelRows::kFirst || best.empty()) {
         return best;
@@ -359,7 +397,8 @@ inline std::vector<double> labeling_from(
     const int64_t later_pops =
         later_rows_max_queue_pops < 0 ? max_queue_pops : later_rows_max_queue_pops;
     if (rows == LabelRows::kVector) {
-        const auto row = labeling_vector(prob, root, edge_costs, profits, later_pops, stats);
+        const auto row =
+            labeling_vector(prob, root, edge_costs, profits, later_pops, stats, deadline);
         for (size_t v = 0; v < row.size(); ++v) {  // empty row: row 0 alone
             best[v] = std::max(best[v], row[v]);
         }
@@ -397,9 +436,10 @@ inline std::vector<double> labeling_from(const Problem& prob, int32_t root,
                                          int64_t max_queue_pops = 0,
                                          LabelRows rows = LabelRows::kFirst,
                                          int64_t later_rows_max_queue_pops = -1,
-                                         LabelingStats* stats = nullptr) {
+                                         LabelingStats* stats = nullptr,
+                                         LabelingDeadline deadline = kNoLabelingDeadline) {
     return labeling_from(prob, root, prob.edge_costs(), prob.profits(), max_queue_pops, rows,
-                         later_rows_max_queue_pops, stats);
+                         later_rows_max_queue_pops, stats, deadline);
 }
 
 /// Forward labeling from a given source node (wrapper for labeling_from).

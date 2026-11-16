@@ -19,6 +19,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_exception.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -1266,6 +1267,48 @@ TEST_CASE("Multicap: vector labels are never weaker than per-row or surrogate",
             }
         }
     }
+}
+
+TEST_CASE("Multicap: the vector labeling gives no bound past its deadline (#115)",
+          "[multicap][labeling]") {
+    using cptp::preprocess::LabelRows;
+    const auto prob = make_problem(3);
+    const auto past = std::chrono::steady_clock::now();
+    cptp::preprocess::LabelingStats stats;
+    REQUIRE(cptp::preprocess::labeling_vector(prob, 0, prob.edge_costs(), prob.profits(), 0, &stats,
+                                              past)
+                .empty());
+    REQUIRE(stats.timed_out);
+    // labeling_from then keeps row 0's bound alone, never a partial one.
+    stats = {};
+    REQUIRE(cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kVector, -1, &stats, past) ==
+            cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kFirst));
+    REQUIRE(stats.timed_out);
+    // A deadline that does not pass changes nothing.
+    stats = {};
+    const auto later = std::chrono::steady_clock::now() + std::chrono::hours(1);
+    REQUIRE(cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kVector, -1, &stats, later) ==
+            cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kVector));
+    REQUIRE_FALSE(stats.timed_out);
+}
+
+TEST_CASE("Multicap: labeling_rows = vector keeps to time_limit (#115)",
+          "[multicap][labeling][model]") {
+    // The root vector labeling alone ran 972 s here under time_limit=120.
+    constexpr double kLimit = 5.0;
+    constexpr double kMargin = 5.0;
+    auto prob = cptp::io::load("benchmarks/instances/multicap/spprclib/m10/B-n57-k7-20-m10.sppcc");
+    cptp::Model model;
+    model.set_problem(std::move(prob));
+    const cptp::SolverOptions opts = {{"time_limit", std::to_string(kLimit)},
+                                      {"output_flag", "false"},
+                                      {"threads", "1"},
+                                      {"labeling_rows", "vector"}};
+    const auto start = std::chrono::steady_clock::now();
+    (void)model.solve(opts);
+    const double elapsed =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    REQUIRE(elapsed < kLimit + kMargin);
 }
 
 TEST_CASE("Multicap: the surrogate row needs two bounded rows", "[multicap][labeling]") {

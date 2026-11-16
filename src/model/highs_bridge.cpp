@@ -567,6 +567,7 @@ void HiGHSBridge::install_propagator() {
     auto rc_settings = rc_settings_;
     int64_t labeling_limit = labeling_max_queue_pops_;
     const preprocess::LabelRows label_rows = label_rows_;
+    const preprocess::LabelingDeadline labeling_deadline = labeling_deadline_;
     auto rc_adaptive_disabled = std::make_shared<bool>(false);
     auto rc_low_yield_streak = std::make_shared<int32_t>(0);
 
@@ -872,18 +873,19 @@ void HiGHSBridge::install_propagator() {
                     std::vector<double> rc_bwd;
                     if (prob.is_tour()) {
                         rc_fwd = preprocess::labeling_from(prob, prob.source(), rc_edge_costs,
-                                                           rc_profits, labeling_limit, label_rows);
+                                                           rc_profits, labeling_limit, label_rows,
+                                                           -1, nullptr, labeling_deadline);
                         rc_bwd = rc_fwd;
                     } else {
                         {
                             std::jthread t_fwd([&] {
-                                rc_fwd = preprocess::labeling_from(prob, prob.source(),
-                                                                   rc_edge_costs, rc_profits,
-                                                                   labeling_limit, label_rows);
+                                rc_fwd = preprocess::labeling_from(
+                                    prob, prob.source(), rc_edge_costs, rc_profits, labeling_limit,
+                                    label_rows, -1, nullptr, labeling_deadline);
                             });
-                            rc_bwd =
-                                preprocess::labeling_from(prob, prob.target(), rc_edge_costs,
-                                                          rc_profits, labeling_limit, label_rows);
+                            rc_bwd = preprocess::labeling_from(
+                                prob, prob.target(), rc_edge_costs, rc_profits, labeling_limit,
+                                label_rows, -1, nullptr, labeling_deadline);
                         }
                     }
                     stats->rc_label_runs += prob.is_tour() ? 1 : 2;
@@ -984,7 +986,8 @@ void HiGHSBridge::install_propagator() {
 
                                         auto fwd_i = preprocess::labeling_from(
                                             prob, prob.source(), rc_edge_costs, mod_profits,
-                                            labeling_limit, label_rows);
+                                            labeling_limit, label_rows, -1, nullptr,
+                                            labeling_deadline);
 
                                         if (fwd_i.empty()) {
                                             return;  // budget exhausted

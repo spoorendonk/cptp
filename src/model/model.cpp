@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <map>
 #include <memory>
@@ -185,6 +186,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     build_problem();
 
     Timer timer;
+    const auto solve_start = std::chrono::steady_clock::now();
 
     int32_t random_seed = 0;
     bool output_flag = true;
@@ -603,6 +605,14 @@ SolveResult Model::solve(const SolverOptions& options) {
         physical_cores, logical_threads, preproc_thread_limit, simd_str);
 
     const auto label_rows = preprocess::parse_label_rows(labeling_rows);
+    // The vector labeling stops at the solve's time limit (#115); the others
+    // keep to their pop budget. A limit past ~30 years (inf too) is none, so
+    // the conversion cannot overflow.
+    const preprocess::LabelingDeadline labeling_deadline =
+        user_time_limit > 0.0 && user_time_limit < 1e9
+            ? solve_start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                std::chrono::duration<double>(user_time_limit))
+            : preprocess::kNoLabelingDeadline;
     std::vector<std::string> nondefault_settings;
     if (random_seed != 0) {
         nondefault_settings.push_back("random_seed=" + std::to_string(random_seed));
@@ -846,19 +856,25 @@ SolveResult Model::solve(const SolverOptions& options) {
             preprocess::LabelingStats bwd_stats;
             if (source != target) {
                 std::jthread t_fwd([&] {
-                    fwd_bounds = preprocess::labeling_from(
-                        problem_, source, labeling_max_queue_pops, label_rows, -1, &fwd_stats);
+                    fwd_bounds =
+                        preprocess::labeling_from(problem_, source, labeling_max_queue_pops,
+                                                  label_rows, -1, &fwd_stats, labeling_deadline);
                 });
-                bwd_bounds = preprocess::labeling_from(problem_, target, labeling_max_queue_pops,
-                                                       label_rows, -1, &bwd_stats);
+                bwd_bounds =
+                    preprocess::labeling_from(problem_, target, labeling_max_queue_pops, label_rows,
+                                              -1, &bwd_stats, labeling_deadline);
             } else {
-                fwd_bounds = preprocess::labeling_from(problem_, source, labeling_max_queue_pops,
-                                                       label_rows, -1, &fwd_stats);
+                fwd_bounds =
+                    preprocess::labeling_from(problem_, source, labeling_max_queue_pops, label_rows,
+                                              -1, &fwd_stats, labeling_deadline);
                 bwd_bounds = fwd_bounds;
             }
             if (label_rows == preprocess::LabelRows::kVector) {
                 logger_.log("  vector labels: fwd={} bwd={}", fwd_stats.labels,
                             source != target ? bwd_stats.labels : fwd_stats.labels);
+                if (fwd_stats.timed_out || bwd_stats.timed_out) {
+                    logger_.log("  vector labeling stopped at time_limit — row 0 bounds only");
+                }
             }
             if (fwd_bounds.empty() || bwd_bounds.empty()) {
                 logger_.log(
@@ -965,7 +981,8 @@ SolveResult Model::solve(const SolverOptions& options) {
                     0, n,
                     [&](int s) {
                         auto row = preprocess::labeling_from(problem_, s, 0, label_rows,
-                                                             labeling_max_queue_pops);
+                                                             labeling_max_queue_pops, nullptr,
+                                                             labeling_deadline);
                         if (row.empty()) {
                             any_empty = true;
                             return;
@@ -1068,6 +1085,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_rc_fixing(rc_settings);
     bridge.set_labeling_max_queue_pops(labeling_max_queue_pops);
     bridge.set_label_rows(label_rows);
+    bridge.set_labeling_deadline(labeling_deadline);
     bridge.set_edge_elimination(edge_elimination);
     bridge.set_edge_elimination_nodes(edge_elimination_nodes);
     bridge.set_heuristic_node_interval(heu_lpg_node_interval);

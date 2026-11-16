@@ -111,6 +111,10 @@ public:
     void set_rc_fixing(RCFixingSettings settings) { rc_settings_ = settings; }
     void set_labeling_max_queue_pops(int64_t limit) { labeling_max_queue_pops_ = limit; }
     void set_label_rows(preprocess::LabelRows rows) { label_rows_ = rows; }
+    /// When the in-tree vector labeling stops: the solve's time limit (#115).
+    void set_labeling_deadline(preprocess::LabelingDeadline deadline) {
+        labeling_deadline_ = deadline;
+    }
     void set_edge_elimination(bool enable) { edge_elimination_enabled_ = enable; }
 
     /// True if all objective coefficients are integer-valued (detected in
@@ -223,6 +227,7 @@ private:
     bool obj_is_integer_ = false;  // true if all obj coefficients are integral
     int64_t labeling_max_queue_pops_ = 0;
     preprocess::LabelRows label_rows_ = preprocess::LabelRows::kFirst;
+    preprocess::LabelingDeadline labeling_deadline_ = preprocess::kNoLabelingDeadline;
     RCFixingSettings rc_settings_;
 
     // Cut statistics (updated from callback)
