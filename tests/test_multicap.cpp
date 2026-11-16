@@ -844,6 +844,37 @@ TEST_CASE("The numeric loader rejects a short arc list", "[io]") {
                                 "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n2 1\n");
     REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(cut), std::runtime_error, expected);
     std::filesystem::remove(cut);
+
+    // A short list followed by the capacity and "s t" lines: "10 0 2" was
+    // read as the sixth arc and the file loaded as an unlimited tour.
+    const auto trailing = write_temp("cptp_numeric_short_arcs_trailing.txt",
+                                     "3 6\n"
+                                     "0 0 0\n1 5 2\n2 4 1\n"
+                                     "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n"
+                                     "10\n0 2\n");
+    REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(trailing), std::runtime_error, expected);
+    std::filesystem::remove(trailing);
+
+    // An arc line with a fourth field.
+    const auto extra = write_temp("cptp_numeric_extra_arc_field.txt",
+                                  "3 6\n"
+                                  "0 0 0\n1 5 2\n2 4 1\n"
+                                  "0 1 1\n1 0 1 7\n0 2 1\n2 0 1\n1 2 1\n2 1 1\n"
+                                  "10\n");
+    REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(extra), std::runtime_error, expected);
+    std::filesystem::remove(extra);
+
+    // Blank lines between arcs are still accepted.
+    const auto blank = write_temp("cptp_numeric_blank_arc_lines.txt",
+                                  "3 6\n"
+                                  "0 0 0\n1 5 2\n2 4 1\n\n"
+                                  "0 1 1\n1 0 1\n\n0 2 1\n2 0 1\n1 2 1\n2 1 1\n"
+                                  "10\n0 2\n");
+    const auto prob = cptp::io::load_numeric(blank);
+    std::filesystem::remove(blank);
+    REQUIRE(prob.num_edges() == 3);
+    REQUIRE(prob.capacities() == std::vector<double>{10.0});
+    REQUIRE(prob.target() == 2);
 }
 
 TEST_CASE("Problem::build rejects an edge endpoint out of range", "[io]") {

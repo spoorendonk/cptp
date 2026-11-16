@@ -429,13 +429,32 @@ Problem load_numeric(const std::filesystem::path& path) {
     std::vector<Edge> edges;
     std::vector<double> edge_costs;
 
+    // One arc per line, exactly three fields: read by line, so a short arc
+    // list fails here instead of taking the capacity or "s t" line as an arc.
+    const auto bad_arcs = [num_arcs] {
+        return std::runtime_error("numeric: expected " + std::to_string(num_arcs) +
+                                  " arc lines of \"tail head cost\"");
+    };
+    std::string arc_line;
     for (int32_t i = 0; i < num_arcs; ++i) {
+        // Skip blank lines, including the rest of the last node line.
+        bool found = false;
+        while (std::getline(f, arc_line)) {
+            if (!trim(arc_line).empty()) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            throw bad_arcs();
+        }
+        std::istringstream iss(arc_line);
         int32_t tail;
         int32_t head;
         double cost;
-        if (!(f >> tail >> head >> cost)) {
-            throw std::runtime_error("numeric: expected " + std::to_string(num_arcs) +
-                                     " arc lines of \"tail head cost\"");
+        std::string extra;
+        if (!(iss >> tail >> head >> cost) || (iss >> extra)) {
+            throw bad_arcs();
         }
         if (tail < head) {
             edges.push_back({tail, head});
