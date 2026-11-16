@@ -458,7 +458,11 @@ def test_binary_legacy_aliases_rejected() -> None:
 
 
 def test_binary_settings_nondefault_params() -> None:
-    """Settings line reports rc_fixing, cut families, and branching sub-params."""
+    """Settings line reports rc_fixing and cut families, and what branching ran.
+
+    branch_hyper is disabled pending #135: a requested mode warns and runs as
+    off, so the line reports neither it nor its strong-branching sub-params.
+    """
     if not BIN_PATH.exists():
         pytest.skip("cptp-solve binary not built")
 
@@ -481,7 +485,7 @@ def test_binary_settings_nondefault_params() -> None:
             "--max_cuts_rci",
             "5",
             "--branch_hyper",
-            "sb",
+            "pairs",
             "--branch_hyper_sb_max_depth",
             "3",
             "--output_flag",
@@ -502,8 +506,8 @@ def test_binary_settings_nondefault_params() -> None:
     assert "enable_rglm=on" in settings_line
     assert "enable_sec=off" in settings_line
     assert "max_cuts_rci=5" in settings_line
-    assert "branch_hyper=sb" in settings_line
-    assert "branch_hyper_sb_max_depth=3" in settings_line
+    assert "branch_hyper" not in settings_line
+    assert "branch_hyper=pairs is disabled pending spoorendonk/cptp#135" in result.stdout
 
 
 def test_binary_output_flag_false_is_silent() -> None:

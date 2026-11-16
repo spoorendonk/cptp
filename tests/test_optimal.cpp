@@ -92,18 +92,18 @@ TEST_CASE("B-n45-k6-54 optimal with parallel requested", "[optimal][slow]") {
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }
 
-// Hyperplane branching adds LP rows of origin kBranching (HiGHS patch 4a/4b).
-// The LP-row switches in HighsLpRelaxation.cpp must handle that origin: a
-// missed case falls off the switch and returns garbage, which B&B then reads.
-// The solve must add branching rows, or it does not reach those switches.
-TEST_CASE("B-n45-k6-54 optimal with hyperplane branching", "[optimal][slow][hyperplane]") {
+// branch_hyper is disabled pending #135 (LP-row hyperplane branching can prove
+// a wrong optimum): a requested mode runs as "off", adds no branching rows and
+// reaches the "off" optimum.
+TEST_CASE("B-n45-k6-54 optimal with hyperplane branching requested (runs as off, #135)",
+          "[optimal][slow][hyperplane]") {
     auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n45-k6-54.sppcc");
     cptp::Model model;
     model.set_problem(std::move(prob));
     cptp::SolverOptions opts = {
         {"output_flag", "false"}, {"time_limit", "60"}, {"threads", "1"}, {"branch_hyper", "all"}};
     auto r = model.solve(opts);
-    REQUIRE(r.hyperplane_branch_rows > 0);
+    REQUIRE(r.hyperplane_branch_rows == 0);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }

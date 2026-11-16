@@ -1,7 +1,6 @@
 #include "model/model.h"
 
 #include "model/highs_bridge.h"
-#include "model/hyperplane.h"
 #include "model/options.h"
 #include "parallel/parallel.h"
 
@@ -21,7 +20,6 @@
 #endif
 
 #include "heuristic/primal_heuristic.h"
-#include "mip/HighsMipSolverData.h"
 #include "mip/HighsUserSeparator.h"
 #include "preprocess/edge_elimination.h"
 #include "sep/comb_separator.h"
@@ -73,46 +71,28 @@ std::string join_tokens(const std::vector<std::string>& tokens, std::string_view
 
 constexpr int32_t kWarmStartLsStartsPerThread = 4;
 
-void configure_hyperplane_branching(const Problem& problem, HiGHSBridge& bridge, Logger& logger,
-                                    std::string& branch_hyper, int32_t hyper_sb_max_depth,
-                                    int32_t hyper_sb_iter_limit, int32_t hyper_sb_min_reliable,
-                                    int32_t hyper_sb_max_candidates) {
-    // Hyperplane branching: dynamic constraint branching
+/// Sets `branch_hyper` to the mode that runs: "off" for every value, since
+/// LP-row hyperplane branching can prove a wrong optimum (#135). An unknown
+/// mode and a disabled one each log their own warning.
+void normalize_branch_hyper(Logger& logger, std::string& branch_hyper) {
     static constexpr std::string_view kValidModes[] = {"off",    "pairs",       "clusters",
                                                        "demand", "cardinality", "all"};
     if (std::ranges::find(kValidModes, branch_hyper) == std::end(kValidModes)) {
         logger.log("Warning: unknown branch_hyper mode '{}', using 'off'", branch_hyper);
-        branch_hyper = "off";
+    } else if (branch_hyper != "off") {
+        logger.log(
+            "Warning: branch_hyper={} is disabled pending spoorendonk/cptp#135 (LP-row "
+            "hyperplane branching can prove a wrong optimum), using 'off'",
+            branch_hyper);
     }
-    if (branch_hyper == "off") {
-        // Ensure no stale global hyperplane callback leaks from prior solves.
-        HighsUserSeparator::setBranchingCallback({});
-        HighsUserSeparator::clearStack();
-        return;
-    }
+    branch_hyper = "off";
+}
 
-    HighsUserSeparator::StrongBranchConfig sb_cfg;
-    sb_cfg.max_depth = hyper_sb_max_depth;
-    sb_cfg.iter_limit = hyper_sb_iter_limit;
-    sb_cfg.min_reliable = hyper_sb_min_reliable;
-    sb_cfg.max_sb_candidates = hyper_sb_max_candidates;
-    HighsUserSeparator::setStrongBranchConfig(sb_cfg);
-
-    HighsUserSeparator::setBranchingCallback(
-        [gen = detail::HyperplaneCandidates(problem, bridge.y_offset(), branch_hyper)](
-            const HighsMipSolver& mipsolver)
-            -> std::vector<HighsUserSeparator::HyperplaneCandidate> {
-            const auto& sol = mipsolver.mipdata_->getLp().getSolution().col_value;
-            std::vector<HighsUserSeparator::HyperplaneCandidate> result;
-            for (auto& h : gen(sol)) {
-                HighsUserSeparator::HyperplaneCandidate c;
-                c.indices.assign(h.indices.begin(), h.indices.end());
-                c.values = std::move(h.values);
-                c.name = std::move(h.name);
-                result.push_back(std::move(c));
-            }
-            return result;
-        });
+/// Clears the patched HiGHS branching hook, so no hyperplane callback or row
+/// stack from an earlier solve leaks into this one.
+void reset_hyperplane_branching() {
+    HighsUserSeparator::setBranchingCallback({});
+    HighsUserSeparator::clearStack();
 }
 
 RCFixingStrategy parse_rc_fixing(const std::string& value) {
@@ -579,6 +559,13 @@ SolveResult Model::solve(const SolverOptions& options) {
         accepted_highs_options.erase(it);
     }
     highs.setOptionValue("parallel", "off");
+
+    // Hyperplane branching through LP rows can prove a wrong optimum: HiGHS
+    // ages, removes and exports the node-local branching rows as global cuts
+    // (#135). Every mode runs as "off" until it branches through auxiliary
+    // integer columns instead (#137). Gated before the settings line is
+    // built, so the line reports what actually runs.
+    normalize_branch_hyper(logger_, branch_hyper);
 
     // Cascading disables: labeling_elim_bounds=false disables bounds-dependent
     // features
@@ -1199,9 +1186,7 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     bridge.build_formulation();
 
-    configure_hyperplane_branching(problem_, bridge, logger_, branch_hyper, hyper_sb_max_depth,
-                                   hyper_sb_iter_limit, hyper_sb_min_reliable,
-                                   hyper_sb_max_candidates);
+    reset_hyperplane_branching();
 
     bridge.install_separators();
     bridge.set_bounds_propagation(bounds_propagation);
