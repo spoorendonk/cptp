@@ -706,6 +706,39 @@ TEST_CASE("Model: rc_fixing accepts its five strategies and rejects anything els
     }
 }
 
+TEST_CASE("Model: rc_fixing_interval takes a positive integer and rejects the rest (#122)",
+          "[model][options][rc_fixing]") {
+    REQUIRE(cptp::parse_positive_int_option("rc_fixing_interval", "1") == 1);
+    REQUIRE(cptp::parse_positive_int_option("rc_fixing_interval", "250") == 250);
+    for (const char* v : {"0", "-5", "10x", "", " 10", "1.5", "99999999999"}) {
+        INFO(v);
+        REQUIRE_THROWS_AS(cptp::parse_positive_int_option("rc_fixing_interval", v),
+                          std::invalid_argument);
+    }
+
+    // 0 used to reach propagator_calls % periodic_interval in the propagator.
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    std::vector<double> costs = {5.0, 3.0, 4.0};
+    std::vector<double> profits = {0.0, 10.0, 8.0};
+    std::vector<double> demands = {0.0, 2.0, 3.0};
+    model.set_graph(3, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 5.0);
+    auto opts_ok = kQuiet;
+    opts_ok.emplace_back("rc_fixing", "periodic");
+    opts_ok.emplace_back("rc_fixing_interval", "3");
+    REQUIRE(model.solve(opts_ok).is_optimal());
+    for (const char* v : {"0", "-1"}) {
+        INFO(v);
+        auto opts = kQuiet;
+        opts.emplace_back("rc_fixing", "periodic");
+        opts.emplace_back("rc_fixing_interval", v);
+        REQUIRE_THROWS_AS(model.solve(opts), std::invalid_argument);
+    }
+}
+
 TEST_CASE(
     "Model: connectivity check still enforced with SEC off and submip "
     "separation off",

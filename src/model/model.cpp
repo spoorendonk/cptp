@@ -430,7 +430,7 @@ SolveResult Model::solve(const SolverOptions& options) {
             continue;
         }
         if (key == "rc_fixing_interval") {
-            rc_settings.periodic_interval = std::stoi(value);
+            rc_settings.periodic_interval = parse_positive_int_option(key, value);
             continue;
         }
         if (key == "rc_fixing_to_one") {
