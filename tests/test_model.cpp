@@ -14,6 +14,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 using Catch::Matchers::WithinAbs;
 
@@ -898,8 +899,18 @@ TEST_CASE("Model: presolve option is captured and forced off", "[model][options]
 // parallel search would add workers on this instance. The thread count must
 // be above 1 for the check to mean anything.
 TEST_CASE("Model: parallel tree search is forced off", "[model][options][parallel]") {
-    // The scheduler keeps the thread count of its first run in this process.
+    // The scheduler keeps the thread count of its first run in this process,
+    // and a later solve asking for another count fails: reset it on the way
+    // in and on the way out, for the tests run after this one in-process.
     Highs::resetThreadScheduler(true);
+    struct SchedulerReset {
+        SchedulerReset() = default;
+        SchedulerReset(const SchedulerReset&) = delete;
+        SchedulerReset& operator=(const SchedulerReset&) = delete;
+        SchedulerReset(SchedulerReset&&) = delete;
+        SchedulerReset& operator=(SchedulerReset&&) = delete;
+        ~SchedulerReset() { Highs::resetThreadScheduler(true); }
+    } scheduler_reset;
 
     cptp::Model model;
     std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
@@ -922,16 +933,18 @@ TEST_CASE("Model: parallel tree search is forced off", "[model][options][paralle
         {"time_limit", "30"}, {"output_flag", "true"}, {"parallel", "on"}, {"threads", "4"}};
     auto r = model.solve(opts);
     const std::string text = log.str();
+    INFO(text);
 
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1e-6));
     REQUIRE(text.contains("Warning: HiGHS option parallel = on ignored"));
-    std::smatch m;
+    // Exactly one such line, the main MIP's: a sub-MIP always reports 1 worker.
     const std::regex workers(R"(using up to (\d+) workers across (\d+) threads)");
-    INFO(text);
-    REQUIRE(std::regex_search(text, m, workers));
-    REQUIRE(m[1].str() == "1");
-    REQUIRE(m[2].str() == "4");
+    const std::vector<std::smatch> lines(std::sregex_iterator(text.begin(), text.end(), workers),
+                                         std::sregex_iterator());
+    REQUIRE(lines.size() == 1);
+    REQUIRE(lines[0][1].str() == "1");
+    REQUIRE(lines[0][2].str() == "4");
 }
 
 TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][branching]") {
