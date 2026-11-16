@@ -113,8 +113,8 @@ Two bugs, both present since the first commit (5dcf2b2, 2026-03-10), could
 cut off an optimal solution and so report a suboptimal objective as optimal:
 
 - **Reduced-cost fixing ([#114](https://github.com/spoorendonk/cptp/issues/114)).**
-  The fixing test built an edge's bound on z_LP where the valid base is the
-  Lagrangian bound z_LP − rc·x\*, so it could fix out edges the optimum
+  The fixing test built an edge's bound on z_LP where the Lagrangian bound needs
+  the base z_LP − rc·x\*, so it could fix out edges the optimum
   uses. RC fixing is on by default (`rc_fixing=adaptive`). Fixed in cf191b2.
 - **Labeling bounds ([#111](https://github.com/spoorendonk/cptp/issues/111)).**
   The scalar labeling queued labels by their index in a node's list, and
