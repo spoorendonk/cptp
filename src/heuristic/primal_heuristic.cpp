@@ -1016,7 +1016,8 @@ HeuristicResult run_local_search_from_pool(
                     continue;
                 }
 
-                // Deterministic contract:
+                // Deterministic contract (without a deadline, which stops
+                // starts and rounds at wall-clock time, #143):
                 // - fixed move order in local_search()
                 // - fixed number of ILS rounds
                 // - deterministic kick candidate order derived from (start, round)

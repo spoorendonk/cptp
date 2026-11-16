@@ -875,7 +875,10 @@ SolveResult Model::solve(const SolverOptions& options) {
             }
             const bool timed_out = fwd_stats.timed_out || bwd_stats.timed_out;
             if (fwd_bounds.empty() || bwd_bounds.empty()) {
-                if (timed_out) {
+                // An empty side ran row 0 alone, so its own flag says why it
+                // stopped; the other side's may be a later row's.
+                if ((fwd_bounds.empty() && fwd_stats.timed_out) ||
+                    (bwd_bounds.empty() && bwd_stats.timed_out)) {
                     logger_.log(
                         "  labeling stopped at time_limit — disabling bounds-dependent features");
                 } else {
