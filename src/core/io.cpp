@@ -511,8 +511,9 @@ Problem load_numeric(const std::filesystem::path& path) {
     // otherwise an arc line beyond num_arcs would be read as the capacity
     // and "s t" lines, and the real ones ignored (#131). Each field is parsed
     // whole, so one that is not wholly a number is an error too (#130).
-    // Known limit: an extra arc line in place of a missing capacity line,
-    // with m = 3 and no "s t" line, still reads as the m capacities.
+    // Known limits: a line with exactly m fields in place of a missing
+    // capacity line still reads as the m capacities: an extra arc line with
+    // m = 3 and no "s t" line, or an "s t" line with m = 2.
     const auto fields = [](const std::string& line) {
         std::istringstream iss(line);
         std::vector<std::string> out;
@@ -539,8 +540,8 @@ Problem load_numeric(const std::filesystem::path& path) {
         }
         capacities = std::move(values);
     } else if (num_rows > 1) {
-        // With m > 1 the capacity line is required: a missing one followed
-        // by "s t" would be read as capacities.
+        // With m > 1 the capacity line is required, so a file that ends
+        // after the arcs leaves no row unlimited by mistake.
         throw std::runtime_error("numeric: expected " + std::to_string(num_rows) + " capacities");
     }  // m = 1 without a capacity line: row 0 has no limit
 
