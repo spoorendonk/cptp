@@ -1190,10 +1190,13 @@ SolveResult Model::solve(const SolverOptions& options) {
     auto result = bridge.extract_result();
     result.time_seconds = total_elapsed_seconds;
     result.hyperplane_columns = bridge.num_hyperplane_columns();
-    if (run_status == HighsStatus::kError) {
-        // HiGHS logs the cause itself; without this the model status it
-        // leaves (kNotset) would read as a time limit.
-        logger_.log("Error: HiGHS run failed");
+    // A kError run that never reached the MIP solver (mip_node_count stays at
+    // its unset -1) leaves the model status kNotset, which extract_result reads
+    // as an interrupted run. A MIP that ran and then stopped with kError (e.g.
+    // kMemoryLimit) keeps its incumbent and the status extract_result gave it.
+    if (run_status == HighsStatus::kError && highs.getInfo().mip_node_count < 0) {
+        // HiGHS logs the cause itself.
+        logger_.log("Error: HiGHS run failed before the MIP solve");
         result.status = SolveResult::Status::Error;
     }
 
