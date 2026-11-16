@@ -72,14 +72,22 @@ cptp_replace(SOURCES_CONTENT 1
   "${SRC_PREFIX}/HighsModkSeparator.h"
   "${SRC_PREFIX}/HighsModkSeparator.h\n    ${SRC_PREFIX}/HighsUserSeparator.h\n    ${SRC_PREFIX}/HighsUserPropagator.h")
 
-# Keep the patch sources out of HiGHS's unity build (on only if(APPLE) in
-# highs/CMakeLists.txt): batched with neighbouring HiGHS sources, any
-# file-scope name they share with one breaks only the macOS build. HiGHS does
-# the same for io/filereaderlp/reader.cpp; sources.cmake is included from
+# Keep every source this patch adds or edits out of HiGHS's unity build (on
+# only if(APPLE) in highs/CMakeLists.txt): batched with neighbouring HiGHS
+# sources, a file-scope name a hunk adds that a neighbour also has breaks only
+# the macOS build, which no Linux gate builds. HiGHS does the same for
+# io/filereaderlp/reader.cpp; sources.cmake is included from
 # highs/CMakeLists.txt, which defines the targets, so the property applies.
+# A hunk below that edits another HiGHS .cpp adds it to this list.
+set(_cptp_patched_sources
+  HighsUserSeparator.cpp HighsUserPropagator.cpp
+  HighsSeparation.cpp HighsMipSolverData.cpp HighsSearch.cpp
+  HighsLpRelaxation.cpp)
+list(TRANSFORM _cptp_patched_sources PREPEND "${SRC_PREFIX}/")
+list(JOIN _cptp_patched_sources " " _cptp_patched_sources)
 string(APPEND SOURCES_CONTENT
-  "\n# cptp patch: keep the user callback sources out of the unity build\n"
-  "set_source_files_properties(${SRC_PREFIX}/HighsUserSeparator.cpp ${SRC_PREFIX}/HighsUserPropagator.cpp PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)\n")
+  "\n# cptp patch: keep the sources it adds or edits out of the unity build\n"
+  "set_source_files_properties(${_cptp_patched_sources} PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)\n")
 
 file(WRITE "${SOURCE_DIR}/cmake/sources.cmake" "${SOURCES_CONTENT}")
 message(STATUS "Added HighsUserSeparator + HighsUserPropagator to cmake/sources.cmake")
