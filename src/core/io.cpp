@@ -360,9 +360,10 @@ Problem load_tsplib(const std::filesystem::path& path) {
     if (profits.empty()) {
         profits.assign(dimension, 0.0);
     }
-    // Depot gets demand 0
+    // Depot gets demand 0. A negative (or NaN) one is kept for Problem::build
+    // to reject, as it rejects one on any other node (#95).
     for (auto& row : demand_rows) {
-        if (row.size() > static_cast<size_t>(depot)) {
+        if (row.size() > static_cast<size_t>(depot) && row[depot] >= 0.0) {
             row[depot] = 0.0;
         }
     }

@@ -156,7 +156,7 @@ def test_negative_demand_is_rejected() -> None:
     # differently, so Problem.build rejects it on every path.
     rows = ROWS.copy()
     rows[1, 2] = -1.0
-    with pytest.raises(ValueError, match="non-negative"):
+    with pytest.raises(ValueError, match="^demands must be non-negative$"):
         Problem(
             num_nodes=4,
             edges=EDGES,
@@ -167,7 +167,7 @@ def test_negative_demand_is_rejected() -> None:
             source=0,
             target=0,
         )
-    with pytest.raises(ValueError, match="non-negative"):
+    with pytest.raises(ValueError, match="^demands must be non-negative$"):
         solve(
             num_nodes=4,
             edges=EDGES,
