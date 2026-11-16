@@ -826,6 +826,26 @@ TEST_CASE("The numeric loader rejects a source with no target", "[io]") {
     REQUIRE(tour.target() == 0);
 }
 
+TEST_CASE("The numeric loader rejects a short arc list", "[io]") {
+    // #128: num_arcs = 6 with 5 arc lines read an uninitialized head.
+    const auto expected =
+        Catch::Matchers::Message("numeric: expected 6 arc lines of \"tail head cost\"");
+    const auto short_arcs = write_temp("cptp_numeric_short_arcs.txt",
+                                       "3 6\n"
+                                       "0 0 0\n1 5 2\n2 4 1\n"
+                                       "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n");
+    REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(short_arcs), std::runtime_error, expected);
+    std::filesystem::remove(short_arcs);
+
+    // A truncated last arc line, cut off before its cost.
+    const auto cut = write_temp("cptp_numeric_cut_arc.txt",
+                                "3 6\n"
+                                "0 0 0\n1 5 2\n2 4 1\n"
+                                "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n2 1\n");
+    REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(cut), std::runtime_error, expected);
+    std::filesystem::remove(cut);
+}
+
 TEST_CASE("Problem::build rejects an edge endpoint out of range", "[io]") {
     // #125: edge (1, 5) with num_nodes 4 wrote past static_graph's degree array.
     const auto range = Catch::Matchers::Message("edge endpoints must be in [0, num_nodes)");

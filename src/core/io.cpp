@@ -433,7 +433,10 @@ Problem load_numeric(const std::filesystem::path& path) {
         int32_t tail;
         int32_t head;
         double cost;
-        f >> tail >> head >> cost;
+        if (!(f >> tail >> head >> cost)) {
+            throw std::runtime_error("numeric: expected " + std::to_string(num_arcs) +
+                                     " arc lines of \"tail head cost\"");
+        }
         if (tail < head) {
             edges.push_back({tail, head});
             edge_costs.push_back(cost);
