@@ -1010,6 +1010,51 @@ TEST_CASE("The numeric loader rejects lines beyond the declared arcs", "[io]") {
     REQUIRE(prob.target() == 2);
 }
 
+TEST_CASE("The numeric loader rejects a bad m and node lines of the wrong width", "[io]") {
+    // #132: "3 6 x" loaded with m = 1, "3 6 2.5" with m = 2, and an extra
+    // node column shifted every later field.
+    const auto rejects = [](const std::string& name, const std::string& text,
+                            const std::string& message) {
+        INFO(name);
+        const auto path = write_temp(name, text);
+        REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(path), std::runtime_error,
+                               Catch::Matchers::Message(message));
+        std::filesystem::remove(path);
+    };
+    const std::string nodes = "0 0 0\n1 5 2\n2 4 1\n";
+    const std::string arcs = "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n2 1 1\n";
+    const auto m = [](const std::string& t) {
+        return "numeric: the number of capacity rows \"" + t + "\" is not a positive int";
+    };
+    rejects("cptp_numeric_text_m.txt", "3 6 x\n" + nodes + arcs, m("x"));
+    rejects("cptp_numeric_overflow_m.txt", "3 6 99999999999\n" + nodes + arcs, m("99999999999"));
+    rejects("cptp_numeric_fractional_m.txt", "3 6 2.5\n" + nodes + arcs, m("2.5"));
+    rejects("cptp_numeric_zero_m.txt", "3 6 0\n" + nodes + arcs, m("0"));
+    rejects("cptp_numeric_negative_m.txt", "3 6 -1\n" + nodes + arcs, m("-1"));
+    const std::string first = R"(numeric: first line must be "num_nodes num_arcs [m]")";
+    rejects("cptp_numeric_first_extra.txt", "3 6 1 7\n" + nodes + arcs, first);
+    rejects("cptp_numeric_first_short.txt", "3\n" + nodes + arcs, first);
+    rejects("cptp_numeric_first_text.txt", "3x 6\n" + nodes + arcs, first);
+
+    const std::string width = R"(numeric: expected 3 node lines of "id profit" and 1 demands)";
+    rejects("cptp_numeric_node_extra.txt", "3 6\n0 0 0\n1 5 2 9\n2 4 1\n" + arcs, width);
+    rejects("cptp_numeric_node_short.txt", "3 6\n0 0 0\n1 5\n2 4 1\n" + arcs, width);
+    rejects("cptp_numeric_node_count.txt", "3 0\n0 0 0\n1 5 2\n", width);
+    rejects("cptp_numeric_node_id.txt", "3 6\n0 0 0\nx 5 2\n2 4 1\n" + arcs,
+            R"(numeric: the node id "x" is not an int)");
+    rejects("cptp_numeric_node_demand.txt", "3 6\n0 0 0\n1 5 2x\n2 4 1\n" + arcs,
+            R"(numeric: the node field "2x" is not a number)");
+
+    // m = 2: two demands per node; blank lines between nodes still load.
+    const auto ok = write_temp("cptp_numeric_m2_nodes.txt",
+                               "3 6 2\n\n0 0 0 0\n1 5 2 3\n\n2 4 1 6\n" + arcs + "4 7\n");
+    const auto two = cptp::io::load_numeric(ok);
+    std::filesystem::remove(ok);
+    REQUIRE(two.capacities() == std::vector<double>{4.0, 7.0});
+    REQUIRE(two.demands(1) == std::vector<double>{0.0, 3.0, 6.0});
+    REQUIRE(two.profits() == std::vector<double>{0.0, 5.0, 4.0});
+}
+
 TEST_CASE("Problem::build rejects an edge endpoint out of range", "[io]") {
     // #125: edge (1, 5) with num_nodes 4 wrote past static_graph's degree array.
     const auto range = Catch::Matchers::Message("edge endpoints must be in [0, num_nodes)");

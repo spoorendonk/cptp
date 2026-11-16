@@ -430,39 +430,89 @@ Problem load_numeric(const std::filesystem::path& path) {
     // Then (optional; required if m > 1): capacity_1 .. capacity_m, one line
     // Then (optional): source target, one line, and nothing after it
 
+    // The file is read by line, each line split into fields that are parsed
+    // whole: a line with the wrong number of fields, or a field that is not
+    // wholly a number, is an error, instead of shifting every later field.
+    // The next non-blank line; blank is no field for >>.
+    const auto next_line = [&f](std::string& line) {
+        while (std::getline(f, line)) {
+            std::istringstream iss(line);
+            if (std::string field; iss >> field) {
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto fields = [](const std::string& line) {
+        std::istringstream iss(line);
+        std::vector<std::string> out;
+        for (std::string token; iss >> token;) {
+            out.push_back(token);
+        }
+        return out;
+    };
+
     int32_t num_nodes = 0;
     int32_t num_arcs = 0;
     int32_t num_rows = 1;
-    std::string first;
-    while (std::getline(f, first) && trim(first).empty()) {
-    }
+    std::string line;
     {
-        std::istringstream iss(first);
-        if (!(iss >> num_nodes >> num_arcs)) {
-            throw std::runtime_error("numeric: first line must be \"num_nodes num_arcs [m]\"");
+        const auto bad_first = [] {
+            return std::runtime_error(R"(numeric: first line must be "num_nodes num_arcs [m]")");
+        };
+        if (!next_line(line)) {
+            throw bad_first();
         }
-        if (int32_t rows = 0; iss >> rows) {
-            if (rows < 1) {
-                throw std::runtime_error("numeric: the number of capacity rows must be positive");
+        const auto tokens = fields(line);
+        if (tokens.size() < 2 || tokens.size() > 3) {
+            throw bad_first();
+        }
+        const auto n = parse_int(tokens[0]);
+        const auto a = parse_int(tokens[1]);
+        if (!n || !a) {
+            throw bad_first();
+        }
+        num_nodes = *n;
+        num_arcs = *a;
+        // #132: a failed >> read "3 6 x" as m absent, and "3 6 2.5" as m = 2.
+        if (tokens.size() == 3) {
+            const auto rows = parse_int(tokens[2]);
+            if (!rows || *rows < 1) {
+                throw std::runtime_error("numeric: the number of capacity rows \"" + tokens[2] +
+                                         "\" is not a positive int");
             }
-            num_rows = rows;
+            num_rows = *rows;
         }
     }
 
     std::vector<double> profits(num_nodes);
     std::vector<std::vector<double>> demand_rows(num_rows, std::vector<double>(num_nodes));
 
+    // One node per line, exactly 2 + m fields (#132: an extra or missing
+    // column shifted every later field).
     for (int32_t i = 0; i < num_nodes; ++i) {
-        int32_t id;
-        f >> id >> profits[i];
-        for (int32_t k = 0; k < num_rows; ++k) {
-            f >> demand_rows[k][i];
+        const auto tokens = next_line(line) ? fields(line) : std::vector<std::string>{};
+        if (std::ssize(tokens) != 2 + num_rows) {
+            throw std::runtime_error("numeric: expected " + std::to_string(num_nodes) +
+                                     R"( node lines of "id profit" and )" +
+                                     std::to_string(num_rows) + " demands");
         }
-    }
-    if (!f) {
-        throw std::runtime_error("numeric: expected " + std::to_string(num_nodes) +
-                                 " node lines of \"id profit\" and " + std::to_string(num_rows) +
-                                 " demands");
+        if (!parse_int(tokens[0])) {
+            throw std::runtime_error("numeric: the node id \"" + tokens[0] + "\" is not an int");
+        }
+        for (int32_t k = 0; k <= num_rows; ++k) {
+            const auto& token = tokens[k + 1];
+            const auto value = parse_double(token);
+            if (!value) {
+                throw std::runtime_error("numeric: the node field \"" + token +
+                                         "\" is not a number");
+            }
+            if (k == 0) {
+                profits[i] = *value;
+            } else {
+                demand_rows[k - 1][i] = *value;
+            }
+        }
     }
 
     // Read directed arcs, convert to undirected edges (keep only i < j)
@@ -474,17 +524,6 @@ Problem load_numeric(const std::filesystem::path& path) {
     const auto bad_arcs = [num_arcs] {
         return std::runtime_error("numeric: expected " + std::to_string(num_arcs) +
                                   " arc lines of \"tail head cost\"");
-    };
-    // The next non-blank line, skipping the rest of the last node line too.
-    // Blank is no field for >>, so a non-blank line has at least one.
-    const auto next_line = [&f](std::string& line) {
-        while (std::getline(f, line)) {
-            std::istringstream iss(line);
-            if (std::string field; iss >> field) {
-                return true;
-            }
-        }
-        return false;
     };
     std::string arc_line;
     for (int32_t i = 0; i < num_arcs; ++i) {
@@ -514,15 +553,6 @@ Problem load_numeric(const std::filesystem::path& path) {
     // Known limits: a line with exactly m fields in place of a missing
     // capacity line still reads as the m capacities: an extra arc line with
     // m = 3 and no "s t" line, or an "s t" line with m = 2.
-    const auto fields = [](const std::string& line) {
-        std::istringstream iss(line);
-        std::vector<std::string> out;
-        for (std::string token; iss >> token;) {
-            out.push_back(token);
-        }
-        return out;
-    };
-    std::string line;
     std::vector<double> capacities(num_rows, 1e18);
     if (next_line(line)) {
         std::vector<double> values;
