@@ -41,6 +41,20 @@ def test_model_basic() -> None:
     assert result.objective <= 0.0
 
 
+def test_model_thread_count_change_between_solves() -> None:
+    """Solves in one process with different thread counts all run (#141)."""
+    model = Model()
+    edges = np.array([[0, 1], [1, 0], [0, 2], [2, 0], [1, 2], [2, 1]], dtype=np.int32)
+    model.set_graph(3, edges, np.array([5.0, 5.0, 3.0, 3.0, 4.0, 4.0]))
+    model.set_depot(0)
+    model.set_profits(np.array([0.0, 10.0, 8.0]))
+    model.add_capacity_resource(np.array([0.0, 2.0, 3.0]), 5.0)
+
+    for threads in ("1", "2", "1"):
+        result = model.solve([*OPTS, ("threads", threads)])
+        assert result.status == Status.Optimal, f"threads={threads}"
+
+
 def test_model_negative_costs() -> None:
     """Tour with negative edge costs."""
     model = Model()

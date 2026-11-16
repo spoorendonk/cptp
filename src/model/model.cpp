@@ -1175,7 +1175,12 @@ SolveResult Model::solve(const SolverOptions& options) {
         highs.setOptionValue("time_limit", remaining);
     }
     logger_.log("HiGHS start offset (preprocessing): {:.3f}s", pre_highs_seconds);
-    highs.run();
+    // HiGHS keeps one task scheduler per calling thread, sized by the first
+    // run on it, and a later run asking for another `threads` value fails
+    // (#141). Solves on one thread run one after another, so dropping the
+    // scheduler here is safe: run() builds a fresh one with this solve's count.
+    Highs::resetThreadScheduler(true);
+    const HighsStatus run_status = highs.run();
     const double total_elapsed_seconds = timer.elapsed_seconds();
     logger_.log("Total elapsed (preprocessing + HiGHS): {:.3f}s", total_elapsed_seconds);
 
@@ -1185,6 +1190,12 @@ SolveResult Model::solve(const SolverOptions& options) {
     auto result = bridge.extract_result();
     result.time_seconds = total_elapsed_seconds;
     result.hyperplane_columns = bridge.num_hyperplane_columns();
+    if (run_status == HighsStatus::kError) {
+        // HiGHS logs the cause itself; without this the model status it
+        // leaves (kNotset) would read as a time limit.
+        logger_.log("Error: HiGHS run failed");
+        result.status = SolveResult::Status::Error;
+    }
 
     return result;
 }

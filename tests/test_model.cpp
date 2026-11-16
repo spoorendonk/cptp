@@ -1,6 +1,5 @@
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
-#include "Highs.h"
 #include "model/model.h"
 #include "model/options.h"
 
@@ -899,19 +898,6 @@ TEST_CASE("Model: presolve option is captured and forced off", "[model][options]
 // parallel search would add workers on this instance. The thread count must
 // be above 1 for the check to mean anything.
 TEST_CASE("Model: parallel tree search is forced off", "[model][options][parallel]") {
-    // The scheduler keeps the thread count of its first run in this process,
-    // and a later solve asking for another count fails: reset it on the way
-    // in and on the way out, for the tests run after this one in-process.
-    Highs::resetThreadScheduler(true);
-    struct SchedulerReset {
-        SchedulerReset() = default;
-        SchedulerReset(const SchedulerReset&) = delete;
-        SchedulerReset& operator=(const SchedulerReset&) = delete;
-        SchedulerReset(SchedulerReset&&) = delete;
-        SchedulerReset& operator=(SchedulerReset&&) = delete;
-        ~SchedulerReset() { Highs::resetThreadScheduler(true); }
-    } scheduler_reset;
-
     cptp::Model model;
     std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -945,6 +931,30 @@ TEST_CASE("Model: parallel tree search is forced off", "[model][options][paralle
     REQUIRE(lines.size() == 1);
     REQUIRE(lines[0][1].str() == "1");
     REQUIRE(lines[0][2].str() == "4");
+}
+
+// HiGHS sizes its per-thread task scheduler at the first run on a thread and
+// rejects a later run asking for another thread count; Model::solve drops the
+// scheduler before each run, so solves with different counts all run (#141).
+TEST_CASE("Model: solves with different thread counts in one process", "[model][options]") {
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    model.set_graph(4, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 7.0);
+
+    for (const char* threads : {"1", "2", "1"}) {
+        INFO("threads = " << threads);
+        const cptp::SolverOptions opts = {
+            {"time_limit", "30"}, {"output_flag", "false"}, {"threads", threads}};
+        auto r = model.solve(opts);
+        REQUIRE(r.status == cptp::SolveResult::Status::Optimal);
+        REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1e-6));
+    }
 }
 
 TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][branching]") {
