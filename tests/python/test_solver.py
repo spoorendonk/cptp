@@ -482,8 +482,6 @@ def test_binary_settings_nondefault_params() -> None:
             "5",
             "--branch_hyper",
             "pairs",
-            "--branch_hyper_sb_max_depth",
-            "3",
             "--output_flag",
             "true",
         ],
@@ -503,7 +501,6 @@ def test_binary_settings_nondefault_params() -> None:
     assert "enable_sec=off" in settings_line
     assert "max_cuts_rci=5" in settings_line
     assert "branch_hyper=pairs" in settings_line
-    assert "branch_hyper_sb_max_depth=3" in settings_line
 
 
 def test_binary_output_flag_false_is_silent() -> None:

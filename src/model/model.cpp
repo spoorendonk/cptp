@@ -82,13 +82,6 @@ void normalize_branch_hyper(Logger& logger, std::string& branch_hyper) {
     }
 }
 
-/// Clears the patched HiGHS branching hook, so no hyperplane callback or row
-/// stack from an earlier solve leaks into this one.
-void reset_hyperplane_branching() {
-    HighsUserSeparator::setBranchingCallback({});
-    HighsUserSeparator::clearStack();
-}
-
 RCFixingStrategy parse_rc_fixing(const std::string& value) {
     if (value == "off") {
         return RCFixingStrategy::off;
@@ -282,10 +275,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::string branch_hyper = "off";
     double cutoff = std::numeric_limits<double>::infinity();
     int32_t preproc_fast_restarts = 12;
-    int32_t hyper_sb_max_depth = 0;
-    int32_t hyper_sb_iter_limit = 100;
-    int32_t hyper_sb_min_reliable = 4;
-    int32_t hyper_sb_max_candidates = 3;
 
     double user_time_limit = -1.0;  // -1 = no limit specified
 
@@ -494,22 +483,6 @@ SolveResult Model::solve(const SolverOptions& options) {
             preproc_fast_restarts = std::stoi(value);
             continue;
         }
-        if (key == "branch_hyper_sb_max_depth") {
-            hyper_sb_max_depth = std::stoi(value);
-            continue;
-        }
-        if (key == "branch_hyper_sb_iter_limit") {
-            hyper_sb_iter_limit = std::stoi(value);
-            continue;
-        }
-        if (key == "branch_hyper_sb_min_reliable") {
-            hyper_sb_min_reliable = std::stoi(value);
-            continue;
-        }
-        if (key == "branch_hyper_sb_max_candidates") {
-            hyper_sb_max_candidates = std::stoi(value);
-            continue;
-        }
         if (key == "output_flag") {
             output_flag = parse_bool(value);
             continue;
@@ -539,9 +512,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     // One branch-and-bound tree: the patched separator and feasibility-check
-    // callbacks are thread_local and the hyperplane-branching row stack is
-    // shared, so the parallel tree search HiGHS runs by default from v1.16
-    // would explore nodes on worker threads that skip the lazy SECs and
+    // callbacks are thread_local, so the parallel tree search HiGHS runs by
+    // default from v1.16 would explore nodes on worker threads that skip the
+    // lazy SECs and
     // report wrong optima. "off" changes only the MIP search (and HiPO);
     // simplex behaves as under v1.15's default.
     if (auto it = accepted_highs_options.find("parallel");
@@ -573,10 +546,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     heu_lpg_node_interval = std::max<int64_t>(1, heu_lpg_node_interval);
     heu_lpg_deterministic_restarts = std::max<int32_t>(1, heu_lpg_deterministic_restarts);
     heu_ws_ls_max_iter = std::max<int32_t>(1, heu_ws_ls_max_iter);
-    hyper_sb_iter_limit = std::max<int32_t>(1, hyper_sb_iter_limit);
-    hyper_sb_min_reliable = std::max<int32_t>(1, hyper_sb_min_reliable);
-    hyper_sb_max_candidates = std::max<int32_t>(1, hyper_sb_max_candidates);
-    hyper_sb_max_depth = std::max<int32_t>(0, hyper_sb_max_depth);
     HighsInt highs_threads_option = 0;
     if (highs.getOptionValue("threads", highs_threads_option) != HighsStatus::kOk) {
         highs_threads_option = 0;
@@ -798,24 +767,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     if (max_cuts_spi != -1) {
         nondefault_settings.push_back("max_cuts_spi=" + std::to_string(max_cuts_spi));
-    }
-    if (branch_hyper != "off") {
-        if (hyper_sb_max_depth != 0) {
-            nondefault_settings.push_back("branch_hyper_sb_max_depth=" +
-                                          std::to_string(hyper_sb_max_depth));
-        }
-        if (hyper_sb_iter_limit != 100) {
-            nondefault_settings.push_back("branch_hyper_sb_iter_limit=" +
-                                          std::to_string(hyper_sb_iter_limit));
-        }
-        if (hyper_sb_min_reliable != 4) {
-            nondefault_settings.push_back("branch_hyper_sb_min_reliable=" +
-                                          std::to_string(hyper_sb_min_reliable));
-        }
-        if (hyper_sb_max_candidates != 3) {
-            nondefault_settings.push_back("branch_hyper_sb_max_candidates=" +
-                                          std::to_string(hyper_sb_max_candidates));
-        }
     }
     for (const auto& [k, v] : accepted_highs_options) {
         nondefault_settings.push_back(std::string(k).append("=").append(v));
@@ -1188,8 +1139,6 @@ SolveResult Model::solve(const SolverOptions& options) {
         bridge.set_hyperplanes(hyperplanes.columns());
     }
     bridge.build_formulation();
-
-    reset_hyperplane_branching();
 
     bridge.install_separators();
     bridge.set_bounds_propagation(bounds_propagation);

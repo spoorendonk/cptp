@@ -576,10 +576,6 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
     opts.emplace_back("max_cuts_sec", "2");
     opts.emplace_back("max_cuts_rci", "2");
     opts.emplace_back("branch_hyper", "pairs");
-    opts.emplace_back("branch_hyper_sb_max_depth", "1");
-    opts.emplace_back("branch_hyper_sb_iter_limit", "20");
-    opts.emplace_back("branch_hyper_sb_min_reliable", "2");
-    opts.emplace_back("branch_hyper_sb_max_candidates", "2");
 
     auto result = model.solve(opts);
     REQUIRE(result.has_solution());

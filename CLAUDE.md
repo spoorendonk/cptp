@@ -14,7 +14,7 @@
 <!-- wcp-declined: 9070a09f6181 LSP -->
 # Project: cptp
 
-Capacitated Profitable Tour Problem solver. Branch-and-cut solver for the CPTP following Jepsen et al. (2014). Also solves open s–t path variants. MIP backend is HiGHS with custom callbacks for user cut separation, domain propagation, and hyperplane branching.
+Capacitated Profitable Tour Problem solver. Branch-and-cut solver for the CPTP following Jepsen et al. (2014). Also solves open s–t path variants. MIP backend is HiGHS with custom callbacks for user cut separation and domain propagation; hyperplane branching goes through auxiliary integer columns.
 
 ## Build & Test
 
