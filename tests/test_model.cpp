@@ -1,14 +1,19 @@
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
+#include "Highs.h"
 #include "model/model.h"
 #include "model/options.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <mutex>
+#include <regex>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 
 using Catch::Matchers::WithinAbs;
 
@@ -884,6 +889,49 @@ TEST_CASE("Model: presolve option is captured and forced off", "[model][options]
     REQUIRE_THAT(r_forced.objective, WithinAbs(-11.0, 1e-6));
     REQUIRE_THAT(r_off.objective, WithinAbs(-11.0, 1e-6));
     REQUIRE_THAT(r_forced.objective, WithinAbs(r_off.objective, 1e-9));
+}
+
+// The user callbacks are thread_local, so Model::solve forces HiGHS's
+// parallel=off even when asked for parallel tree search (#110). HiGHS logs its
+// worker count, which is 1 exactly when parallel is off, at the start of the
+// MIP solve, so this checks the setting HiGHS runs with, whether or not a
+// parallel search would add workers on this instance. The thread count must
+// be above 1 for the check to mean anything.
+TEST_CASE("Model: parallel tree search is forced off", "[model][options][parallel]") {
+    // The scheduler keeps the thread count of its first run in this process.
+    Highs::resetThreadScheduler(true);
+
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+    std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
+    std::vector<double> profits = {0.0, 20.0, 15.0, 10.0};
+    std::vector<double> demands = {0.0, 3.0, 4.0, 2.0};
+    model.set_graph(4, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 7.0);
+
+    // The Model's logger writes to std::cout, HiGHS's log included.
+    std::ostringstream log;
+    struct CoutRedirect {
+        std::streambuf* old;
+        ~CoutRedirect() { std::cout.rdbuf(old); }
+    } redirect{std::cout.rdbuf(log.rdbuf())};
+
+    const cptp::SolverOptions opts = {
+        {"time_limit", "30"}, {"output_flag", "true"}, {"parallel", "on"}, {"threads", "4"}};
+    auto r = model.solve(opts);
+    const std::string text = log.str();
+
+    REQUIRE(r.is_optimal());
+    REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1e-6));
+    REQUIRE(text.contains("Warning: HiGHS option parallel = on ignored"));
+    std::smatch m;
+    const std::regex workers(R"(using up to (\d+) workers across (\d+) threads)");
+    INFO(text);
+    REQUIRE(std::regex_search(text, m, workers));
+    REQUIRE(m[1].str() == "1");
+    REQUIRE(m[2].str() == "4");
 }
 
 TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][branching]") {
