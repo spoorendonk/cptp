@@ -783,6 +783,23 @@ TEST_CASE("Problem::build and the TSPLIB loader reject a source/target out of ra
     std::filesystem::remove(tsplib);
 }
 
+TEST_CASE("The TSPLIB loader rejects a DEPOT_SECTION id below 1", "[io]") {
+    // #126: ids 0 and -3 were skipped, leaving the depot at node 0.
+    const auto below = Catch::Matchers::Message("TSPLIB: DEPOT_SECTION id must be at least 1");
+    for (const int id : {0, -3}) {
+        INFO("depot id " << id);
+        const auto path = write_temp("cptp_depot_below_one.vrp",
+                                     "NAME : depot\nTYPE : CVRP\nDIMENSION : 3\n"
+                                     "EDGE_WEIGHT_TYPE : EUC_2D\nCAPACITY : 1\n"
+                                     "NODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n"
+                                     "DEMAND_SECTION\n1 0\n2 1\n3 1\n"
+                                     "DEPOT_SECTION\n" +
+                                         std::to_string(id) + "\n-1\nEOF\n");
+        REQUIRE_THROWS_MATCHES(cptp::io::load_tsplib(path), std::runtime_error, below);
+        std::filesystem::remove(path);
+    }
+}
+
 TEST_CASE("Problem::build rejects an edge endpoint out of range", "[io]") {
     // #125: edge (1, 5) with num_nodes 4 wrote past static_graph's degree array.
     const auto range = Catch::Matchers::Message("edge endpoints must be in [0, num_nodes)");

@@ -218,7 +218,9 @@ Problem load_tsplib(const std::filesystem::path& path) {
             std::istringstream iss(line);
             if (iss >> d) {
                 if (d >= 1) {
-                    depot = d - 1;  // TSPLIB is 1-indexed
+                    depot = d - 1;     // TSPLIB is 1-indexed
+                } else if (d != -1) {  // -1 terminates the section
+                    throw std::runtime_error("TSPLIB: DEPOT_SECTION id must be at least 1");
                 }
             }
             continue;
