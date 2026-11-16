@@ -934,11 +934,11 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
             opts.emplace_back("random_seed", "0");
             opts.emplace_back("branch_hyper", mode);
             auto result = model.solve(opts);
+            REQUIRE(result.hyperplane_branch_rows == 0);  // runs as off (#135)
             if (result.status == cptp::SolveResult::Status::Error) {
                 WARN("mode=" << mode << " returned Error; skipping objective check");
                 continue;
             }
-            REQUIRE(result.hyperplane_branch_rows == 0);  // runs as off (#135)
             if (result.has_solution()) {
                 REQUIRE_THAT(result.objective, WithinAbs(ref_obj, 1.0));
             }

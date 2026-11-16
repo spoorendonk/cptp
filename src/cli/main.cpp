@@ -158,7 +158,7 @@ static void print_usage(const char* prog) {
                  "every mode\n"
               << "                                           runs as off, with a "
                  "warning\n"
-              << "  --branch_hyper_sb_max_depth N           Strong-branching max "
+              << "  --branch_hyper_sb_max_depth N            Strong-branching max "
                  "depth\n"
               << "  --branch_hyper_sb_iter_limit N           Strong-branching "
                  "iteration limit\n"
