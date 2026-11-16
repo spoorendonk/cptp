@@ -472,6 +472,11 @@ Problem load_numeric(const std::filesystem::path& path) {
         if (!n || !a) {
             throw bad_first();
         }
+        // #133: a negative count threw length_error from a vector, or loaded
+        // as "no arcs".
+        if (*n < 0 || *a < 0) {
+            throw std::runtime_error("numeric: num_nodes and num_arcs must not be negative");
+        }
         num_nodes = *n;
         num_arcs = *a;
         // #132: a failed >> read "3 6 x" as m absent, and "3 6 2.5" as m = 2.
@@ -485,14 +490,18 @@ Problem load_numeric(const std::filesystem::path& path) {
         }
     }
 
-    std::vector<double> profits(num_nodes);
-    std::vector<std::vector<double>> demand_rows(num_rows, std::vector<double>(num_nodes));
+    // Nothing is sized by a header count before the lines it counts are read
+    // (#133: "3 6 1000000000" allocated a billion demand rows up front), so
+    // the vectors grow line by line, and the m demand rows are laid out only
+    // once the capacity line has shown m fields.
+    std::vector<double> profits;
+    std::vector<double> node_demands;  // node-major: node i's m demands
 
     // One node per line, exactly 2 + m fields (#132: an extra or missing
     // column shifted every later field).
     for (int32_t i = 0; i < num_nodes; ++i) {
         const auto tokens = next_line(line) ? fields(line) : std::vector<std::string>{};
-        if (std::ssize(tokens) != 2 + num_rows) {
+        if (std::ssize(tokens) != 2 + int64_t{num_rows}) {
             throw std::runtime_error("numeric: expected " + std::to_string(num_nodes) +
                                      R"( node lines of "id profit" and )" +
                                      std::to_string(num_rows) + " demands");
@@ -508,9 +517,9 @@ Problem load_numeric(const std::filesystem::path& path) {
                                          "\" is not a number");
             }
             if (k == 0) {
-                profits[i] = *value;
+                profits.push_back(*value);
             } else {
-                demand_rows[k - 1][i] = *value;
+                node_demands.push_back(*value);
             }
         }
     }
@@ -553,7 +562,7 @@ Problem load_numeric(const std::filesystem::path& path) {
     // Known limits: a line with exactly m fields in place of a missing
     // capacity line still reads as the m capacities: an extra arc line with
     // m = 3 and no "s t" line, or an "s t" line with m = 2.
-    std::vector<double> capacities(num_rows, 1e18);
+    std::vector<double> capacities{1e18};  // m = 1 with no capacity line
     if (next_line(line)) {
         std::vector<double> values;
         for (const auto& token : fields(line)) {
@@ -574,6 +583,13 @@ Problem load_numeric(const std::filesystem::path& path) {
         // after the arcs leaves no row unlimited by mistake.
         throw std::runtime_error("numeric: expected " + std::to_string(num_rows) + " capacities");
     }  // m = 1 without a capacity line: row 0 has no limit
+
+    std::vector<std::vector<double>> demand_rows(num_rows, std::vector<double>(num_nodes));
+    for (int32_t i = 0; i < num_nodes; ++i) {
+        for (int32_t k = 0; k < num_rows; ++k) {
+            demand_rows[k][i] = node_demands[(static_cast<size_t>(i) * num_rows) + k];
+        }
+    }
 
     // Optionally read source and target nodes (default: 0 0 = tour)
     int32_t source = 0;

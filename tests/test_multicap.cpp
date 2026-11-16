@@ -1055,6 +1055,37 @@ TEST_CASE("The numeric loader rejects a bad m and node lines of the wrong width"
     REQUIRE(two.profits() == std::vector<double>{0.0, 5.0, 4.0});
 }
 
+TEST_CASE("The numeric loader rejects negative counts and sizes nothing by a count", "[io]") {
+    // #133: "-1 6" threw length_error, "3 -1" loaded with no arcs, and a huge
+    // m or num_nodes was allocated before the lines it counts were read.
+    const auto rejects = [](const std::string& name, const std::string& text,
+                            const std::string& message) {
+        INFO(name);
+        const auto path = write_temp(name, text);
+        REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(path), std::runtime_error,
+                               Catch::Matchers::Message(message));
+        std::filesystem::remove(path);
+    };
+    const std::string nodes = "0 0 0\n1 5 2\n2 4 1\n";
+    const std::string arcs = "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n2 1 1\n";
+    const std::string negative = "numeric: num_nodes and num_arcs must not be negative";
+    rejects("cptp_numeric_negative_nodes.txt", "-1 6\n" + nodes + arcs, negative);
+    rejects("cptp_numeric_negative_arcs.txt", "3 -1\n" + nodes, negative);
+
+    // The largest counts fail at the first line they count, not in an
+    // allocation.
+    rejects("cptp_numeric_huge_m.txt", "3 6 2147483647\n" + nodes + arcs,
+            R"(numeric: expected 3 node lines of "id profit" and 2147483647 demands)");
+    rejects("cptp_numeric_huge_m_no_nodes.txt", "0 0 2147483647\n",
+            "numeric: expected 2147483647 capacities");
+    rejects("cptp_numeric_huge_m_short_caps.txt", "0 0 2147483647\n4 7\n",
+            "numeric: expected 2147483647 capacities on one line, found 2");
+    rejects("cptp_numeric_huge_nodes.txt", "2147483647 6\n" + nodes + arcs,
+            R"(numeric: expected 2147483647 node lines of "id profit" and 1 demands)");
+    rejects("cptp_numeric_huge_arcs.txt", "3 2147483647\n" + nodes + arcs,
+            R"(numeric: expected 2147483647 arc lines of "tail head cost")");
+}
+
 TEST_CASE("Problem::build rejects an edge endpoint out of range", "[io]") {
     // #125: edge (1, 5) with num_nodes 4 wrote past static_graph's degree array.
     const auto range = Catch::Matchers::Message("edge endpoints must be in [0, num_nodes)");
