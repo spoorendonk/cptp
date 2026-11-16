@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 
@@ -413,8 +414,13 @@ SolveResult Model::solve(const SolverOptions& options) {
                 rc_settings.strategy = RCFixingStrategy::periodic;
             } else if (value == "adaptive") {
                 rc_settings.strategy = RCFixingStrategy::adaptive;
-            } else {
+            } else if (value == "off") {
                 rc_settings.strategy = RCFixingStrategy::off;
+            } else {
+                throw std::invalid_argument(
+                    "rc_fixing must be off, root_only, on_ub_improvement, periodic or "
+                    "adaptive, not " +
+                    value);
             }
             continue;
         }

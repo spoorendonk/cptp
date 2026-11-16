@@ -680,6 +680,32 @@ TEST_CASE("Bool options take true/false, 1/0 or on/off in any case and reject th
     REQUIRE_THROWS_AS(model.solve(opts_bad_flag), std::invalid_argument);
 }
 
+TEST_CASE("Model: rc_fixing accepts its five strategies and rejects anything else",
+          "[model][options][rc_fixing]") {
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    std::vector<double> costs = {5.0, 3.0, 4.0};
+    std::vector<double> profits = {0.0, 10.0, 8.0};
+    std::vector<double> demands = {0.0, 2.0, 3.0};
+    model.set_graph(3, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 5.0);
+    for (const char* v : {"off", "root_only", "on_ub_improvement", "periodic", "adaptive"}) {
+        INFO(v);
+        auto opts = kQuiet;
+        opts.emplace_back("rc_fixing", v);
+        REQUIRE(model.solve(opts).is_optimal());
+    }
+    // A typo used to fall through to off, silently disabling RC fixing.
+    for (const char* v : {"adaptve", "Off", "", "on"}) {
+        INFO(v);
+        auto opts = kQuiet;
+        opts.emplace_back("rc_fixing", v);
+        REQUIRE_THROWS_AS(model.solve(opts), std::invalid_argument);
+    }
+}
+
 TEST_CASE(
     "Model: connectivity check still enforced with SEC off and submip "
     "separation off",
