@@ -66,7 +66,7 @@ Format C++ (every tracked source, as `pre-commit` checks them):
 git ls-files -z '*.h' '*.cpp' | xargs -0 clang-format -i
 ```
 
-The build patches HiGHS with custom user-cut and propagator callbacks from `third_party/highs_patch/`.
+The build patches HiGHS with custom user-cut and propagator callbacks from `third_party/highs_patch/`. A change to any file there re-patches a pristine HiGHS checkout on the next build, and an anchor `apply_patch.cmake` expects but does not find exactly as often as it says is a configure error.
 
 ## Development Workflow
 
