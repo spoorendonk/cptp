@@ -1,10 +1,15 @@
 #include "core/io.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <system_error>
 #include <unordered_map>
 
 namespace cptp::io {
@@ -30,6 +35,35 @@ double euc2d(double x1, double y1, double x2, double y2) {
 
 bool starts_with(const std::string& s, const std::string& prefix) {
     return s.starts_with(prefix);
+}
+
+/// The whole token as an int32, or nothing (not an int, or out of range).
+std::optional<int32_t> parse_int(const std::string& token) {
+    int32_t v = 0;
+    const char* begin = token.data();
+    const char* end = begin + token.size();
+    if (begin != end && *begin == '+') {
+        ++begin;  // from_chars takes no '+'; operator>> did
+        if (begin != end && *begin == '-') {
+            return std::nullopt;  // "+-1"
+        }
+    }
+    auto [ptr, ec] = std::from_chars(begin, end, v);
+    if (ec != std::errc{} || ptr != end) {
+        return std::nullopt;
+    }
+    return v;
+}
+
+/// The whole token as a finite double, or nothing.
+std::optional<double> parse_double(const std::string& token) {
+    errno = 0;
+    char* end = nullptr;
+    const double v = std::strtod(token.c_str(), &end);
+    if (end != token.c_str() + token.size() || errno == ERANGE || !std::isfinite(v)) {
+        return std::nullopt;
+    }
+    return v;
 }
 
 /// Detect format by peeking at file content.
@@ -468,17 +502,14 @@ Problem load_numeric(const std::filesystem::path& path) {
         }
     }
 
-    // After a failed read: true at end of file (the optional part is absent),
-    // false when a token is left that did not parse.
-    const auto at_end = [&f] {
-        f.clear();
-        f >> std::ws;
-        return f.eof();
-    };
-
+    // The optional tail is read token by token: a missing token is the part
+    // being absent, and a token that is not wholly a number is an error (a
+    // failed >> cannot tell the two apart, as it consumes an overflowing or
+    // sign-only token).
+    std::string token;
     std::vector<double> capacities(num_rows, 1e18);
     for (int32_t k = 0; k < num_rows; ++k) {
-        if (!(f >> capacities[k])) {
+        if (!(f >> token)) {
             // The format is untagged, so with m > 1 the capacity line is
             // required: a missing one followed by "s t" would be read as
             // capacities, and a short one would leave rows unlimited.
@@ -486,31 +517,32 @@ Problem load_numeric(const std::filesystem::path& path) {
                 throw std::runtime_error("numeric: expected " + std::to_string(num_rows) +
                                          " capacities");
             }
-            if (!at_end()) {
-                throw std::runtime_error("numeric: the capacity is not a number");
-            }
-            // m = 1 without a capacity line: row 0 has no limit.
-            capacities[0] = 1e18;
-            break;
+            break;  // m = 1 without a capacity line: row 0 has no limit
         }
+        const auto q = parse_double(token);
+        if (!q) {
+            throw std::runtime_error("numeric: the capacity \"" + token + "\" is not a number");
+        }
+        capacities[k] = *q;
     }
 
     // Optionally read source and target nodes (default: 0 0 = tour)
     int32_t source = 0;
     int32_t target = 0;
-    if (f >> source) {
-        if (!(f >> target)) {
-            if (at_end()) {
-                throw std::runtime_error(
-                    "numeric: expected \"source target\", found a source only");
-            }
-            throw std::runtime_error("numeric: the target is not an int");
+    if (f >> token) {
+        const auto s = parse_int(token);
+        if (!s) {
+            throw std::runtime_error("numeric: the source \"" + token + "\" is not an int");
         }
-    } else {
-        if (!at_end()) {
-            throw std::runtime_error("numeric: the source is not an int");
+        if (!(f >> token)) {
+            throw std::runtime_error("numeric: expected \"source target\", found a source only");
         }
-        source = 0;  // no source line: a tour from node 0
+        const auto t = parse_int(token);
+        if (!t) {
+            throw std::runtime_error("numeric: the target \"" + token + "\" is not an int");
+        }
+        source = *s;
+        target = *t;
     }
 
     Problem prob;

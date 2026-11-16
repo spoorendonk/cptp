@@ -866,14 +866,39 @@ TEST_CASE("The numeric loader rejects a capacity or source/target that does not 
                                Catch::Matchers::Message(message));
         std::filesystem::remove(path);
     };
-    const std::string bad_source = "numeric: the source is not an int";
-    rejects("cptp_numeric_text_source.txt", arcs + "4\nabc 1\n", bad_source);
-    rejects("cptp_numeric_overflow_source.txt", arcs + "4\n99999999999 1\n", bad_source);
-    rejects("cptp_numeric_text_target.txt", arcs + "4\n2 x\n", "numeric: the target is not an int");
+    const auto source = [](const std::string& t) {
+        return "numeric: the source \"" + t + "\" is not an int";
+    };
+    const auto target = [](const std::string& t) {
+        return "numeric: the target \"" + t + "\" is not an int";
+    };
+    const auto capacity = [](const std::string& t) {
+        return "numeric: the capacity \"" + t + "\" is not a number";
+    };
+    rejects("cptp_numeric_text_source.txt", arcs + "4\nabc 1\n", source("abc"));
+    rejects("cptp_numeric_overflow_source.txt", arcs + "4\n99999999999 1\n", source("99999999999"));
+    // A failed >> consumes an overflowing or sign-only token: at end of file
+    // these read as "no source line".
+    rejects("cptp_numeric_overflow_source_end.txt", arcs + "4\n99999999999\n",
+            source("99999999999"));
+    rejects("cptp_numeric_sign_source_end.txt", arcs + "4\n-\n", source("-"));
+    rejects("cptp_numeric_plus_minus_source.txt", arcs + "4\n+-1 1\n", source("+-1"));
+    rejects("cptp_numeric_text_target.txt", arcs + "4\n2 x\n", target("x"));
+    rejects("cptp_numeric_overflow_target_end.txt", arcs + "4\n2 99999999999\n",
+            target("99999999999"));
     // With m = 1 a capacity token that is not a number hid the "s t" line.
-    const std::string bad_capacity = "numeric: the capacity is not a number";
-    rejects("cptp_numeric_text_capacity.txt", arcs + "abc\n0 2\n", bad_capacity);
-    rejects("cptp_numeric_text_capacity_end.txt", arcs + "abc\n", bad_capacity);
+    rejects("cptp_numeric_text_capacity.txt", arcs + "abc\n0 2\n", capacity("abc"));
+    rejects("cptp_numeric_text_capacity_end.txt", arcs + "abc\n", capacity("abc"));
+    rejects("cptp_numeric_overflow_capacity_end.txt", arcs + "1e999\n", capacity("1e999"));
+    rejects("cptp_numeric_exponent_capacity_end.txt", arcs + "1e\n", capacity("1e"));
+    rejects("cptp_numeric_sign_capacity_end.txt", arcs + "-\n", capacity("-"));
+
+    // "+2" still reads as 2, as it did with operator>>.
+    const auto plus = write_temp("cptp_numeric_plus_source.txt", arcs + "4\n+2 +1\n");
+    const auto path = cptp::io::load_numeric(plus);
+    std::filesystem::remove(plus);
+    REQUIRE(path.source() == 2);
+    REQUIRE(path.target() == 1);
 
     // No capacity line at all is still "no limit", and a tour.
     const auto none = write_temp("cptp_numeric_no_capacity.txt", arcs);
