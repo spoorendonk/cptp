@@ -13,6 +13,8 @@ namespace {
 thread_local HighsUserSeparator::Callback callback_;
 thread_local HighsUserSeparator::FeasibilityCheck feasibility_check_;
 thread_local bool incumbent_rejected_ = false;
+// pushBranching() calls since the last setBranchingCallback() or clearCallback().
+thread_local int64_t branch_rows_added_ = 0;
 }  // namespace
 
 // Static member definitions for branching/hyperplane features.
@@ -23,7 +25,6 @@ std::unordered_map<std::string, HighsUserSeparator::HyperplanePseudocost>
     HighsUserSeparator::hyperplane_pseudocosts_;
 std::vector<HighsInt> HighsUserSeparator::hp_stack_;
 std::vector<HighsUserSeparator::HyperplaneData> HighsUserSeparator::hp_data_pool_;
-int64_t HighsUserSeparator::branch_rows_added_ = 0;
 
 void HighsUserSeparator::separateLpSolution(HighsLpRelaxation& lpRelaxation,
                                             HighsLpAggregator& /*lpAggregator*/,
@@ -49,6 +50,7 @@ void HighsUserSeparator::clearCallback() {
     strong_branch_config_ = StrongBranchConfig{};
     hyperplane_pseudocosts_.clear();
     clearStack();
+    branch_rows_added_ = 0;
 }
 
 void HighsUserSeparator::setBranchingCallback(BranchingCallback cb) {

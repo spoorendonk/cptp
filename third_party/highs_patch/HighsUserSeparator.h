@@ -156,7 +156,8 @@ public:
     /// Clear stack and pool (call between solves).
     static void clearStack();
 
-    /// Branching rows pushBranching() added since the last setBranchingCallback().
+    /// Branching rows pushBranching() added on this thread since the last
+    /// setBranchingCallback() or clearCallback() (thread-local, like the callbacks).
     static int64_t branchRowsAdded();
 
 private:
@@ -169,7 +170,6 @@ private:
     // Hyperplane branching: row lifecycle tracking
     static std::vector<HighsInt> hp_stack_;            // tracks active branching rows
     static std::vector<HyperplaneData> hp_data_pool_;  // coefficients for flip
-    static int64_t branch_rows_added_;                 // pushBranching() calls this solve
 };
 
 #endif  // MIP_HIGHS_USER_SEPARATOR_H_
