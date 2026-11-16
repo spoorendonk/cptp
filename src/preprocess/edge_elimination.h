@@ -23,9 +23,8 @@ inline constexpr int32_t kNoPred = -1;
 /// Label for the capacity-aware labeling.
 /// Tracks net cost (edge costs - collected profits) and accumulated demand.
 struct Label {
-    double cost;             // net cost = sum(edge_costs) - sum(profits along path)
-    double demand;           // accumulated demand along path
-    int32_t pred = kNoPred;  // node before this one (2-cycle elimination)
+    double cost;    // net cost = sum(edge_costs) - sum(profits along path)
+    double demand;  // accumulated demand along path
 };
 
 /// Each node's final Pareto front of a labeling, as (cost, demand) labels:
@@ -192,22 +191,27 @@ inline std::vector<double> labeling_demand(
     // live label unextended and f too high (#111).
     std::vector<Label> pool;
     std::vector<int32_t> node_of;
+    std::vector<int32_t> pred_of;  // each label's predecessor, kept only under two_cycle
     std::vector<char> dead;
     std::vector<std::vector<int32_t>> live(static_cast<size_t>(n));
     std::vector<double> best_cost(static_cast<size_t>(n), kInf);
     std::vector<int32_t> queue;
+    auto pred = [&](int32_t id) { return pred_of[static_cast<size_t>(id)]; };
 
-    auto push = [&](int32_t v, Label lbl) {
+    auto push = [&](int32_t v, Label lbl, int32_t from) {
         const auto id = static_cast<int32_t>(pool.size());
         pool.push_back(lbl);
         node_of.push_back(v);
+        if (two_cycle) {
+            pred_of.push_back(from);
+        }
         dead.push_back(0);
         live[static_cast<size_t>(v)].push_back(id);
         best_cost[static_cast<size_t>(v)] = std::min(lbl.cost, best_cost[static_cast<size_t>(v)]);
         queue.push_back(id);
     };
 
-    push(root, {-profits[root], demand[root], kNoPred});
+    push(root, {-profits[root], demand[root]}, kNoPred);
     DeadlineCheck out_of_time(deadline, timed_out);
 
     size_t head = 0;
@@ -221,10 +225,11 @@ inline std::vector<double> labeling_demand(
         }
         const int32_t u = node_of[static_cast<size_t>(id)];
         const Label lbl = pool[static_cast<size_t>(id)];  // a copy: push grows the pool
+        const int32_t lbl_pred = two_cycle ? pred(id) : kNoPred;
 
         for (auto e : graph.incident_edges(u)) {
             const int32_t v = graph.other_endpoint(e, u);
-            if (two_cycle && v == lbl.pred) {
+            if (two_cycle && v == lbl_pred) {
                 continue;  // u -> v -> u
             }
 
@@ -246,13 +251,13 @@ inline std::vector<double> labeling_demand(
                 if (existing.cost > new_cost || existing.demand > new_demand) {
                     continue;
                 }
-                if (!two_cycle || existing.pred == u || existing.pred == kNoPred) {
+                if (!two_cycle || pred(other) == u || pred(other) == kNoPred) {
                     dominated = true;
                     break;
                 }
                 if (other_pred == kNoPred) {
-                    other_pred = existing.pred;
-                } else if (existing.pred != other_pred) {
+                    other_pred = pred(other);
+                } else if (pred(other) != other_pred) {
                     dominated = true;  // two preds: one of them goes wherever the new one would
                     break;
                 }
@@ -264,14 +269,14 @@ inline std::vector<double> labeling_demand(
             std::erase_if(at_v, [&](int32_t other) {
                 const Label& ex = pool[static_cast<size_t>(other)];
                 if (new_cost <= ex.cost && new_demand <= ex.demand &&
-                    (!two_cycle || ex.pred == u)) {
+                    (!two_cycle || pred(other) == u)) {
                     dead[static_cast<size_t>(other)] = 1;
                     return true;
                 }
                 return false;
             });
 
-            push(v, {new_cost, new_demand, u});
+            push(v, {new_cost, new_demand}, u);
         }
     }
 
@@ -649,11 +654,14 @@ inline double join_staircases(std::span<const Label> a, std::span<const Label> b
 ///           of a.cost + c_e + b.cost + correction,
 /// with cap = Q_0 + d_0(depot) for a tour and Q_0 for a path, again over
 /// both orientations. lb_e is the larger of the two bounds: f and b may
-/// come from more rows than row 0 (labeling_from).
+/// come from more rows than row 0 (labeling_from). The join stops at
+/// `deadline` (the solve's time limit, as the labelings): the edges it has
+/// not reached keep the first bound, which is still valid.
 inline std::vector<double> edge_lower_bounds(const Problem& prob, std::span<const double> f,
                                              std::span<const double> b, double correction,
                                              const LabelFronts* front_f = nullptr,
-                                             const LabelFronts* front_b = nullptr) {
+                                             const LabelFronts* front_b = nullptr,
+                                             LabelingDeadline deadline = kNoLabelingDeadline) {
     const auto& graph = prob.graph();
     constexpr double kInf = std::numeric_limits<double>::infinity();
     std::vector<double> lb(static_cast<size_t>(prob.num_edges()), kInf);
@@ -680,10 +688,16 @@ inline std::vector<double> edge_lower_bounds(const Problem& prob, std::span<cons
         return out;
     };
     const auto sf = stairs(*front_f);
-    const auto sb = front_f == front_b ? sf : stairs(*front_b);
+    const auto own_sb = front_f == front_b ? std::vector<std::vector<Label>>{} : stairs(*front_b);
+    const auto& sb = front_f == front_b ? sf : own_sb;  // a tour shares one set
+    DeadlineCheck out_of_time(deadline, nullptr);
     for (auto e : graph.edges()) {
         const int32_t u = graph.edge_source(e);
         const int32_t v = graph.edge_target(e);
+        const size_t work = sf[u].size() + sb[v].size() + sf[v].size() + sb[u].size();
+        if (out_of_time.passed(static_cast<int64_t>(work))) {
+            break;  // out of time: the rest keep the first bound
+        }
         const double c = prob.edge_cost(e);
         const double joined =
             std::min(join_staircases(sf[u], sb[v], cap), join_staircases(sf[v], sb[u], cap)) + c +
@@ -692,6 +706,17 @@ inline std::vector<double> edge_lower_bounds(const Problem& prob, std::span<cons
         x = std::max(x, joined);
     }
     return lb;
+}
+
+/// Raises edge_lb (edge_lower_bounds) to the plain bound from f and b where
+/// that is higher, after f and b were recomputed (all-pairs bounds).
+inline void raise_edge_lower_bounds(std::vector<double>& edge_lb, const Problem& prob,
+                                    std::span<const double> f, std::span<const double> b,
+                                    double correction) {
+    const auto plain = edge_lower_bounds(prob, f, b, correction);
+    for (size_t e = 0; e < edge_lb.size(); ++e) {
+        edge_lb[e] = std::max(edge_lb[e], plain[e]);
+    }
 }
 
 /// Edge elimination from per-edge lower bounds (edge_lower_bounds):

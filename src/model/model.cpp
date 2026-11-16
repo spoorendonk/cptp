@@ -932,7 +932,7 @@ SolveResult Model::solve(const SolverOptions& options) {
                 // The fronts are filled only under join_by_load; empty ones join nothing.
                 edge_lb = preprocess::edge_lower_bounds(
                     problem_, fwd_bounds, bwd_bounds, correction, &fwd_fronts,
-                    source != target ? &bwd_fronts : &fwd_fronts);
+                    source != target ? &bwd_fronts : &fwd_fronts, labeling_deadline);
                 logger_.log(
                     "  fwd_reachable={}/{}  bwd_reachable={}/{}  fwd[target]={}  "
                     "time={:.3f}s",
@@ -1052,6 +1052,9 @@ SolveResult Model::solve(const SolverOptions& options) {
                     bwd_bounds.assign(all_pairs.begin() + static_cast<ptrdiff_t>(target) * n,
                                       all_pairs.begin() + static_cast<ptrdiff_t>(target) * n + n);
                 }
+                // Stage 5 and the bridge then see the bound from these f and b too.
+                preprocess::raise_edge_lower_bounds(edge_lb, problem_, fwd_bounds, bwd_bounds,
+                                                    correction);
             } else {
                 logger_.log("  no bounds produced");
             }

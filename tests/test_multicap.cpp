@@ -1616,3 +1616,49 @@ TEST_CASE("Multicap: labeling_join = load and labeling_2cycle keep the optimum (
     opts.emplace_back("labeling_join", "max");
     REQUIRE_THROWS_AS(model.solve(opts), std::invalid_argument);
 }
+
+TEST_CASE("Labeling join: s-t path solves agree across labeling_join and 2cycle (#144)",
+          "[multicap][labeling]") {
+    // Random s-t path instances (s = 0, t = 7) with a binding capacity: the
+    // load join and 2-cycle elimination must not cut off the optimum that the
+    // plain join (labeling_join = min) finds.
+    std::mt19937 rng(1440);
+    std::uniform_int_distribution<int> cost(1, 20);
+    std::uniform_int_distribution<int> profit(0, 30);
+    std::uniform_int_distribution<int> dem(1, 4);
+    constexpr int32_t kNodes = 8;
+    for (int trial = 0; trial < 20; ++trial) {
+        std::vector<cptp::Edge> edges;
+        std::vector<double> costs;
+        for (int32_t u = 0; u < kNodes; ++u) {
+            for (int32_t v = u + 1; v < kNodes; ++v) {
+                edges.push_back({u, v});
+                costs.push_back(cost(rng));
+            }
+        }
+        std::vector<double> profits(kNodes);
+        std::vector<double> demands(kNodes);
+        for (int32_t v = 0; v < kNodes; ++v) {
+            profits[static_cast<size_t>(v)] = profit(rng);
+            demands[static_cast<size_t>(v)] = dem(rng);
+        }
+        cptp::Problem prob;
+        prob.build(kNodes, edges, costs, profits, std::vector<std::vector<double>>{demands},
+                   std::vector<double>{10.0}, 0, kNodes - 1);
+        auto solve = [&](const char* join, const char* two_cycle) {
+            cptp::Model model;
+            model.set_problem(prob);
+            auto opts = kQuiet;
+            opts.emplace_back("labeling_join", join);
+            opts.emplace_back("labeling_2cycle", two_cycle);
+            const auto result = model.solve(opts);
+            REQUIRE(result.is_optimal());
+            return result.objective;
+        };
+        INFO("trial " << trial);
+        const double want = solve("min", "false");
+        REQUIRE_THAT(solve("load", "false"), WithinAbs(want, 1e-6));
+        REQUIRE_THAT(solve("min", "true"), WithinAbs(want, 1e-6));
+        REQUIRE_THAT(solve("load", "true"), WithinAbs(want, 1e-6));
+    }
+}
