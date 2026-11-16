@@ -199,7 +199,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool output_flag = true;
     for (const auto& [key, value] : options) {
         if (key == "output_flag") {
-            output_flag = (value == "true" || value == "1");
+            output_flag = parse_bool_option(key, value);
         }
     }
     logger_.set_enabled(output_flag);

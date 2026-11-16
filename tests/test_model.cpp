@@ -673,6 +673,11 @@ TEST_CASE("Bool options take true/false, 1/0 or on/off in any case and reject th
     auto opts_bad = kQuiet;
     opts_bad.emplace_back("capacity_cut_surrogate", "yes");
     REQUIRE_THROWS_AS(model.solve(opts_bad), std::invalid_argument);
+    // output_flag is also read before the main option loop, to set up the
+    // logger; that read must use the same parser.
+    auto opts_bad_flag = kQuiet;
+    opts_bad_flag.emplace_back("output_flag", "yes");
+    REQUIRE_THROWS_AS(model.solve(opts_bad_flag), std::invalid_argument);
 }
 
 TEST_CASE(
