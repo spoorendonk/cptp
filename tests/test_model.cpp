@@ -5,7 +5,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <mutex>
@@ -246,6 +248,37 @@ TEST_CASE("Heuristic pool local search: deterministic across worker counts (path
 
     REQUIRE(single.objective == parallel.objective);
     REQUIRE(single.col_values == parallel.col_values);
+}
+
+TEST_CASE("Heuristic pool local search starts nothing past its deadline (#143)", "[heuristic]") {
+    auto prob = make_heuristic_small_tour_problem();
+    auto pool = cptp::heuristic::build_construction_pool(prob, 16);
+    REQUIRE_FALSE(pool.candidates.empty());
+    const int starts = static_cast<int>(pool.candidates.size());
+    cptp::heuristic::WarmStartProgressOptions progress_opts;
+    progress_opts.report_every_starts = 1;
+    int32_t starts_done = -1;
+    auto progress_cb = [&](const cptp::heuristic::WarmStartProgressSnapshot& snap) {
+        if (snap.final) {
+            starts_done = snap.starts_done;
+        }
+    };
+
+    const auto past = std::chrono::steady_clock::now();
+    auto late = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, starts, 200, 2, {}, &progress_opts, progress_cb, false, past);
+    REQUIRE(starts_done == 0);
+    REQUIRE(late.col_values.empty());
+    REQUIRE_FALSE(std::isfinite(late.objective));
+
+    // A deadline that does not pass changes nothing.
+    const auto later = std::chrono::steady_clock::now() + std::chrono::hours(1);
+    auto in_time = cptp::heuristic::run_local_search_from_pool(
+        prob, pool, starts, 200, 2, {}, &progress_opts, progress_cb, false, later);
+    REQUIRE(starts_done == starts);
+    auto unlimited = cptp::heuristic::run_local_search_from_pool(prob, pool, starts, 200, 2);
+    REQUIRE(in_time.objective == unlimited.objective);
+    REQUIRE(in_time.col_values == unlimited.col_values);
 }
 
 TEST_CASE("Heuristic conversion throws on invalid route", "[heuristic][validation]") {

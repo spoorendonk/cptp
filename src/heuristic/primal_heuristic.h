@@ -4,6 +4,7 @@
 #include "sep/separation_oracle.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -284,14 +285,17 @@ inline HeuristicResult best_construction_solution(const Problem& prob,
     return {detail::tour_to_solution(prob, best.tour), best.objective};
 }
 
-HeuristicResult run_local_search_from_pool(const Problem& prob, const ConstructionPool& pool,
-                                           int num_starts,
-                                           int ls_max_iter_per_start = kDefaultLsMaxIterPerStart,
-                                           int32_t max_workers = 0,
-                                           const std::vector<bool>& edge_active_override = {},
-                                           const WarmStartProgressOptions* progress_opts = nullptr,
-                                           const WarmStartProgressCallback& progress_cb = {},
-                                           bool reuse_candidates_for_starts = false);
+/// Local search (with ILS rounds) from num_starts seeds of the pool, best
+/// result kept. No start or ILS round begins once `deadline` has passed
+/// (#143): the result is then the best of the work done so far, none if
+/// no start got that far.
+HeuristicResult run_local_search_from_pool(
+    const Problem& prob, const ConstructionPool& pool, int num_starts,
+    int ls_max_iter_per_start = kDefaultLsMaxIterPerStart, int32_t max_workers = 0,
+    const std::vector<bool>& edge_active_override = {},
+    const WarmStartProgressOptions* progress_opts = nullptr,
+    const WarmStartProgressCallback& progress_cb = {}, bool reuse_candidates_for_starts = false,
+    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max());
 
 /// Build an initial solution via deterministic seed construction + parallel
 /// local search over top seeds.

@@ -1279,17 +1279,41 @@ TEST_CASE("Multicap: the vector labeling gives no bound past its deadline (#115)
                                               past)
                 .empty());
     REQUIRE(stats.timed_out);
-    // labeling_from then keeps row 0's bound alone, never a partial one.
-    stats = {};
-    REQUIRE(cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kVector, -1, &stats, past) ==
-            cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kFirst));
-    REQUIRE(stats.timed_out);
-    // A deadline that does not pass changes nothing.
+    // (Row 0 stops at the same deadline, so labeling_from then gives no bound:
+    // see the #143 test below.) A deadline that does not pass changes nothing.
     stats = {};
     const auto later = std::chrono::steady_clock::now() + std::chrono::hours(1);
     REQUIRE(cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kVector, -1, &stats, later) ==
             cptp::preprocess::labeling_from(prob, 0, 0, LabelRows::kVector));
     REQUIRE_FALSE(stats.timed_out);
+}
+
+TEST_CASE("Multicap: row 0's labeling gives no bound past its deadline (#143)",
+          "[multicap][labeling]") {
+    using cptp::preprocess::LabelRows;
+    const auto prob = make_problem(3);
+    const auto past = std::chrono::steady_clock::now();
+    bool timed_out = false;
+    REQUIRE(cptp::preprocess::labeling_row(prob, 0, 0, prob.edge_costs(), prob.profits(), 0, past,
+                                           &timed_out)
+                .empty());
+    REQUIRE(timed_out);
+    // labeling_from then gives no bound either, under every row choice.
+    for (const auto rows :
+         {LabelRows::kFirst, LabelRows::kAll, LabelRows::kSurrogate, LabelRows::kVector}) {
+        cptp::preprocess::LabelingStats stats;
+        REQUIRE(cptp::preprocess::labeling_from(prob, 0, 0, rows, -1, &stats, past).empty());
+        REQUIRE(stats.timed_out);
+    }
+    // A deadline that does not pass changes nothing.
+    const auto later = std::chrono::steady_clock::now() + std::chrono::hours(1);
+    for (const auto rows : {LabelRows::kFirst, LabelRows::kAll, LabelRows::kSurrogate}) {
+        cptp::preprocess::LabelingStats stats;
+        const auto bound = cptp::preprocess::labeling_from(prob, 0, 0, rows, -1, &stats, later);
+        REQUIRE_FALSE(bound.empty());
+        REQUIRE(bound == cptp::preprocess::labeling_from(prob, 0, 0, rows));
+        REQUIRE_FALSE(stats.timed_out);
+    }
 }
 
 TEST_CASE("Multicap: labeling_rows = vector keeps to time_limit (#115)",

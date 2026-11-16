@@ -605,8 +605,8 @@ SolveResult Model::solve(const SolverOptions& options) {
         physical_cores, logical_threads, preproc_thread_limit, simd_str);
 
     const auto label_rows = preprocess::parse_label_rows(labeling_rows);
-    // The vector labeling stops at the solve's time limit (#115); the others
-    // keep to their pop budget. A limit past ~30 years (inf too) is none, so
+    // The labelings (#115, #143) and the stage-4 local search (#143) stop at
+    // the solve's time limit. A limit past ~30 years (inf too) is none, so
     // the conversion cannot overflow.
     const preprocess::LabelingDeadline labeling_deadline =
         user_time_limit > 0.0 && user_time_limit < 1e9
@@ -872,15 +872,18 @@ SolveResult Model::solve(const SolverOptions& options) {
             if (label_rows == preprocess::LabelRows::kVector) {
                 logger_.log("  vector labels: fwd={} bwd={}", fwd_stats.labels,
                             source != target ? bwd_stats.labels : fwd_stats.labels);
-                if (fwd_stats.timed_out || bwd_stats.timed_out) {
-                    logger_.log("  vector labeling stopped at time_limit — row 0 bounds only");
-                }
             }
+            const bool timed_out = fwd_stats.timed_out || bwd_stats.timed_out;
             if (fwd_bounds.empty() || bwd_bounds.empty()) {
-                logger_.log(
-                    "  labeling budget exhausted ({} pops) — disabling "
-                    "bounds-dependent features",
-                    labeling_max_queue_pops);
+                if (timed_out) {
+                    logger_.log(
+                        "  labeling stopped at time_limit — disabling bounds-dependent features");
+                } else {
+                    logger_.log(
+                        "  labeling budget exhausted ({} pops) — disabling "
+                        "bounds-dependent features",
+                        labeling_max_queue_pops);
+                }
                 fwd_bounds.clear();
                 bwd_bounds.clear();
                 labeling_elim_bounds = false;
@@ -890,6 +893,11 @@ SolveResult Model::solve(const SolverOptions& options) {
                 all_pairs_bounds = false;
                 rc_settings.strategy = RCFixingStrategy::off;
             } else {
+                if (timed_out) {
+                    logger_.log(
+                        "  later rows' labeling stopped at time_limit — their bounds "
+                        "dropped");
+                }
                 logger_.log(
                     "  fwd_reachable={}/{}  bwd_reachable={}/{}  fwd[target]={}  "
                     "time={:.3f}s",
@@ -975,11 +983,15 @@ SolveResult Model::solve(const SolverOptions& options) {
                 // leave kInf, "unreachable", for its source: drop all pairs.
                 // Row 0 runs unbounded, as the root labeling showed it ends;
                 // rows k >= 1 keep the root's budget, since the root run skips
-                // a row that exhausts it and so proves nothing about it.
+                // a row that exhausts it and so proves nothing about it. Each
+                // labeling stops at the deadline (#143), giving an empty row.
                 std::atomic<bool> any_empty = false;
                 parallel::parallel_for(
                     0, n,
                     [&](int s) {
+                        if (any_empty) {
+                            return;  // all pairs is dropped anyway
+                        }
                         auto row = preprocess::labeling_from(problem_, s, 0, label_rows,
                                                              labeling_max_queue_pops, nullptr,
                                                              labeling_deadline);
@@ -1033,7 +1045,8 @@ SolveResult Model::solve(const SolverOptions& options) {
             };
             ls_stage4 = heuristic::run_local_search_from_pool(
                 problem_, construction_pool, requested_starts, heu_ws_ls_max_iter,
-                preproc_thread_limit, stage3_edge_active, &progress_opts, progress_cb, true);
+                preproc_thread_limit, stage3_edge_active, &progress_opts, progress_cb, true,
+                labeling_deadline);
         } else {
             logger_.log("  skipped (heu_ws=false or candidates=0)  time={:.3f}s",
                         stage4_timer.elapsed_seconds());

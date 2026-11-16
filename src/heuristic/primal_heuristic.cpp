@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -885,13 +886,11 @@ ConstructionPool build_construction_pool(const Problem& prob, int max_candidates
     return pool;
 }
 
-HeuristicResult run_local_search_from_pool(const Problem& prob, const ConstructionPool& pool,
-                                           int num_starts, int ls_max_iter_per_start,
-                                           int32_t max_workers,
-                                           const std::vector<bool>& edge_active_override,
-                                           const WarmStartProgressOptions* progress_opts,
-                                           const WarmStartProgressCallback& progress_cb,
-                                           bool reuse_candidates_for_starts) {
+HeuristicResult run_local_search_from_pool(
+    const Problem& prob, const ConstructionPool& pool, int num_starts, int ls_max_iter_per_start,
+    int32_t max_workers, const std::vector<bool>& edge_active_override,
+    const WarmStartProgressOptions* progress_opts, const WarmStartProgressCallback& progress_cb,
+    bool reuse_candidates_for_starts, std::chrono::steady_clock::time_point deadline) {
     if (pool.candidates.empty()) {
         return {{}, detail::kNoSolution};
     }
@@ -920,6 +919,10 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
     double progress_best_objective = detail::kNoSolution;
     std::mutex progress_emit_mu;
     int32_t last_emitted_starts = -1;
+    const bool has_deadline = deadline != std::chrono::steady_clock::time_point::max();
+    auto past_deadline = [&] {
+        return has_deadline && std::chrono::steady_clock::now() >= deadline;
+    };
 
     auto build_progress_snapshot = [&](bool final) -> WarmStartProgressSnapshot {
         WarmStartProgressSnapshot snap;
@@ -984,6 +987,9 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
         0, num_threads,
         [&](int) {
             while (true) {
+                if (past_deadline()) {
+                    break;  // out of time: no new start (#143)
+                }
                 const int32_t i = next_start.fetch_add(1, std::memory_order_relaxed);
                 if (i >= starts) {
                     break;
@@ -1020,6 +1026,9 @@ HeuristicResult run_local_search_from_pool(const Problem& prob, const Constructi
                                                  .objective = detail::tour_objective(prob, tour)};
 
                 for (int32_t round = 0; round < detail::kIlsRounds; ++round) {
+                    if (past_deadline()) {
+                        break;  // out of time: keep the best tour so far (#143)
+                    }
                     std::vector<int32_t> kicked = best_local.tour;
                     std::vector<bool> kicked_in_tour;
                     detail::Residual kicked_remaining_cap;
