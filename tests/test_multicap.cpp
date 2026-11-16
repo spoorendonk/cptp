@@ -711,6 +711,39 @@ TEST_CASE("Multicap: negative demands are rejected, a looping row 0 eliminates n
     REQUIRE(std::ranges::none_of(elim, [](bool b) { return b; }));
 }
 
+TEST_CASE("Multicap: Model and loaders reject a negative demand", "[multicap][io]") {
+    // #95: with d = (0, 3, -2) and Q = 1 the heuristic took {1, 2} (load 1)
+    // while the LP row 3 y_1 <= 1 forbade it. No path admits such a row.
+    cptp::Model model;
+    model.set_graph(3, std::vector<cptp::Edge>{{0, 1}, {0, 2}, {1, 2}},
+                    std::vector<double>{1.0, 1.0, 1.0});
+    model.set_profits(std::vector<double>{0.0, 10.0, 10.0});
+    model.set_depot(0);
+    model.add_capacity_resource(std::vector<double>{0.0, 3.0, -2.0}, 1.0);
+    REQUIRE_THROWS_AS(model.solve(kQuiet), std::invalid_argument);
+
+    const auto tsplib = write_temp("cptp_multicap_negative.vrp",
+                                   "NAME : negative\nTYPE : CVRP\nDIMENSION : 3\n"
+                                   "EDGE_WEIGHT_TYPE : EUC_2D\nCAPACITY : 1\n"
+                                   "NODE_COORD_SECTION\n1 0 0\n2 1 0\n3 0 1\n"
+                                   "DEMAND_SECTION\n1 0\n2 3\n3 -2\n"
+                                   "DEPOT_SECTION\n1\n-1\nEOF\n");
+    REQUIRE_THROWS_AS(cptp::io::load_tsplib(tsplib), std::invalid_argument);
+    std::filesystem::remove(tsplib);
+
+    // The numeric layout of the m = 2 test above, with d^1_2 = -1.
+    const auto numeric = write_temp("cptp_multicap_negative.txt",
+                                    "3 6 2\n"
+                                    "0 0 0 0\n"
+                                    "1 5 2 3\n"
+                                    "2 4 1 -1\n"
+                                    "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n2 1 1\n"
+                                    "4 7\n"
+                                    "0 0\n");
+    REQUIRE_THROWS_AS(cptp::io::load_numeric(numeric), std::invalid_argument);
+    std::filesystem::remove(numeric);
+}
+
 TEST_CASE("Multicap: zero-demand cycles that are not negative keep their row",
           "[multicap][labeling]") {
     using cptp::preprocess::LabelRows;

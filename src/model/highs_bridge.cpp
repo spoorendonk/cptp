@@ -228,6 +228,7 @@ void HiGHSBridge::build_formulation() {
         std::vector<double> values;
         for (int32_t i = 0; i < n; ++i) {
             double d = prob_.demand(k, i);
+            // Problem::build rejects d < 0 (#95), so this only drops zeros.
             if (d > 0) {
                 indices.push_back(m + i);
                 values.push_back(d);

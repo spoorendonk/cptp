@@ -151,6 +151,34 @@ def test_problem_one_dimensional_strided_demands() -> None:
     np.testing.assert_array_equal(prob.demands, ROWS[1])
 
 
+def test_negative_demand_is_rejected() -> None:
+    # #95: the heuristic and the LP capacity row read a negative demand
+    # differently, so Problem.build rejects it on every path.
+    rows = ROWS.copy()
+    rows[1, 2] = -1.0
+    with pytest.raises(ValueError, match="non-negative"):
+        Problem(
+            num_nodes=4,
+            edges=EDGES,
+            edge_costs=COSTS,
+            profits=PROFITS,
+            demands=rows,
+            capacities=CAPS,
+            source=0,
+            target=0,
+        )
+    with pytest.raises(ValueError, match="non-negative"):
+        solve(
+            num_nodes=4,
+            edges=EDGES,
+            edge_costs=COSTS,
+            profits=PROFITS,
+            demands=rows[1],
+            capacity=float(CAPS[1]),
+            time_limit=30.0,
+        )
+
+
 def test_solve_rejects_zero_rows() -> None:
     with pytest.raises(ValueError, match="at least one capacity row"):
         solve(
