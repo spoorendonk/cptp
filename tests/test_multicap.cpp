@@ -871,8 +871,22 @@ TEST_CASE("The TSPLIB loader sizes nothing by DIMENSION before its data", "[io]"
             head + "DIMENSION : 3\n" + coords + "PROFIT_SECTION\n1 0\n2 5\nEOF\n",
             "TSPLIB: PROFIT_SECTION has 2 values, DIMENSION is 3");
 
-    // A full section loads, and weights past it (an unknown section read on)
-    // are ignored.
+    // An unknown section ends the one before it: its data does not make up
+    // a short section, and a section with too many entries is an error too.
+    const std::string display = "DISPLAY_DATA_SECTION\n1 0 0\n2 1 0\n3 0 1\n";
+    rejects("cptp_tsplib_short_full_display.vrp",
+            full + "EDGE_WEIGHT_SECTION\n0 1 2\n1 0 3\n" + display + "EOF\n",
+            "TSPLIB: EDGE_WEIGHT_SECTION has 6 weights, FULL_MATRIX with DIMENSION 3 needs 9");
+    rejects("cptp_tsplib_short_coords_display.vrp",
+            head + "DIMENSION : 3\nNODE_COORD_SECTION\n1 0 0\n2 1 0\n" + display + "EOF\n",
+            "TSPLIB: NODE_COORD_SECTION has 2 nodes, DIMENSION is 3");
+    rejects("cptp_tsplib_long_full.vrp",
+            full + "EDGE_WEIGHT_SECTION\n0 1 2\n1 0 3\n2 3 0\n4\nEOF\n",
+            "TSPLIB: EDGE_WEIGHT_SECTION has 10 weights, FULL_MATRIX with DIMENSION 3 needs 9");
+    rejects("cptp_tsplib_long_coords.vrp", head + "DIMENSION : 2\n" + coords + "EOF\n",
+            "TSPLIB: NODE_COORD_SECTION has 3 nodes, DIMENSION is 2");
+
+    // A full section loads, and an unknown section after it is not read.
     const auto ok = write_temp("cptp_tsplib_full_ok.vrp",
                                full +
                                    "EDGE_WEIGHT_SECTION\n0 1 2\n1 0 3\n2 3 0\n"
@@ -888,6 +902,17 @@ TEST_CASE("The TSPLIB loader sizes nothing by DIMENSION before its data", "[io]"
     const auto lower_prob = cptp::io::load_tsplib(lower);
     std::filesystem::remove(lower);
     REQUIRE(lower_prob.edge_costs() == std::vector<double>{1.0, 2.0, 3.0});
+    // LOWER_ROW has no diagonal: n(n-1)/2 weights (#142).
+    const auto lower_row =
+        write_temp("cptp_tsplib_lower_row_ok.vrp", full +
+                                                       "EDGE_WEIGHT_FORMAT : LOWER_ROW\n"
+                                                       "EDGE_WEIGHT_SECTION\n1\n2 3\nEOF\n");
+    const auto lower_row_prob = cptp::io::load_tsplib(lower_row);
+    std::filesystem::remove(lower_row);
+    REQUIRE(lower_row_prob.edge_costs() == std::vector<double>{1.0, 2.0, 3.0});
+    rejects("cptp_tsplib_short_lower_row.vrp",
+            full + "EDGE_WEIGHT_FORMAT : LOWER_ROW\nEDGE_WEIGHT_SECTION\n1 2\nEOF\n",
+            "TSPLIB: EDGE_WEIGHT_SECTION has 2 weights, LOWER_ROW with DIMENSION 3 needs 3");
 }
 
 TEST_CASE("The numeric loader rejects a source with no target", "[io]") {

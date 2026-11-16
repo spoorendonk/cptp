@@ -169,6 +169,13 @@ Problem load_tsplib(const std::filesystem::path& path) {
         if (line == "EOF") {
             break;
         }
+        if (line.ends_with("_SECTION") && !line.contains(':')) {
+            // An unknown section (DISPLAY_DATA_SECTION, for one) ends the
+            // current one, so its data is not read as weights or coordinates
+            // (#134); only "key : value" lines are read until the next one.
+            section = Section::Header;
+            continue;
+        }
 
         if (section == Section::Header) {
             auto pos = line.find(':');
@@ -325,21 +332,21 @@ Problem load_tsplib(const std::filesystem::path& path) {
         size_t needed = 0;
         if (format == "FULL_MATRIX") {
             needed = n * n;
-        } else if (format == "LOWER_DIAG_ROW" || format == "LOWER_ROW") {
+        } else if (format == "LOWER_DIAG_ROW") {
             needed = n * (n + 1) / 2;
+        } else if (format == "LOWER_ROW") {  // without the diagonal
+            needed = n * (n - 1) / 2;
         } else {
             throw std::runtime_error("TSPLIB: EDGE_WEIGHT_FORMAT " + format + " is not supported");
         }
-        // More is allowed: an unknown section after the weights (such as
-        // DISPLAY_DATA_SECTION) is read on as weights.
-        if (flat.size() < needed) {
+        if (flat.size() != needed) {
             throw std::runtime_error("TSPLIB: EDGE_WEIGHT_SECTION has " +
                                      std::to_string(flat.size()) + " weights, " + format +
                                      " with DIMENSION " + std::to_string(dimension) + " needs " +
                                      std::to_string(needed));
         }
     } else if (!x_coords.empty()) {
-        if (x_coords.size() < n) {
+        if (x_coords.size() != n) {
             throw std::runtime_error("TSPLIB: NODE_COORD_SECTION has " +
                                      std::to_string(x_coords.size()) + " nodes, DIMENSION is " +
                                      std::to_string(dimension));
@@ -362,10 +369,11 @@ Problem load_tsplib(const std::filesystem::path& path) {
                 dist[i][j] = flat[(i * n) + j];
             }
         }
-    } else if (!format.empty()) {  // LOWER_DIAG_ROW or LOWER_ROW
+    } else if (!format.empty()) {  // LOWER_DIAG_ROW, or LOWER_ROW without j == i
+        const size_t diagonal = format == "LOWER_DIAG_ROW" ? 1 : 0;
         size_t k = 0;
         for (size_t i = 0; i < n; ++i) {
-            for (size_t j = 0; j <= i; ++j) {
+            for (size_t j = 0; j < i + diagonal; ++j) {
                 dist[i][j] = flat[k];
                 dist[j][i] = flat[k];
                 ++k;
