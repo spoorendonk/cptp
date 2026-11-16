@@ -7,6 +7,7 @@
 #include "mip/HighsMipSolver.h"
 #include "mip/HighsSeparator.h"
 
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -155,6 +156,9 @@ public:
     /// Clear stack and pool (call between solves).
     static void clearStack();
 
+    /// Branching rows pushBranching() added since the last setBranchingCallback().
+    static int64_t branchRowsAdded();
+
 private:
     // callback_ and feasibility_check_ are thread_local in HighsUserSeparator.cpp
     static BranchingCallback branching_callback_;
@@ -165,6 +169,7 @@ private:
     // Hyperplane branching: row lifecycle tracking
     static std::vector<HighsInt> hp_stack_;            // tracks active branching rows
     static std::vector<HyperplaneData> hp_data_pool_;  // coefficients for flip
+    static int64_t branch_rows_added_;                 // pushBranching() calls this solve
 };
 
 #endif  // MIP_HIGHS_USER_SEPARATOR_H_

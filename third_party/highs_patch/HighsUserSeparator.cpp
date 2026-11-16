@@ -23,6 +23,7 @@ std::unordered_map<std::string, HighsUserSeparator::HyperplanePseudocost>
     HighsUserSeparator::hyperplane_pseudocosts_;
 std::vector<HighsInt> HighsUserSeparator::hp_stack_;
 std::vector<HighsUserSeparator::HyperplaneData> HighsUserSeparator::hp_data_pool_;
+int64_t HighsUserSeparator::branch_rows_added_ = 0;
 
 void HighsUserSeparator::separateLpSolution(HighsLpRelaxation& lpRelaxation,
                                             HighsLpAggregator& /*lpAggregator*/,
@@ -53,6 +54,7 @@ void HighsUserSeparator::clearCallback() {
 void HighsUserSeparator::setBranchingCallback(BranchingCallback cb) {
     std::lock_guard<std::mutex> lock(mutex_);
     branching_callback_ = std::move(cb);
+    branch_rows_added_ = 0;
 }
 
 const HighsUserSeparator::BranchingCallback& HighsUserSeparator::getBranchingCallback() {
@@ -112,6 +114,7 @@ void HighsUserSeparator::pushBranching(HighsLpRelaxation& lp, const HyperplaneDa
     HighsInt nnz = static_cast<HighsInt>(data.indices.size());
     lp.addBranchingRow(nnz, data.indices.data(), data.values.data(), lo, hi);
     hp_stack_.push_back(1);
+    ++branch_rows_added_;
 }
 
 void HighsUserSeparator::restoreBranching(HighsLpRelaxation& lp, HighsInt target_pos) {
@@ -124,6 +127,10 @@ void HighsUserSeparator::restoreBranching(HighsLpRelaxation& lp, HighsInt target
 void HighsUserSeparator::clearStack() {
     hp_stack_.clear();
     hp_data_pool_.clear();
+}
+
+int64_t HighsUserSeparator::branchRowsAdded() {
+    return branch_rows_added_;
 }
 
 // ── Candidate evaluation ──

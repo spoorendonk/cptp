@@ -1247,11 +1247,13 @@ SolveResult Model::solve(const SolverOptions& options) {
     const double total_elapsed_seconds = timer.elapsed_seconds();
     logger_.log("Total elapsed (preprocessing + HiGHS): {:.3f}s", total_elapsed_seconds);
 
+    const int64_t hyperplane_branch_rows = HighsUserSeparator::branchRowsAdded();
     // Clear static callbacks/state to avoid leaking between solves
     HighsUserSeparator::clearCallback();
 
     auto result = bridge.extract_result();
     result.time_seconds = total_elapsed_seconds;
+    result.hyperplane_branch_rows = hyperplane_branch_rows;
 
     return result;
 }
