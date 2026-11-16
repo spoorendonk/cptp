@@ -427,8 +427,8 @@ Problem load_numeric(const std::filesystem::path& path) {
     // Line 1: num_nodes num_arcs [m]       (m capacity rows, default 1)
     // Next num_nodes lines: node_id profit demand_1 .. demand_m
     // Next num_arcs lines: tail head cost (directed arcs)
-    // Then (optional): capacity_1 .. capacity_m
-    // Then (optional): source target
+    // Then (optional; required if m > 1): capacity_1 .. capacity_m, one line
+    // Then (optional): source target, one line, and nothing after it
 
     int32_t num_nodes = 0;
     int32_t num_arcs = 0;
@@ -475,17 +475,19 @@ Problem load_numeric(const std::filesystem::path& path) {
         return std::runtime_error("numeric: expected " + std::to_string(num_arcs) +
                                   " arc lines of \"tail head cost\"");
     };
-    std::string arc_line;
-    for (int32_t i = 0; i < num_arcs; ++i) {
-        // Skip blank lines, including the rest of the last node line.
-        bool found = false;
-        while (std::getline(f, arc_line)) {
-            if (!trim(arc_line).empty()) {
-                found = true;
-                break;
+    // The next non-blank line, skipping the rest of the last node line too.
+    // Blank is all whitespace as >> sees it, so a non-blank line has a field.
+    const auto next_line = [&f](std::string& line) {
+        while (std::getline(f, line)) {
+            if (line.find_first_not_of(" \t\n\v\f\r") != std::string::npos) {
+                return true;
             }
         }
-        if (!found) {
+        return false;
+    };
+    std::string arc_line;
+    for (int32_t i = 0; i < num_arcs; ++i) {
+        if (!next_line(arc_line)) {
             throw bad_arcs();
         }
         std::istringstream iss(arc_line);
@@ -502,47 +504,69 @@ Problem load_numeric(const std::filesystem::path& path) {
         }
     }
 
-    // The optional tail is read token by token: a missing token is the part
-    // being absent, and a token that is not wholly a number is an error (a
-    // failed >> cannot tell the two apart, as it consumes an overflowing or
-    // sign-only token).
-    std::string token;
+    // The optional tail is read by line, as the arcs are: the capacity line,
+    // then the "s t" line, then nothing. The format is untagged, so a line
+    // with the wrong number of fields, or a line after "s t", is an error:
+    // otherwise an arc line beyond num_arcs would be read as the capacity
+    // and "s t" lines, and the real ones ignored (#131). Each field is parsed
+    // whole, so one that is not wholly a number is an error too (#130).
+    const auto fields = [](const std::string& line) {
+        std::istringstream iss(line);
+        std::vector<std::string> out;
+        for (std::string token; iss >> token;) {
+            out.push_back(token);
+        }
+        return out;
+    };
+    std::string line;
     std::vector<double> capacities(num_rows, 1e18);
-    for (int32_t k = 0; k < num_rows; ++k) {
-        if (!(f >> token)) {
-            // The format is untagged, so with m > 1 the capacity line is
-            // required: a missing one followed by "s t" would be read as
-            // capacities, and a short one would leave rows unlimited.
-            if (num_rows > 1) {
-                throw std::runtime_error("numeric: expected " + std::to_string(num_rows) +
-                                         " capacities");
+    if (next_line(line)) {
+        std::vector<double> values;
+        for (const auto& token : fields(line)) {
+            const auto q = parse_double(token);
+            if (!q) {
+                throw std::runtime_error("numeric: the capacity \"" + token + "\" is not a number");
             }
-            break;  // m = 1 without a capacity line: row 0 has no limit
+            values.push_back(*q);
         }
-        const auto q = parse_double(token);
-        if (!q) {
-            throw std::runtime_error("numeric: the capacity \"" + token + "\" is not a number");
+        if (std::ssize(values) != num_rows) {
+            throw std::runtime_error("numeric: expected " + std::to_string(num_rows) +
+                                     " capacities on one line, found " +
+                                     std::to_string(values.size()));
         }
-        capacities[k] = *q;
-    }
+        capacities = std::move(values);
+    } else if (num_rows > 1) {
+        // With m > 1 the capacity line is required: a missing one followed
+        // by "s t" would be read as capacities.
+        throw std::runtime_error("numeric: expected " + std::to_string(num_rows) + " capacities");
+    }  // m = 1 without a capacity line: row 0 has no limit
 
     // Optionally read source and target nodes (default: 0 0 = tour)
     int32_t source = 0;
     int32_t target = 0;
-    if (f >> token) {
-        const auto s = parse_int(token);
+    if (next_line(line)) {
+        const auto tokens = fields(line);
+        const auto s = parse_int(tokens[0]);
         if (!s) {
-            throw std::runtime_error("numeric: the source \"" + token + "\" is not an int");
+            throw std::runtime_error("numeric: the source \"" + tokens[0] + "\" is not an int");
         }
-        if (!(f >> token)) {
+        if (tokens.size() < 2) {
             throw std::runtime_error("numeric: expected \"source target\", found a source only");
         }
-        const auto t = parse_int(token);
+        const auto t = parse_int(tokens[1]);
         if (!t) {
-            throw std::runtime_error("numeric: the target \"" + token + "\" is not an int");
+            throw std::runtime_error("numeric: the target \"" + tokens[1] + "\" is not an int");
+        }
+        if (tokens.size() > 2) {
+            throw std::runtime_error("numeric: expected \"source target\", found " +
+                                     std::to_string(tokens.size()) + " fields");
         }
         source = *s;
         target = *t;
+    }
+    if (next_line(line)) {
+        throw std::runtime_error(R"(numeric: unexpected line after "source target": ")" +
+                                 trim(line) + "\"");
     }
 
     Problem prob;

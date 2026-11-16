@@ -965,6 +965,51 @@ TEST_CASE("The numeric loader rejects a short arc list", "[io]") {
     REQUIRE(prob.target() == 2);
 }
 
+TEST_CASE("The numeric loader rejects lines beyond the declared arcs", "[io]") {
+    // #131: a sixth arc line with num_arcs = 5 loaded as capacity 2 and s-t
+    // 1 -> 1, and the real "10" and "0 2" lines were ignored.
+    const auto rejects = [](const std::string& name, const std::string& text,
+                            const std::string& message) {
+        INFO(name);
+        const auto path = write_temp(name, text);
+        REQUIRE_THROWS_MATCHES(cptp::io::load_numeric(path), std::runtime_error,
+                               Catch::Matchers::Message(message));
+        std::filesystem::remove(path);
+    };
+    const std::string nodes = "0 0 0\n1 5 2\n2 4 1\n";
+    const std::string five = "0 1 1\n1 0 1\n0 2 1\n2 0 1\n1 2 1\n";
+    rejects("cptp_numeric_extra_arc.txt", "3 5\n" + nodes + five + "2 1 1\n10\n0 2\n",
+            "numeric: expected 1 capacities on one line, found 3");
+
+    // m = 3: the extra arc reads as three capacities, and the real capacity
+    // line as "s t".
+    const std::string nodes3 = "0 0 0 0 0\n1 5 2 2 2\n2 4 1 1 1\n";
+    rejects("cptp_numeric_extra_arc_m3.txt", "3 5 3\n" + nodes3 + five + "2 1 1\n10 10 10\n0 2\n",
+            "numeric: expected \"source target\", found 3 fields");
+
+    // Trailing fields on the "s t" line, and a line after it.
+    const std::string body = "3 6\n" + nodes + five + "2 1 1\n10\n";
+    rejects("cptp_numeric_st_extra_field.txt", body + "0 2 7\n",
+            "numeric: expected \"source target\", found 3 fields");
+    rejects("cptp_numeric_after_st.txt", body + "0 2\n\n5\n",
+            R"(numeric: unexpected line after "source target": "5")");
+
+    // Capacity and "s t" on one line, and m = 2 capacities split over lines.
+    rejects("cptp_numeric_cap_st_one_line.txt", body.substr(0, body.size() - 3) + "10 0 2\n",
+            "numeric: expected 1 capacities on one line, found 3");
+    const std::string nodes2 = "0 0 0 0\n1 5 2 3\n2 4 1 6\n";
+    rejects("cptp_numeric_split_caps.txt", "3 5 2\n" + nodes2 + five + "4\n7\n",
+            "numeric: expected 2 capacities on one line, found 1");
+
+    // Trailing blank lines are still accepted.
+    const auto ok = write_temp("cptp_numeric_trailing_blank.txt", body + "0 2\n\n \t\n");
+    const auto prob = cptp::io::load_numeric(ok);
+    std::filesystem::remove(ok);
+    REQUIRE(prob.capacities() == std::vector<double>{10.0});
+    REQUIRE(prob.source() == 0);
+    REQUIRE(prob.target() == 2);
+}
+
 TEST_CASE("Problem::build rejects an edge endpoint out of range", "[io]") {
     // #125: edge (1, 5) with num_nodes 4 wrote past static_graph's degree array.
     const auto range = Catch::Matchers::Message("edge endpoints must be in [0, num_nodes)");
