@@ -1,15 +1,29 @@
 # Patch script for HiGHS: add HighsUserSeparator + HighsUserPropagator
-# Called by FetchContent PATCH_COMMAND (cmake/FetchHiGHS.cmake), which carries
-# a hash of this directory, so a change to any file here re-runs it.
-# Idempotent: it first restores the pristine HiGHS checkout, then patches it.
+# Called by FetchContent PATCH_COMMAND (cmake/FetchHiGHS.cmake) with PATCH_HASH,
+# a hash of this directory's patch files.
+# Idempotent: a tree already patched with PATCH_HASH is left alone (the patch
+# step runs on every configure); otherwise it restores the pristine HiGHS
+# checkout, patches it and records PATCH_HASH.
 
-if(NOT SOURCE_DIR OR NOT PATCH_DIR OR NOT GIT_EXECUTABLE)
-    message(FATAL_ERROR "apply_patch.cmake needs SOURCE_DIR, PATCH_DIR and GIT_EXECUTABLE")
+if(NOT SOURCE_DIR OR NOT PATCH_DIR OR NOT PATCH_HASH OR NOT GIT_EXECUTABLE)
+    message(FATAL_ERROR
+      "apply_patch.cmake needs SOURCE_DIR, PATCH_DIR, PATCH_HASH and GIT_EXECUTABLE")
+endif()
+
+# Untracked, so the reset below removes it and a failed run leaves none.
+set(_stamp "${SOURCE_DIR}/.cptp_patch_hash")
+if(EXISTS "${_stamp}")
+    file(READ "${_stamp}" _stamp_hash)
+    if(_stamp_hash STREQUAL PATCH_HASH)
+        message(STATUS "HiGHS already patched with ${PATCH_HASH}, skipping")
+        return()
+    endif()
 endif()
 
 # Start from the commit FetchContent checked out: drop an earlier run's edits
-# and copied sources, so every anchor below is matched against pristine HiGHS.
-execute_process(COMMAND "${GIT_EXECUTABLE}" checkout -- .
+# (staged ones too) and copied sources, so every anchor below is matched
+# against pristine HiGHS.
+execute_process(COMMAND "${GIT_EXECUTABLE}" checkout HEAD -- .
     WORKING_DIRECTORY "${SOURCE_DIR}" COMMAND_ERROR_IS_FATAL ANY)
 execute_process(COMMAND "${GIT_EXECUTABLE}" clean -fdq
     WORKING_DIRECTORY "${SOURCE_DIR}" COMMAND_ERROR_IS_FATAL ANY)
@@ -158,8 +172,8 @@ cptp_replace(CONTENT3 1
   "#include \"mip/HighsSearch.h\"\n#include \"mip/HighsUserPropagator.h\"")
 
 # Insert propagator call after HighsRedcostFixing::propagateRedCost and
-# before localdom.propagate(). The 1.15 call is multi-line (parallel-MIP
-# signature), so anchor on its closing arguments to stay unique.
+# before localdom.propagate(). The call is multi-line (parallel-MIP
+# signature, since v1.15), so anchor on its closing arguments to stay unique.
 cptp_replace(CONTENT3 1
   "mipworker.getPseudocost(), getUpperLimit());\n            localdom.propagate();"
   "mipworker.getPseudocost(), getUpperLimit());\n            HighsUserPropagator::propagate(localdom, mipsolver, *lp);\n            localdom.propagate();")
@@ -353,7 +367,7 @@ cptp_replace(SEARCH_CONTENT 2
 # between that and the flag's definition any more).
 cptp_replace(SEARCH_CONTENT 1
   "    if (nodeToQueue) {\n      // if (!mipsolver.submip) printf(\"node goes to queue\\n\");"
-  "    if (currnode.hp_data_idx >= 0) nodeToQueue = false;  // guard after ancestor score check\n    if (nodeToQueue) {\n      // if (!mipsolver.submip) printf(\"node goes to queue\\n\");")
+  "    if (currnode.hp_data_idx >= 0) nodeToQueue = false;  // hyperplane nodes can't be queued\n    if (nodeToQueue) {\n      // if (!mipsolver.submip) printf(\"node goes to queue\\n\");")
 
 # ── 5i. Suppress debug asserts for hyperplane branches ──
 # The asserts check branchchg matches branchingdecision. For hyperplane branches
@@ -372,3 +386,5 @@ cptp_replace(SEARCH_CONTENT 1
 
 file(WRITE "${MIP_DIR}/HighsSearch.cpp" "${SEARCH_CONTENT}")
 message(STATUS "Applied hyperplane branching patch to HighsSearch.cpp")
+
+file(WRITE "${_stamp}" "${PATCH_HASH}")

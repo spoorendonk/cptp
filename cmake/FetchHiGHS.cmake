@@ -9,14 +9,17 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 find_package(Git REQUIRED)
 
-# FetchContent re-runs PATCH_COMMAND only when the command line changes, so it
-# carries a hash of every file in the patch directory: a change to the script
-# or a patch source re-runs it on the next configure, and apply_patch.cmake
-# starts from the pristine checkout. CONFIGURE_DEPENDS on the glob and each
-# file makes a plain build re-run configure after such a change.
+# PATCH_COMMAND carries a hash of the patch directory's files. apply_patch.cmake
+# skips a tree it already patched with that hash and otherwise re-patches the
+# pristine checkout, so a change to the script or a patch source is applied on
+# the next configure (also with FETCHCONTENT_UPDATES_DISCONNECTED, where only
+# a changed command line re-runs the step). CONFIGURE_DEPENDS on the glob and
+# each file makes a plain build re-run configure after such a change. The glob
+# names the file types, so editor and Finder droppings do not count.
 set(_cptp_highs_patch_dir ${CMAKE_CURRENT_SOURCE_DIR}/third_party/highs_patch)
 file(GLOB _cptp_highs_patch_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
-    ${_cptp_highs_patch_dir}/*)
+    ${_cptp_highs_patch_dir}/*.cmake ${_cptp_highs_patch_dir}/*.h
+    ${_cptp_highs_patch_dir}/*.cpp)
 list(SORT _cptp_highs_patch_files)
 set(_cptp_highs_patch_digests "")
 foreach(_file IN LISTS _cptp_highs_patch_files)
