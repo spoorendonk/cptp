@@ -8,7 +8,7 @@ authors:
   - family-names: Spoorendonk
     given-names: Simon
     orcid: "https://orcid.org/0009-0007-4304-6956"
-abstract: "Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP), with a HiGHS MIP backend and custom callbacks for cut separation, domain propagation, and hyperplane branching; also solves open s-t path variants."
+abstract: "Branch-and-cut solver for the Capacitated Profitable Tour Problem (CPTP), with a HiGHS MIP backend and custom callbacks for cut separation and domain propagation, branching on hyperplanes through auxiliary integer columns; also solves open s-t path variants."
 version: "0.2.0"
 repository-code: "https://github.com/spoorendonk/cptp"
 url: "https://github.com/spoorendonk/cptp"

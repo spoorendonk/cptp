@@ -2,7 +2,6 @@
 #define MIP_HIGHS_USER_SEPARATOR_H_
 
 #include "mip/HighsCutPool.h"
-#include "mip/HighsDomain.h"
 #include "mip/HighsLpRelaxation.h"
 #include "mip/HighsMipSolver.h"
 #include "mip/HighsSeparator.h"

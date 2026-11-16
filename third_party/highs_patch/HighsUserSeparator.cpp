@@ -1,7 +1,5 @@
 #include "mip/HighsUserSeparator.h"
 
-#include "mip/HighsMipSolverData.h"
-
 #include <utility>
 
 // Thread-local callback storage — each thread gets its own copy,
