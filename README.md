@@ -88,7 +88,7 @@ result = cptp.solve(
 
 ## Instance Formats
 
-- **Numeric (.txt)**: native format — a first line `num_nodes num_arcs [m]`, nodes (id, profit, demand_1 .. demand_m), directed arcs (tail, head, cost; one arc per line), capacity_1 .. capacity_m on one line (optional when m = 1: no limit), optional source/target on one line, and nothing after it. m defaults to 1.
+- **Numeric (.txt)**: native format — a first line `num_nodes num_arcs [m]`, nodes (id, profit, demand_1 .. demand_m), directed arcs (tail, head, cost; one arc per line), capacity_1 .. capacity_m on one line (may be left out when m = 1, for no limit, but only together with the source/target line), optional source/target on one line, and nothing after it. m defaults to 1.
 - **TSPLIB (.vrp)**: standard CVRP format with CAPACITY, DEMAND_SECTION, etc. With m rows, `CAPACITY : Q_1 .. Q_m`, and each DEMAND_SECTION line is `id d_1 .. d_m`.
 - **SPPCC (.sppcc)**: SPPRCLIB column-generation subproblem format, with m rows as in TSPLIB.
 

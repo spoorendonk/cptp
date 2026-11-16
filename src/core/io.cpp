@@ -476,10 +476,11 @@ Problem load_numeric(const std::filesystem::path& path) {
                                   " arc lines of \"tail head cost\"");
     };
     // The next non-blank line, skipping the rest of the last node line too.
-    // Blank is all whitespace as >> sees it, so a non-blank line has a field.
+    // Blank is no field for >>, so a non-blank line has at least one.
     const auto next_line = [&f](std::string& line) {
         while (std::getline(f, line)) {
-            if (line.find_first_not_of(" \t\n\v\f\r") != std::string::npos) {
+            std::istringstream iss(line);
+            if (std::string field; iss >> field) {
                 return true;
             }
         }
@@ -510,6 +511,8 @@ Problem load_numeric(const std::filesystem::path& path) {
     // otherwise an arc line beyond num_arcs would be read as the capacity
     // and "s t" lines, and the real ones ignored (#131). Each field is parsed
     // whole, so one that is not wholly a number is an error too (#130).
+    // Known limit: an extra arc line in place of a missing capacity line,
+    // with m = 3 and no "s t" line, still reads as the m capacities.
     const auto fields = [](const std::string& line) {
         std::istringstream iss(line);
         std::vector<std::string> out;
