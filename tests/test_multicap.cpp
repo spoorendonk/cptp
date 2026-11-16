@@ -577,14 +577,12 @@ TEST_CASE("Multicap: most_violated keeps the most violated row's multistar", "[m
 
 namespace {
 
-// The candidates of `mode` at y = 0.5 everywhere (y columns from offset 6).
+// The hyperplane columns of `mode` (y columns from offset 6).
 constexpr int32_t kYOffset = 6;
 
-std::vector<cptp::detail::Hyperplane> hyperplanes_at_half(const cptp::Problem& prob,
-                                                          const std::string& mode) {
-    const cptp::detail::HyperplaneCandidates gen(prob, kYOffset, mode);
-    const std::vector<double> sol(static_cast<size_t>(kYOffset + prob.num_nodes()), 0.5);
-    return gen(sol);
+std::vector<cptp::detail::Hyperplane> hyperplanes_of(const cptp::Problem& prob,
+                                                     const std::string& mode) {
+    return cptp::detail::HyperplaneCandidates(prob, kYOffset, mode).columns();
 }
 
 std::vector<std::string> names_of(const std::vector<cptp::detail::Hyperplane>& hs) {
@@ -600,9 +598,9 @@ std::vector<std::string> names_of(const std::vector<cptp::detail::Hyperplane>& h
 
 TEST_CASE("Multicap: demand hyperplanes come from every bounded row", "[multicap][branching]") {
     const auto prob = make_problem(2);
-    const auto hs = hyperplanes_at_half(prob, "all");
+    const auto hs = hyperplanes_of(prob, "all");
     const auto names = names_of(hs);
-    // One cluster {1, 2, 3}: row 0's load 1.5 and row 1's 2.5 are fractional.
+    // One cluster {1, 2, 3}, weighed by each row's demands.
     for (const char* name : {"cluster_0", "cluster_0_row1", "demand", "demand_row1"}) {
         INFO(name);
         REQUIRE(std::ranges::count(names, std::string(name)) == 1);
@@ -616,13 +614,12 @@ TEST_CASE("Multicap: demand hyperplanes come from every bounded row", "[multicap
 
 TEST_CASE("Multicap: one row keeps the one-row hyperplane names", "[multicap][branching]") {
     const auto prob = make_problem(1);
-    const auto demand = hyperplanes_at_half(prob, "demand");
+    const auto demand = hyperplanes_of(prob, "demand");
     REQUIRE(names_of(demand) == std::vector<std::string>{"demand"});
     REQUIRE(demand[0].indices == std::vector<int32_t>{7, 8, 9});
     REQUIRE(demand[0].values == std::vector<double>{1.0, 1.0, 1.0});
-    REQUIRE(names_of(hyperplanes_at_half(prob, "clusters")) ==
-            std::vector<std::string>{"cluster_0"});
-    for (const auto& name : names_of(hyperplanes_at_half(prob, "all"))) {
+    REQUIRE(names_of(hyperplanes_of(prob, "clusters")) == std::vector<std::string>{"cluster_0"});
+    for (const auto& name : names_of(hyperplanes_of(prob, "all"))) {
         REQUIRE_FALSE(name.contains("_row"));
     }
 }
@@ -633,7 +630,7 @@ TEST_CASE("Multicap: rows with Q_k = 0 or no limit give no hyperplane", "[multic
                {3.0, 0.0, cptp::sep::kInfiniteCapacity, 3.0}, 0, 0);
     const cptp::detail::HyperplaneCandidates gen(prob, kYOffset, "demand");
     REQUIRE(gen.rows() == std::vector<int32_t>{0, 3});
-    REQUIRE(names_of(hyperplanes_at_half(prob, "demand")) ==
+    REQUIRE(names_of(hyperplanes_of(prob, "demand")) ==
             std::vector<std::string>{"demand", "demand_row3"});
 }
 

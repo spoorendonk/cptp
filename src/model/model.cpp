@@ -1,6 +1,7 @@
 #include "model/model.h"
 
 #include "model/highs_bridge.h"
+#include "model/hyperplane.h"
 #include "model/options.h"
 #include "parallel/parallel.h"
 
@@ -71,21 +72,14 @@ std::string join_tokens(const std::vector<std::string>& tokens, std::string_view
 
 constexpr int32_t kWarmStartLsStartsPerThread = 4;
 
-/// Sets `branch_hyper` to the mode that runs: "off" for every value, since
-/// LP-row hyperplane branching can prove a wrong optimum (#135). An unknown
-/// mode and a disabled one each log their own warning.
+/// Sets an unknown `branch_hyper` mode to "off", with a warning.
 void normalize_branch_hyper(Logger& logger, std::string& branch_hyper) {
     static constexpr std::string_view kValidModes[] = {"off",    "pairs",       "clusters",
                                                        "demand", "cardinality", "all"};
     if (std::ranges::find(kValidModes, branch_hyper) == std::end(kValidModes)) {
         logger.log("Warning: unknown branch_hyper mode '{}', using 'off'", branch_hyper);
-    } else if (branch_hyper != "off") {
-        logger.log(
-            "Warning: branch_hyper={} is disabled pending spoorendonk/cptp#135 (LP-row "
-            "hyperplane branching can prove a wrong optimum), using 'off'",
-            branch_hyper);
+        branch_hyper = "off";
     }
-    branch_hyper = "off";
 }
 
 /// Clears the patched HiGHS branching hook, so no hyperplane callback or row
@@ -560,11 +554,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
     highs.setOptionValue("parallel", "off");
 
-    // Hyperplane branching through LP rows can prove a wrong optimum: HiGHS
-    // ages, removes and exports the node-local branching rows as global cuts
-    // (#135). Every mode runs as "off" until it branches through auxiliary
-    // integer columns instead (#137). Gated before the settings line is
-    // built, so the line reports what actually runs.
+    // Before the settings line is built, so it reports the mode that runs.
     normalize_branch_hyper(logger_, branch_hyper);
 
     // Cascading disables: labeling_elim_bounds=false disables bounds-dependent
@@ -1184,6 +1174,19 @@ SolveResult Model::solve(const SolverOptions& options) {
         bridge.add_separator(std::move(spi));
     }
 
+    // Hyperplane branching through auxiliary integer columns, which HiGHS
+    // branches on as on any column (#137). Never through the patch's LP-row
+    // hook (#135): it stays cleared.
+    if (branch_hyper != "off") {
+        const detail::HyperplaneCandidates hyperplanes(problem_, bridge.y_offset(), branch_hyper);
+        for (int32_t k : hyperplanes.skipped_rows()) {
+            logger_.log(
+                "Warning: capacity row {} has non-integer demands, so branch_hyper={} adds no "
+                "demand or cluster hyperplanes for it",
+                k, branch_hyper);
+        }
+        bridge.set_hyperplanes(hyperplanes.columns());
+    }
     bridge.build_formulation();
 
     reset_hyperplane_branching();
@@ -1202,10 +1205,7 @@ SolveResult Model::solve(const SolverOptions& options) {
 
     if (heu_ws && has_feasible_heuristic(warm_start)) {
         std::vector<double> start_values = std::move(warm_start.col_values);
-        HighsInt num_cols = highs.getNumCol();
-        while (static_cast<HighsInt>(start_values.size()) < num_cols) {
-            start_values.push_back(0.0);
-        }
+        bridge.complete_solution(start_values);  // z = a . y on the hyperplane columns
         if (heu_lpg) {
             // When the LP-guided heuristic is active it injects solutions through
             // kCallbackMipUserSolution. Combining that with HiGHS setSolution()
@@ -1232,13 +1232,12 @@ SolveResult Model::solve(const SolverOptions& options) {
     const double total_elapsed_seconds = timer.elapsed_seconds();
     logger_.log("Total elapsed (preprocessing + HiGHS): {:.3f}s", total_elapsed_seconds);
 
-    const int64_t hyperplane_branch_rows = HighsUserSeparator::branchRowsAdded();
     // Clear static callbacks/state to avoid leaking between solves
     HighsUserSeparator::clearCallback();
 
     auto result = bridge.extract_result();
     result.time_seconds = total_elapsed_seconds;
-    result.hyperplane_branch_rows = hyperplane_branch_rows;
+    result.hyperplane_columns = bridge.num_hyperplane_columns();
 
     return result;
 }

@@ -3,6 +3,7 @@
 #include "core/problem.h"
 #include "core/solution.h"
 #include "Highs.h"
+#include "model/hyperplane.h"
 #include "preprocess/edge_elimination.h"
 #include "sep/separation_context.h"
 #include "sep/separation_oracle.h"
@@ -161,6 +162,19 @@ public:
 
     void set_fixed_y(std::vector<int8_t> fixed_y) { fixed_y_ = std::move(fixed_y); }
 
+    /// Hyperplanes to branch on, set before build_formulation: each becomes an
+    /// integer column z_h after the x and y columns, linked by the row
+    /// z_h - sum(a_j * y_j) = 0, and HiGHS branches on z_h as on any column
+    /// (#137). The x and y offsets do not move.
+    void set_hyperplanes(std::vector<detail::Hyperplane> hyperplanes) {
+        hyperplanes_ = std::move(hyperplanes);
+    }
+    int32_t num_hyperplane_columns() const { return static_cast<int32_t>(hyperplanes_.size()); }
+
+    /// Pads `sol` (x and y values, at least) to the x and y columns and appends
+    /// each hyperplane column's z = a . y, so it is a full HiGHS solution.
+    void complete_solution(std::vector<double>& sol) const;
+
 private:
     /// Order the visited nodes by following edges from source.
     std::vector<int32_t> order_path(const std::vector<int32_t>& visited_nodes,
@@ -194,10 +208,11 @@ private:
     double heu_lpg_seed_threshold_ = 0.3;
 
     // Labeling bounds for edge elimination and propagation
-    std::vector<double> fwd_bounds_;  // f[v]: forward bounds (source → v)
-    std::vector<double> bwd_bounds_;  // b[v]: backward bounds (v → target)
-    double correction_ = 0.0;         // profit(source) if tour, 0 if path
-    std::vector<int8_t> fixed_y_;     // optional fixed y-vars: -1 unset, 0/1 fixed
+    std::vector<double> fwd_bounds_;               // f[v]: forward bounds (source → v)
+    std::vector<double> bwd_bounds_;               // b[v]: backward bounds (v → target)
+    double correction_ = 0.0;                      // profit(source) if tour, 0 if path
+    std::vector<int8_t> fixed_y_;                  // optional fixed y-vars: -1 unset, 0/1 fixed
+    std::vector<detail::Hyperplane> hyperplanes_;  // one z column each, after x and y
 
     // All-pairs labeling bounds for stronger Trigger B propagation
     std::vector<double> all_pairs_;  // flat n×n: d(s,v) = all_pairs_[s*n+v]

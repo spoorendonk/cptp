@@ -92,20 +92,23 @@ TEST_CASE("B-n45-k6-54 optimal with parallel requested", "[optimal][slow]") {
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }
 
-// branch_hyper is disabled pending #135 (LP-row hyperplane branching can prove
-// a wrong optimum): a requested mode runs as "off", adds no branching rows and
-// reaches the "off" optimum.
-TEST_CASE("B-n45-k6-54 optimal with hyperplane branching requested (runs as off, #135)",
-          "[optimal][slow][hyperplane]") {
-    auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n45-k6-54.sppcc");
-    cptp::Model model;
-    model.set_problem(std::move(prob));
-    cptp::SolverOptions opts = {
-        {"output_flag", "false"}, {"time_limit", "60"}, {"threads", "1"}, {"branch_hyper", "all"}};
-    auto r = model.solve(opts);
-    REQUIRE(r.hyperplane_branch_rows == 0);
-    REQUIRE(r.is_optimal());
-    REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
+// Hyperplane branching through auxiliary integer columns (#137): every mode
+// adds its columns and reaches the branch_hyper=off optimum.
+TEST_CASE("B-n45-k6-54 optimal with hyperplane branching", "[optimal][slow][hyperplane]") {
+    for (const char* mode : {"pairs", "clusters", "demand", "cardinality", "all"}) {
+        INFO("branch_hyper=" << mode);
+        auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n45-k6-54.sppcc");
+        cptp::Model model;
+        model.set_problem(std::move(prob));
+        cptp::SolverOptions opts = {{"output_flag", "false"},
+                                    {"time_limit", "60"},
+                                    {"threads", "1"},
+                                    {"branch_hyper", mode}};
+        auto r = model.solve(opts);
+        REQUIRE(r.hyperplane_columns > 0);
+        REQUIRE(r.is_optimal());
+        REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
+    }
 }
 
 // The benchmark pipeline reads per-phase timings and fixing counts from

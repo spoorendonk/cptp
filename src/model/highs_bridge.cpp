@@ -239,6 +239,38 @@ void HiGHSBridge::build_formulation() {
                           indices.data(), values.data());
         }
     }
+
+    // 3. Hyperplane columns: z_h = sum(a_j * y_j), integer in [0, sum a_j],
+    // cost 0, so branching on z_h branches on the hyperplane (#137). Every a_j
+    // is integer (HyperplaneCandidates drops non-integer demand rows), so z_h
+    // is integer at every integer y.
+    for (const auto& h : hyperplanes_) {
+        double upper = 0.0;
+        for (double a : h.values) {
+            upper += a;
+        }
+        const int z = highs_.getNumCol();
+        highs_.addCol(0.0, 0.0, upper, 0, nullptr, nullptr);
+        highs_.changeColIntegrality(z, HighsVarType::kInteger);
+        std::vector<int> indices{z};
+        std::vector<double> values{1.0};
+        for (size_t j = 0; j < h.indices.size(); ++j) {
+            indices.push_back(h.indices[j]);
+            values.push_back(-h.values[j]);
+        }
+        highs_.addRow(0.0, 0.0, static_cast<int>(indices.size()), indices.data(), values.data());
+    }
+}
+
+void HiGHSBridge::complete_solution(std::vector<double>& sol) const {
+    sol.resize(static_cast<size_t>(num_edges_) + static_cast<size_t>(num_nodes_), 0.0);
+    for (const auto& h : hyperplanes_) {
+        double z = 0.0;
+        for (size_t j = 0; j < h.indices.size(); ++j) {
+            z += h.values[j] * sol[static_cast<size_t>(h.indices[j])];
+        }
+        sol.push_back(z);
+    }
 }
 
 void HiGHSBridge::install_separators() {
@@ -566,6 +598,8 @@ void HiGHSBridge::install_propagator() {
     auto prop_fwd = fwd_bounds_;
     auto prop_bwd = bwd_bounds_;
     auto prop_corr = correction_;
+    // Hyperplane columns z_h = a_h . y (#137), whose reduced costs fold into y's.
+    auto hyperplanes = hyperplanes_;
 
     HighsUserPropagator::setCallback([=, &prob = prob_](HighsDomain& domain,
                                                         const HighsMipSolver& mipsolver,
@@ -807,7 +841,7 @@ void HiGHSBridge::install_propagator() {
 
                 // Labeling weights: rc_e = col_dual[e] per edge, and
                 // -col_dual[m+i] as node i's profit.
-                if (ncols >= m + n) {
+                if (ncols >= m + n + static_cast<int32_t>(hyperplanes.size())) {
                     std::vector<double> rc_edge_costs(m);
                     std::vector<double> rc_profits(n);
                     for (int32_t e = 0; e < m; ++e) {
@@ -818,6 +852,16 @@ void HiGHSBridge::install_propagator() {
                         // rc for y_i = col_dual[m+i]. The labeling subtracts profits,
                         // so rc_profit = -col_dual[m+i] to match the labeling convention.
                         rc_profits[i] = -lp_sol.col_dual[m + i];
+                    }
+                    // A hyperplane column adds rc_h * z_h = sum_i rc_h * a_hi * y_i
+                    // to rc x at every solution, since z_h = a_h . y there, so
+                    // its reduced cost belongs to the y_i it sums (#137).
+                    for (size_t h = 0; h < hyperplanes.size(); ++h) {
+                        const double rc_h = lp_sol.col_dual[static_cast<size_t>(m + n) + h];
+                        const auto& hp = hyperplanes[h];
+                        for (size_t j = 0; j < hp.indices.size(); ++j) {
+                            rc_profits[hp.indices[j] - m] -= rc_h * hp.values[j];
+                        }
                     }
 
                     // Correction under RC costs: for tours, depot RC profit
@@ -1121,6 +1165,7 @@ void HiGHSBridge::install_heuristic_callback() {
             if (!result.col_values.empty() &&
                 result.objective < data_out->mip_primal_bound - 1e-6) {
                 data_in->user_has_solution = true;
+                complete_solution(result.col_values);
                 data_in->user_solution = std::move(result.col_values);
                 stats->heuristic_solutions++;
             }

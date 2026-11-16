@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -12,33 +11,36 @@ class Problem;
 
 namespace detail {
 
-/// A hyperplane branching candidate over the y columns: sum(values * x[indices]).
-/// `name` keys its pseudocosts, so the same hyperplane keeps the same name.
+/// A hyperplane over the y columns, sum_j values[j] * col[indices[j]], branched
+/// on through its own integer column z equal to it (#137). `name` labels it.
 struct Hyperplane {
     std::vector<int32_t> indices;
     std::vector<double> values;
     std::string name;
 };
 
-/// The candidates of `branch_hyper` (pairs, clusters, demand, cardinality or
-/// all; "off" or anything else gives none). The pairs and clusters are fixed
-/// at construction; operator() lists the candidates at an LP solution.
+/// The hyperplanes of `branch_hyper` (pairs, clusters, demand, cardinality or
+/// all; "off" or anything else gives none). They are fixed at construction;
+/// columns() lists them, each to become one auxiliary integer column.
 ///
 /// The demand-weighted ones (clusters, demand) come per capacity row: row 0
-/// always, under the names it had with one row ("cluster_<j>", "demand"), and
-/// each row k >= 1 with 0 < Q_k < kInfiniteCapacity as "cluster_<j>_row<k>" and
-/// "demand_row<k>", so each row's pseudocosts are kept apart. Every such row,
-/// not only the most fractional: which one to branch on is the pseudocost and
-/// strong-branching selection's job, and a candidate that comes and goes with
-/// the LP would keep its pseudocosts from building up (#100).
+/// under the names it had with one row ("cluster_<j>", "demand"), and each row
+/// k >= 1 with 0 < Q_k < kInfiniteCapacity as "cluster_<j>_row<k>" and
+/// "demand_row<k>". A row whose demands are not all integer gives none, since
+/// z = sum(d_i * y_i) would then not be integer at an integer y; skipped_rows()
+/// lists those rows.
 class HyperplaneCandidates {
 public:
     HyperplaneCandidates(const Problem& problem, int32_t y_offset, std::string mode);
 
-    [[nodiscard]] std::vector<Hyperplane> operator()(std::span<const double> col_value) const;
+    /// Every hyperplane of the mode, in a fixed order.
+    [[nodiscard]] std::vector<Hyperplane> columns() const;
 
-    /// The capacity rows the demand-weighted candidates come from.
+    /// The capacity rows the demand-weighted hyperplanes come from.
     [[nodiscard]] const std::vector<int32_t>& rows() const { return rows_; }
+
+    /// The rows left out of rows() because their demands are not all integer.
+    [[nodiscard]] const std::vector<int32_t>& skipped_rows() const { return skipped_rows_; }
 
 private:
     struct Pair {
@@ -50,6 +52,7 @@ private:
     int32_t source_;
     std::string mode_;
     std::vector<int32_t> rows_;
+    std::vector<int32_t> skipped_rows_;
     std::vector<std::vector<double>> demands_;  // demands_[r] for rows_[r]
     std::vector<Pair> pairs_;
     std::vector<std::vector<int32_t>> clusters_;

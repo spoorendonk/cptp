@@ -16,17 +16,27 @@ HyperplaneCandidates::HyperplaneCandidates(const Problem& problem, int32_t y_off
     const int32_t n = n_;
     const auto& graph = problem.graph();
 
-    rows_.push_back(0);
-    for (int32_t k = 1; k < problem.num_capacities(); ++k) {
+    // Integer demands give an integer z at an integer y (same 1e-9 test as
+    // the bridge's integer-objective check).
+    auto integer_demands = [&](int32_t k) {
+        return std::ranges::all_of(problem.demands(k),
+                                   [](double d) { return std::abs(d - std::round(d)) < 1e-9; });
+    };
+    for (int32_t k = 0; k < problem.num_capacities(); ++k) {
         const double q = problem.capacity(k);
-        if (q > 0 && q < sep::kInfiniteCapacity) {
+        if (k > 0 && (q <= 0 || q >= sep::kInfiniteCapacity)) {
+            continue;
+        }
+        if (integer_demands(k)) {
             rows_.push_back(k);
+        } else {
+            skipped_rows_.push_back(k);
         }
     }
     for (int32_t k : rows_) {
         demands_.push_back(problem.demands(k));
     }
-    const auto& demands = demands_[0];
+    const auto& demands = problem.demands(0);
 
     // Ryan-Foster pairs: for each non-depot node, pair with nearest neighbor.
     if (uses("pairs")) {
@@ -119,8 +129,7 @@ HyperplaneCandidates::HyperplaneCandidates(const Problem& problem, int32_t y_off
     }
 }
 
-std::vector<Hyperplane> HyperplaneCandidates::operator()(std::span<const double> col_value) const {
-    const auto& sol = col_value;
+std::vector<Hyperplane> HyperplaneCandidates::columns() const {
     std::vector<Hyperplane> result;
 
     // Row 0 keeps its one-row names; row k >= 1 gets "_row<k>".
@@ -130,12 +139,6 @@ std::vector<Hyperplane> HyperplaneCandidates::operator()(std::span<const double>
 
     if (uses("pairs")) {
         for (const auto& [pi, pj] : pairs_) {
-            double yi = sol[y_off_ + pi];
-            double yj = sol[y_off_ + pj];
-            // Skip if either variable is near-integer.
-            if (yi < 0.05 || yi > 0.95 || yj < 0.05 || yj > 0.95) {
-                continue;
-            }
             Hyperplane c;
             c.indices = {y_off_ + pi, y_off_ + pj};
             c.values = {1.0, 1.0};
@@ -150,19 +153,14 @@ std::vector<Hyperplane> HyperplaneCandidates::operator()(std::span<const double>
                 // Cluster demand hyperplane: sum(demand_i * y_i) for i in cluster.
                 Hyperplane c;
                 c.name = "cluster_" + std::to_string(k) + suffix(r);
-                double total_demand = 0.0;
                 for (int32_t i : clusters_[k]) {
                     if (demands[i] > 0) {
                         c.indices.push_back(y_off_ + i);
                         c.values.push_back(demands[i]);
-                        total_demand += demands[i] * sol[y_off_ + i];
                     }
                 }
                 if (!c.indices.empty()) {
-                    double frac = total_demand - std::floor(total_demand);
-                    if (frac > 0.01 && frac < 0.99) {
-                        result.push_back(std::move(c));
-                    }
+                    result.push_back(std::move(c));
                 }
             }
         }
@@ -196,7 +194,9 @@ std::vector<Hyperplane> HyperplaneCandidates::operator()(std::span<const double>
             c.indices.push_back(y_off_ + i);
             c.values.push_back(1.0);
         }
-        result.push_back(std::move(c));
+        if (!c.indices.empty()) {
+            result.push_back(std::move(c));
+        }
     }
     return result;
 }

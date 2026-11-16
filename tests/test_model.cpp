@@ -584,7 +584,7 @@ TEST_CASE("Model: extended tuning options parse and preserve correctness", "[mod
     auto result = model.solve(opts);
     REQUIRE(result.has_solution());
     REQUIRE(result.objective <= -10.0);
-    REQUIRE(result.hyperplane_branch_rows == 0);  // branch_hyper runs as off (#135)
+    REQUIRE(result.hyperplane_columns > 0);
 }
 
 TEST_CASE("Model: deterministic work-unit settings produce stable repeated solves",
@@ -934,7 +934,7 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
             opts.emplace_back("random_seed", "0");
             opts.emplace_back("branch_hyper", mode);
             auto result = model.solve(opts);
-            REQUIRE(result.hyperplane_branch_rows == 0);  // runs as off (#135)
+            REQUIRE(result.hyperplane_columns > 0);
             if (result.status == cptp::SolveResult::Status::Error) {
                 WARN("mode=" << mode << " returned Error; skipping objective check");
                 continue;

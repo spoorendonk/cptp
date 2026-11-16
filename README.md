@@ -29,16 +29,16 @@ $$
 
 Here, `c_e` is edge cost, `p_i` node profit, `d_i` node demand, `Q` vehicle capacity, and `\delta(.)` denotes incident edges/cut boundary edges. Connectivity (subtour elimination) inequalities are enforced via dynamic cut separation in branch-and-cut.
 
-**Several capacities.** An instance may have m >= 1 capacity rows `\sum_i d^k_i y_i <= Q_k`, k = 1..m, and a solution satisfies all of them. Every row is in the formulation and the primal heuristic. Capacity cuts, labeling bounds, branching hyperplanes and the heuristic's profit/demand ordering still use row 1 only. That is valid, since a relaxation of one row is a relaxation of the intersection, but weaker than per-row versions.
+**Several capacities.** An instance may have m >= 1 capacity rows `\sum_i d^k_i y_i <= Q_k`, k = 1..m, and a solution satisfies all of them. Every row is in the formulation and the primal heuristic. Capacity cuts, labeling bounds and the heuristic's profit/demand ordering still use row 1 only (branching hyperplanes use every bounded row). That is valid, since a relaxation of one row is a relaxation of the intersection, but weaker than per-row versions.
 
 ## Capabilities
 
-- **MIP backend**: [HiGHS](https://highs.dev) with custom callbacks for user cut separation, domain propagation, and hyperplane branching during branch-and-bound.
+- **MIP backend**: [HiGHS](https://highs.dev) with custom callbacks for user cut separation and domain propagation during branch-and-bound.
 - **Cut separation**: SEC (Gomory-Hu), RCI, Multistar/GLM, RGLM, Comb, SPI (shortest-path inequalities — node-incompatibility cuts derived from all-pairs shortest-path bounds and a Held-Karp bound). SPI is a variant of the node-precedence / conflict-graph inequalities of García (2009), with roots in the shortest-path-bound preprocessing of Aneja et al. (1983); the Held-Karp bound is the only cptp-specific element.
 - **Preprocessing / bounds**: Capacity-aware labeling with forward/backward bounds, optional all-pairs bounds, and bound-based edge/node elimination against the current upper bound.
 - **Domain propagation**: sweep fixing (remove edges/nodes inconsistent with bound + UB checks), chain fixing (propagate implications from newly fixed edges), and Lagrangian reduced-cost fixing from LP reduced costs and bound checks.
 - **Primal heuristics**: construction with 2-3 node seed routes, ILS neighborhoods (2-opt, relocate, swap, drop-add), and LP-guided in-tree ILS hooks on reduced graphs (threshold/RINS/neighborhood modes).
-- **Branching**: hyperplane branching supports pairs (Ryan-Foster-style customer pairs), clusters (small demand-seeded customer groups), demand (weighted sum of selected demands), and cardinality (number of selected customers). **Disabled pending [#135](https://github.com/spoorendonk/cptp/issues/135):** branching through LP rows can prove a wrong optimum, so every `branch_hyper` mode runs as `off`, with a warning, until it branches through auxiliary integer columns ([#137](https://github.com/spoorendonk/cptp/issues/137)).
+- **Branching**: hyperplane branching (`branch_hyper`, default `off`) adds one integer column z = a·y per hyperplane, linked by the row z - a·y = 0, and HiGHS branches on z as on any other column. The hyperplanes are fixed before the solve: pairs (Ryan-Foster-style customer pairs), clusters (small demand-seeded customer groups, weighed by each bounded capacity row's demands), demand (one per bounded capacity row) and cardinality (the number of selected customers); `all` adds every family. A capacity row whose demands are not all integer gives no demand or cluster hyperplane, since z would not be integer there.
 
 ## Build
 

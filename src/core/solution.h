@@ -52,8 +52,9 @@ struct SolveResult {
     int64_t rc_fix0_count = 0;
     int64_t rc_fix1_count = 0;
 
-    /// Hyperplane branching rows added to the LP (0 with branch_hyper off).
-    int64_t hyperplane_branch_rows = 0;
+    /// Auxiliary integer columns branch_hyper added, one per hyperplane
+    /// (0 with branch_hyper off).
+    int32_t hyperplane_columns = 0;
 
     [[nodiscard]] bool is_optimal() const { return status == Status::Optimal; }
     [[nodiscard]] bool has_solution() const {
