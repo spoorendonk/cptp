@@ -41,8 +41,13 @@ HyperplaneCandidates::HyperplaneCandidates(const Problem& problem, int32_t y_off
             skipped_rows_.push_back(k);
         }
     }
+    // Rounded, so z is exactly integer at an integer y, not within n * 1e-9.
     for (int32_t k : rows_) {
-        demands_.push_back(problem.demands(k));
+        auto d = problem.demands(k);
+        for (double& v : d) {
+            v = std::round(v);
+        }
+        demands_.push_back(std::move(d));
     }
     const auto& demands = problem.demands(0);
 
@@ -208,10 +213,15 @@ std::vector<Hyperplane> HyperplaneCandidates::columns() const {
     }
     // The same hyperplane can come from two families (a two-node cluster and
     // its pair; demand and cardinality under unit demands): keep the first,
-    // since a second column would only repeat its row.
+    // since a second column would only repeat its row. A one-term hyperplane
+    // (a one-customer cluster) is d * y_i, so branching on it is branching on
+    // y_i: it gets no column.
     std::vector<Hyperplane> result;
     std::set<std::vector<std::pair<int32_t, double>>> seen;
     for (auto& h : found) {
+        if (h.indices.size() < 2) {
+            continue;
+        }
         std::vector<std::pair<int32_t, double>> key;
         key.reserve(h.indices.size());
         for (size_t j = 0; j < h.indices.size(); ++j) {

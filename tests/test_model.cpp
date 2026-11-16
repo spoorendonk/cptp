@@ -908,16 +908,7 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
         ref_opts.emplace_back("threads", "1");
         ref_opts.emplace_back("random_seed", "0");
         auto result = model.solve(ref_opts);
-        if (result.status == cptp::SolveResult::Status::Error) {
-            WARN("Reference run returned Error; skipping hyperplane mode assertions");
-            return;
-        }
-        if (!result.has_solution()) {
-            WARN(
-                "Reference run produced no incumbent; skipping per-mode objective "
-                "checks");
-            return;
-        }
+        REQUIRE(result.is_optimal());
         ref_obj = result.objective;
     }
 
@@ -935,13 +926,8 @@ TEST_CASE("Model: hyperplane branching modes produce valid results", "[model][br
             opts.emplace_back("branch_hyper", mode);
             auto result = model.solve(opts);
             REQUIRE(result.hyperplane_columns > 0);
-            if (result.status == cptp::SolveResult::Status::Error) {
-                WARN("mode=" << mode << " returned Error; skipping objective check");
-                continue;
-            }
-            if (result.has_solution()) {
-                REQUIRE_THAT(result.objective, WithinAbs(ref_obj, 1.0));
-            }
+            REQUIRE(result.is_optimal());
+            REQUIRE_THAT(result.objective, WithinAbs(ref_obj, 1e-6));
         }
     }
 }
