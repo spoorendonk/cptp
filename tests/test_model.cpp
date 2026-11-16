@@ -71,6 +71,53 @@ TEST_CASE("Model solves trivial 3-node instance", "[model]") {
     REQUIRE(result.objective <= 0.0);
 }
 
+TEST_CASE("Model: a failed build keeps its inputs, so a second solve reports the same error (#123)",
+          "[model][validation]") {
+    // A self-loop is the last check Problem::build makes, after the edge_costs
+    // and profits sizes, so moved-out inputs would change the second error.
+    cptp::Model model;
+    std::vector<cptp::Edge> bad_edges = {{0, 1}, {0, 2}, {1, 1}};
+    std::vector<double> costs = {5.0, 3.0, 4.0};
+    model.set_graph(3, bad_edges, costs);
+    model.set_depot(0);
+    std::vector<double> profits = {0.0, 10.0, 8.0};
+    model.set_profits(profits);
+    std::vector<double> demands = {0.0, 2.0, 3.0};
+    model.add_capacity_resource(demands, 5.0);
+
+    REQUIRE_THROWS_WITH(model.solve(kQuiet), "self-loop edge not allowed");
+    REQUIRE_THROWS_WITH(model.solve(kQuiet), "self-loop edge not allowed");
+
+    // Fixing the graph keeps the profits: the tour 0-1-2-0 earns 18 for 12.
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    model.set_graph(3, edges, costs);
+    auto result = model.solve(kQuiet);
+    REQUIRE(result.has_solution());
+    REQUIRE_THAT(result.objective, WithinAbs(-6.0, 1e-6));
+}
+
+TEST_CASE("Model: a setter after a solve rebuilds with the same costs and profits (#123)",
+          "[model]") {
+    cptp::Model model;
+    std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    std::vector<double> costs = {5.0, 3.0, 4.0};
+    model.set_graph(3, edges, costs);
+    model.set_depot(0);
+    std::vector<double> profits = {0.0, 10.0, 8.0};
+    model.set_profits(profits);
+    std::vector<double> demands = {0.0, 2.0, 3.0};
+    model.add_capacity_resource(demands, 5.0);
+
+    auto first = model.solve(kQuiet);
+    REQUIRE(first.has_solution());
+    REQUIRE(first.objective < 0.0);
+
+    model.set_depot(0);  // marks the model unbuilt
+    auto second = model.solve(kQuiet);
+    REQUIRE(second.has_solution());
+    REQUIRE_THAT(second.objective, WithinAbs(first.objective, 1e-6));
+}
+
 TEST_CASE("Model solves instance with negative edge costs", "[model]") {
     cptp::Model model;
 

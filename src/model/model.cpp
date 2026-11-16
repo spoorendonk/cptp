@@ -202,12 +202,15 @@ void Model::build_problem() {
         capacities.push_back(1e18);
     }
 
-    if (profits_.empty()) {
-        profits_.assign(num_nodes_, 0.0);
+    // Copy the inputs: build may throw, and the Model must keep them for the
+    // next build (after a failed one, or after a later setter call).
+    std::vector<double> profits = profits_;
+    if (profits.empty()) {
+        profits.assign(num_nodes_, 0.0);
     }
 
-    problem_.build(num_nodes_, edges_, std::move(edge_costs_), std::move(profits_),
-                   std::move(demand_rows), std::move(capacities), source_, target_);
+    problem_.build(num_nodes_, edges_, edge_costs_, std::move(profits), std::move(demand_rows),
+                   std::move(capacities), source_, target_);
     built_ = true;
 }
 
