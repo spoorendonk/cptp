@@ -81,8 +81,7 @@ cptp_replace(SOURCES_CONTENT 1
 # A hunk below that edits another HiGHS .cpp adds it to this list.
 set(_cptp_patched_sources
   HighsUserSeparator.cpp HighsUserPropagator.cpp
-  HighsSeparation.cpp HighsMipSolverData.cpp HighsSearch.cpp
-  HighsLpRelaxation.cpp)
+  HighsSeparation.cpp HighsMipSolverData.cpp HighsSearch.cpp)
 list(TRANSFORM _cptp_patched_sources PREPEND "${SRC_PREFIX}/")
 list(JOIN _cptp_patched_sources " " _cptp_patched_sources)
 string(APPEND SOURCES_CONTENT

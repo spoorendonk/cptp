@@ -514,9 +514,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     // One branch-and-bound tree: the patched separator and feasibility-check
     // callbacks are thread_local, so the parallel tree search HiGHS runs by
     // default from v1.16 would explore nodes on worker threads that skip the
-    // lazy SECs and
-    // report wrong optima. "off" changes only the MIP search (and HiPO);
-    // simplex behaves as under v1.15's default.
+    // lazy SECs and report wrong optima. "off" changes only the MIP search
+    // (and HiPO); simplex behaves as under v1.15's default.
     if (auto it = accepted_highs_options.find("parallel");
         it != accepted_highs_options.end() && it->second != "off") {
         logger_.log(
@@ -1126,8 +1125,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     // Hyperplane branching through auxiliary integer columns, which HiGHS
-    // branches on as on any column (#137). Never through the patch's LP-row
-    // hook (#135): it stays cleared.
+    // branches on as on any column (#137).
     if (branch_hyper != "off") {
         const detail::HyperplaneCandidates hyperplanes(problem_, bridge.y_offset(), branch_hyper);
         for (int32_t k : hyperplanes.skipped_rows()) {
