@@ -679,18 +679,29 @@ inline std::vector<double> edge_lower_bounds(const Problem& prob, std::span<cons
     const double exact_cap =
         prob.capacity(0) + (prob.is_tour() ? prob.demand(0, prob.source()) : 0.0);
     const double cap = exact_cap + 1e-9 * std::max(1.0, std::abs(exact_cap));
-    auto stairs = [](const LabelFronts& fronts) {
+    // One deadline for the staircases and the join: a stop while building
+    // the staircases leaves every edge at the first bound.
+    DeadlineCheck out_of_time(deadline, nullptr);
+    bool stopped = false;
+    auto stairs = [&](const LabelFronts& fronts) {
         std::vector<std::vector<Label>> out;
         out.reserve(fronts.size());
         for (const auto& front : fronts) {
+            if (out_of_time.passed(static_cast<int64_t>(front.size()) + 1)) {
+                stopped = true;
+                break;
+            }
             out.push_back(staircase(front));
         }
         return out;
     };
     const auto sf = stairs(*front_f);
-    const auto own_sb = front_f == front_b ? std::vector<std::vector<Label>>{} : stairs(*front_b);
+    const auto own_sb =
+        front_f == front_b || stopped ? std::vector<std::vector<Label>>{} : stairs(*front_b);
+    if (stopped) {
+        return lb;
+    }
     const auto& sb = front_f == front_b ? sf : own_sb;  // a tour shares one set
-    DeadlineCheck out_of_time(deadline, nullptr);
     for (auto e : graph.edges()) {
         const int32_t u = graph.edge_source(e);
         const int32_t v = graph.edge_target(e);
