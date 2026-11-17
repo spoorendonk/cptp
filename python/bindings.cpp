@@ -138,7 +138,7 @@ NB_MODULE(_cptp, m) {
                 return nb::ndarray<nb::numpy, int32_t, nb::shape<-1, 2>>(raw->data(), {m, 2},
                                                                          std::move(owner));
             },
-            "Return (m, 2) numpy array of (tail, head) pairs")
+            "Return a (num_edges, 2) numpy array of (tail, head) pairs")
         .def(
             "__init__",
             [](cptp::Problem* self, int32_t num_nodes,
@@ -165,7 +165,8 @@ NB_MODULE(_cptp, m) {
                 self->name = name;
             },
             "num_nodes"_a, "edges"_a, "edge_costs"_a, "profits"_a, "demands"_a, "capacity"_a,
-            "source"_a = 0, "target"_a = 0, "name"_a = "")
+            "source"_a = 0, "target"_a = 0, "name"_a = "",
+            "Build with one capacity row: demands is (n,), capacity is a number")
         .def(
             "__init__",
             [](cptp::Problem* self, int32_t num_nodes,
@@ -254,12 +255,15 @@ NB_MODULE(_cptp, m) {
             [](cptp::Model& self, const cptp::SolverOptions& options) {
                 return self.solve(options);
             },
-            "options"_a = cptp::SolverOptions{});
+            "options"_a = cptp::SolverOptions{},
+            "Solve with (key, value) options: the solver's own (cptp-solve --help lists them,\n"
+            "among them the multi-capacity capacity_cut_rows, capacity_cut_surrogate,\n"
+            "labeling_rows, labeling_join and labeling_2cycle), the rest passed to HiGHS");
 
     m.attr("has_highs") = true;
 
     // IO functions (always available)
     m.def(
         "load", [](const std::string& path) { return cptp::io::load(path); }, "path"_a,
-        "Load an CPTP instance from file (auto-detect format)");
+        "Load a CPTP instance from file (auto-detect format), with all its capacity rows");
 }

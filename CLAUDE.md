@@ -218,9 +218,9 @@ Use Conventional Commits.
 
 The solver has a layered design:
 
-- **`core/`** — Problem definition (`Problem`, `Edge`, `Solution`), I/O (multiple instance formats), and graph primitives (Gomory-Hu trees, Dinitz max-flow, static adjacency graph).
-- **`sep/`** — Cut separators (SEC, RCI, Multistar/GLM, RGLM, Comb, SPI). Each implements the `Separator` interface. `SeparationOracle` orchestrates all separators per callback round.
-- **`preprocess/`** — Bound propagation (capacity-aware labeling with forward/backward bounds), edge/node elimination against the current upper bound.
+- **`core/`** — Problem definition (`Problem` with m >= 1 capacity rows, every one enforced; `Edge`, `Solution`), I/O (multiple instance formats), and graph primitives (Gomory-Hu trees, Dinitz max-flow, static adjacency graph).
+- **`sep/`** — Cut separators (SEC, RCI, Multistar/GLM, RGLM, Comb, SPI). Each implements the `Separator` interface; RCI, multistar and RGLM build cuts per capacity row (`capacity_cut_rows`). `SeparationOracle` orchestrates all separators per callback round.
+- **`preprocess/`** — Bound propagation (capacity-aware labeling with forward/backward bounds, on the capacity rows `labeling_rows` picks: row 0 by default), edge/node elimination against the current upper bound.
 - **`heuristic/`** — LP-guided primal heuristic (construction + ILS neighborhoods: 2-opt, relocate, swap, drop-add).
 - **`model/`** — `Model` is the user-facing API. `HiGHSBridge` wires the CPTP formulation, separators, propagator, and heuristic callback into HiGHS. This is the central integration point.
 - **`cli/`** — Command-line entry point (`cptp-solve`).

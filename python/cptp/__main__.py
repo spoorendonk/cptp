@@ -28,6 +28,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="cptp",
         description="Branch-and-cut solver for the Capacitated Profitable Tour Problem",
+        epilog=(
+            "The instance may have m >= 1 capacity rows; a solution satisfies every row. "
+            "Any other --key value pair goes to the solver as an option, the same as "
+            "cptp-solve's (cptp-solve --help lists them), e.g. --capacity_cut_rows "
+            "all|most_violated|first, --capacity_cut_surrogate, --labeling_rows "
+            "first|all|surrogate|vector, --labeling_join load|min, --labeling_2cycle; "
+            "an unrecognized one goes to HiGHS."
+        ),
     )
     parser.add_argument("instance", help="Path to instance file (.txt, .sppcc, or .vrp)")
     parser.add_argument("--source", type=int, default=None, help="Override source node")
@@ -65,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         ("threads", str(args.threads)),
         ("output_flag", "true" if args.verbose else "false"),
     ]
-    # Forward extra --key value pairs to HiGHS
+    # Forward extra --key value pairs as solver options (unrecognized ones go to HiGHS)
     i = 0
     while i < len(extra):
         if extra[i].startswith("--") and i + 1 < len(extra):

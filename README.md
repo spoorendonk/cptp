@@ -19,7 +19,7 @@ $$
 \text{s.t.} \quad
 & \sum_{e \in \delta(i)} x_e = 2 y_i && \forall i \in V \\
 & y_0 = 1 \\
-& \sum_{i \in V} d_i y_i \le Q \\
+& \sum_{i \in V} d^k_i y_i \le Q_k && k = 1, \dots, m \\
 & \sum_{e \in \delta(S)} x_e \ge 2 y_i && \forall S \subset V \setminus \{0\}, \ \forall i \in S \\
 & x_e \in \{0,1\} && \forall e \in E \setminus \delta(0) \\
 & x_e \in \{0,1,2\} && \forall e \in \delta(0) \\
@@ -27,15 +27,46 @@ $$
 \end{aligned}
 $$
 
-Here, `c_e` is edge cost, `p_i` node profit, `d_i` node demand, `Q` vehicle capacity, and `\delta(.)` denotes incident edges/cut boundary edges. Connectivity (subtour elimination) inequalities are enforced via dynamic cut separation in branch-and-cut.
+Here, `c_e` is edge cost, `p_i` node profit, `d^k_i` the demand of node `i` on capacity row `k`, `Q_k` that row's capacity, and `\delta(.)` denotes incident edges/cut boundary edges. An instance has m >= 1 capacity rows (the classical CPTP has m = 1), and a solution satisfies all of them. Connectivity (subtour elimination) inequalities are enforced via dynamic cut separation in branch-and-cut.
 
-**Several capacities.** An instance may have m >= 1 capacity rows `\sum_i d^k_i y_i <= Q_k`, k = 1..m, and a solution satisfies all of them. Every row is in the formulation and the primal heuristic. Capacity cuts, labeling bounds and the heuristic's profit/demand ordering still use row 1 only (branching hyperplanes use every bounded row). That is valid, since a relaxation of one row is a relaxation of the intersection, but weaker than per-row versions.
+### Several capacity rows
+
+Rows are numbered k = 1..m here; the code, its log and its option help call row 1 "row 0". A row is *bounded* when `Q_k < 1e17`; an unbounded row gives no capacity cuts, reachability fixing or hyperplanes. With m rows, each component uses by default:
+
+| Component | Rows it uses by default | Option (default first) | Issue |
+|---|---|---|---|
+| Formulation | every row | — | [#90] |
+| Reachability fixing (nodes that cannot fit) | every bounded row | — | [#90] |
+| Primal heuristics | feasibility under every row; the LP-guided heuristic breaks ties by row 1's profit/demand | — | [#90] |
+| Capacity cuts (RCI, multistar/GLM, RGLM) | every bounded row, each round | `capacity_cut_rows`: `all`, `most_violated`, `first` | [#91], measured on [#99] |
+| Surrogate capacity cuts (RCI, RGLM on `sum_k d^k / Q_k`) | off | `capacity_cut_surrogate`: `false`, `true` | [#112], left off by [#113] |
+| Labeling bounds: edge elimination, bounds propagation, reduced-cost fixing, all-pairs bounds (SPI) | row 1 | `labeling_rows`: `first`, `all`, `surrogate`, `vector` | [#101]–[#103], measured on [#104] |
+| Edge elimination's join of the two labeling halves | by row 1's load | `labeling_join`: `load`, `min` | [#144] |
+| 2-cycle elimination in the preprocessing labelings | off | `labeling_2cycle`: `false`, `true` | [#144] |
+| Branching hyperplanes (`demand`, `clusters`) | every bounded row whose demands are all integer | `branch_hyper` (default `off`) | [#100] |
+
+SEC and Comb cuts use no capacity row. Bounds from row 1 alone are valid, since a relaxation of one row is a relaxation of the intersection, but weaker than per-row ones: `labeling_rows=all` gains mainly at m = 10, at about 1.2x total time, and `vector` can take minutes per labeling at m >= 5 ([#104], [#115]). Cross-capacity inequalities, which combine rows, were studied in a literature write-up ([#105], on [#86]); surrogate capacity cuts closed none of the root gap at m = 2, 5 and 10 ([#113]). Further work on cross-row cuts is on [#146].
+
+[#86]: https://github.com/spoorendonk/cptp/issues/86
+[#90]: https://github.com/spoorendonk/cptp/issues/90
+[#91]: https://github.com/spoorendonk/cptp/issues/91
+[#99]: https://github.com/spoorendonk/cptp/issues/99
+[#100]: https://github.com/spoorendonk/cptp/issues/100
+[#101]: https://github.com/spoorendonk/cptp/issues/101
+[#103]: https://github.com/spoorendonk/cptp/issues/103
+[#104]: https://github.com/spoorendonk/cptp/issues/104
+[#105]: https://github.com/spoorendonk/cptp/issues/105
+[#112]: https://github.com/spoorendonk/cptp/issues/112
+[#113]: https://github.com/spoorendonk/cptp/issues/113
+[#115]: https://github.com/spoorendonk/cptp/issues/115
+[#144]: https://github.com/spoorendonk/cptp/issues/144
+[#146]: https://github.com/spoorendonk/cptp/issues/146
 
 ## Capabilities
 
 - **MIP backend**: [HiGHS](https://highs.dev) with custom callbacks for user cut separation and domain propagation during branch-and-bound.
 - **Cut separation**: SEC (Gomory-Hu), RCI, Multistar/GLM, RGLM, Comb, SPI (shortest-path inequalities — node-incompatibility cuts derived from all-pairs shortest-path bounds and a Held-Karp bound). SPI is a variant of the node-precedence / conflict-graph inequalities of García (2009), with roots in the shortest-path-bound preprocessing of Aneja et al. (1983); the Held-Karp bound is the only cptp-specific element.
-- **Preprocessing / bounds**: Capacity-aware labeling with forward/backward bounds, optional all-pairs bounds, and bound-based edge/node elimination against the current upper bound.
+- **Preprocessing / bounds**: Capacity-aware labeling with forward/backward bounds (on capacity row 1 by default; see [Several capacity rows](#several-capacity-rows)), optional all-pairs bounds, and bound-based edge/node elimination against the current upper bound.
 - **Domain propagation**: sweep fixing (remove edges/nodes inconsistent with bound + UB checks), chain fixing (propagate implications from newly fixed edges), and Lagrangian reduced-cost fixing from LP reduced costs and bound checks.
 - **Primal heuristics**: construction with 2-3 node seed routes, ILS neighborhoods (2-opt, relocate, swap, drop-add), and LP-guided in-tree ILS hooks on reduced graphs (threshold/RINS/neighborhood modes).
 - **Branching**: hyperplane branching (`branch_hyper`, default `off`) adds one integer column z = a·y per hyperplane, linked by the row z - a·y = 0, and HiGHS branches on z as on any other column. The hyperplanes are fixed before the solve: pairs (Ryan-Foster-style customer pairs), clusters (small demand-seeded customer groups, weighed by each bounded capacity row's demands), demand (one per bounded capacity row) and cardinality (the number of selected customers); `all` adds every family. A capacity row whose demands are not all integer gives no demand or cluster hyperplane, since z would not be integer there.
@@ -81,10 +112,15 @@ result = cptp.solve(
     edges=edges,
     edge_costs=costs,
     profits=profits,
-    demands=demands,
-    capacity=10.0,
+    demands=demands,  # (n,), or (m, n) for m capacity rows
+    capacity=10.0,  # a number, or m values
 )
+
+# Options of the multi-capacity components go to Model.solve
+result = model.solve([("capacity_cut_rows", "all"), ("labeling_rows", "first")])
 ```
+
+`python -m cptp <instance> --<option> <value>` and `cptp-solve` take the same options; `cptp-solve --help` lists them.
 
 ## Instance Formats
 

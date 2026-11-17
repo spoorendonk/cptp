@@ -26,13 +26,14 @@ def solve(
 
     Args:
         num_nodes: Number of nodes in the graph.
-        edges: (m, 2) array of (tail, head) pairs.
-        edge_costs: (m,) array of edge costs (can be negative).
+        edges: (num_edges, 2) array of (tail, head) pairs.
+        edge_costs: (num_edges,) array of edge costs (can be negative).
         profits: (n,) array of node profits.
-        demands: (n,) array of node demands, or an (m, n) array with one row
-            per capacity constraint.
-        capacity: Vehicle capacity, or m capacities when demands is (m, n).
-            A solution satisfies every row: sum_i demands[k, i] y_i <= capacity[k].
+        demands: (n,) array of node demands for one capacity row, or an (m, n)
+            array with one row per capacity row, m >= 1.
+        capacity: The capacity when demands is (n,), or m capacities when
+            demands is (m, n). A solution satisfies every row:
+            sum_i demands[k, i] y_i <= capacity[k].
         depot: Depot node index (default 0). Sets source = target = depot (tour).
         source: Source node for s-t path. Overrides depot if set.
         target: Target node for s-t path. Overrides depot if set.
@@ -42,6 +43,11 @@ def solve(
 
     Returns:
         SolveResult with tour, objective, gap, etc.
+
+    The options that choose which capacity rows each component uses
+    (capacity_cut_rows, capacity_cut_surrogate, labeling_rows, labeling_join,
+    labeling_2cycle) are not arguments here: pass them to Model.solve. The
+    README's "Several capacity rows" lists them with their defaults.
     """
     model = _Model()
     model.set_graph(

@@ -74,7 +74,8 @@ class Problem:
     def __init__(self) -> None: ...
 
     @overload
-    def __init__(self, num_nodes: int, edges: Annotated[NDArray[numpy.int32], dict(shape=(None, 2))], edge_costs: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], profits: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], demands: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], capacity: float, source: int = 0, target: int = 0, name: str = '') -> None: ...
+    def __init__(self, num_nodes: int, edges: Annotated[NDArray[numpy.int32], dict(shape=(None, 2))], edge_costs: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], profits: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], demands: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], capacity: float, source: int = 0, target: int = 0, name: str = '') -> None:
+        """Build with one capacity row: demands is (n,), capacity is a number"""
 
     @overload
     def __init__(self, num_nodes: int, edges: Annotated[NDArray[numpy.int32], dict(shape=(None, 2))], edge_costs: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], profits: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], demands: Annotated[NDArray[numpy.float64], dict(shape=(None, None))], capacities: Annotated[NDArray[numpy.float64], dict(shape=(None,), order='C')], source: int = 0, target: int = 0, name: str = '') -> None:
@@ -128,7 +129,7 @@ class Problem:
         """(m, n) demands d^k_i of every row, a copy"""
 
     def graph_edges(self) -> Annotated[NDArray[numpy.int32], dict(shape=(None, 2))]:
-        """Return (m, 2) numpy array of (tail, head) pairs"""
+        """Return a (num_edges, 2) numpy array of (tail, head) pairs"""
 
 class Model:
     def __init__(self) -> None: ...
@@ -152,9 +153,16 @@ class Model:
         Add a capacity row sum_i demands[i] * y_i <= limit; every row added is enforced
         """
 
-    def solve(self, options: Sequence[tuple[str, str]] = []) -> SolveResult: ...
+    def solve(self, options: Sequence[tuple[str, str]] = []) -> SolveResult:
+        """
+        Solve with (key, value) options: the solver's own (cptp-solve --help lists them,
+        among them the multi-capacity capacity_cut_rows, capacity_cut_surrogate,
+        labeling_rows, labeling_join and labeling_2cycle), the rest passed to HiGHS
+        """
 
 has_highs: bool = True
 
 def load(path: str) -> Problem:
-    """Load an CPTP instance from file (auto-detect format)"""
+    """
+    Load a CPTP instance from file (auto-detect format), with all its capacity rows
+    """
