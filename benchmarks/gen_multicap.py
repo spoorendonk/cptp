@@ -14,8 +14,8 @@ File format (TSPLIB extension; every other line is copied byte for byte):
 
 Row 1 is the original (d, Q), unchanged, so it keeps the base's own
 zero-demand customers (G-n262-k25-316 has twelve); rows k >= 2 are positive
-on every customer. Today's single-capacity loader reads such a file as its
-m = 1 restriction (first CAPACITY value, first demand column).
+on every customer. cptp's loaders read all m rows (``cptp.load``,
+``cptp-solve``).
 
 Parameters:
 

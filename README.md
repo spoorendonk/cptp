@@ -31,7 +31,7 @@ Here, `c_e` is edge cost, `p_i` node profit, `d^k_i` the demand of node `i` on c
 
 ### Several capacity rows
 
-Rows are numbered k = 1..m here; the code, its log and its option help call row 1 "row 0". A row is *bounded* when `Q_k < 1e17`; an unbounded row gives no capacity cuts, reachability fixing or hyperplanes. With m rows, each component uses by default:
+Rows are numbered k = 1..m here; the code, its log and its option help call row 1 "row 0". A row is *bounded* when `Q_k < 1e17`; an unbounded row gives no capacity cuts or reachability fixing, and no hyperplanes unless it is row 1 (the labeling and the hyperplanes use row 1 even when it is unbounded). With m rows, each component uses by default:
 
 | Component | Rows it uses by default | Option (default first) | Issue |
 |---|---|---|---|
@@ -43,9 +43,9 @@ Rows are numbered k = 1..m here; the code, its log and its option help call row 
 | Labeling bounds: edge elimination, bounds propagation, reduced-cost fixing, all-pairs bounds (SPI) | row 1 | `labeling_rows`: `first`, `all`, `surrogate`, `vector` | [#101]–[#103], measured on [#104] |
 | Edge elimination's join of the two labeling halves | by row 1's load | `labeling_join`: `load`, `min` | [#144] |
 | 2-cycle elimination in the preprocessing labelings | off | `labeling_2cycle`: `false`, `true` | [#144] |
-| Branching hyperplanes (`demand`, `clusters`) | every bounded row whose demands are all integer | `branch_hyper` (default `off`) | [#100] |
+| Branching hyperplanes (`demand`, `clusters`) | row 1 and every bounded row k >= 2, each only when its demands are all integer; clusters are seeded by row 1's demands | `branch_hyper` (default `off`) | [#100] |
 
-SEC and Comb cuts use no capacity row. Bounds from row 1 alone are valid, since a relaxation of one row is a relaxation of the intersection, but weaker than per-row ones: `labeling_rows=all` gains mainly at m = 10, at about 1.2x total time, and `vector` can take minutes per labeling at m >= 5 ([#104], [#115]). Cross-capacity inequalities, which combine rows, were studied in a literature write-up ([#105], on [#86]); surrogate capacity cuts closed none of the root gap at m = 2, 5 and 10 ([#113]). Further work on cross-row cuts is on [#146].
+SEC and Comb cuts use no capacity row. Bounds from row 1 alone are valid, since a relaxation of one row is a relaxation of the intersection, but weaker than per-row ones: `labeling_rows=all` gains mainly at m = 10, at about 1.2x total time, and `vector` costs 3x at m = 10, with labelings of up to 972 s ([#104], [#115]). Cross-capacity inequalities, which combine rows, were studied in a literature write-up ([#105], on [#86]); surrogate capacity cuts closed none of the root gap at m = 2, 5 and 10 ([#113]). Further work on cross-row cuts is on [#146].
 
 [#86]: https://github.com/spoorendonk/cptp/issues/86
 [#90]: https://github.com/spoorendonk/cptp/issues/90
@@ -117,10 +117,10 @@ result = cptp.solve(
 )
 
 # Options of the multi-capacity components go to Model.solve
-result = model.solve([("capacity_cut_rows", "all"), ("labeling_rows", "first")])
+result = model.solve([("labeling_rows", "all"), ("capacity_cut_rows", "most_violated")])
 ```
 
-`python -m cptp <instance> --<option> <value>` and `cptp-solve` take the same options; `cptp-solve --help` lists them.
+`python -m cptp <instance> --<option> <value>` passes the same `--key value` options as `cptp-solve`, which `cptp-solve --help` lists; the Python CLI sets its own defaults for `time_limit` (600 s), `threads` (1) and `output_flag` (false, `--verbose` for true).
 
 ## Instance Formats
 

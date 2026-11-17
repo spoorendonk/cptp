@@ -24,6 +24,11 @@ def solve(
 ) -> SolveResult:
     """Solve a CPTP instance.
 
+    The options that choose which capacity rows each component uses
+    (capacity_cut_rows, capacity_cut_surrogate, labeling_rows, labeling_join,
+    labeling_2cycle) are not arguments here: pass them to Model.solve. The
+    README's "Several capacity rows" lists them with their defaults.
+
     Args:
         num_nodes: Number of nodes in the graph.
         edges: (num_edges, 2) array of (tail, head) pairs.
@@ -43,11 +48,6 @@ def solve(
 
     Returns:
         SolveResult with tour, objective, gap, etc.
-
-    The options that choose which capacity rows each component uses
-    (capacity_cut_rows, capacity_cut_surrogate, labeling_rows, labeling_join,
-    labeling_2cycle) are not arguments here: pass them to Model.solve. The
-    README's "Several capacity rows" lists them with their defaults.
     """
     model = _Model()
     model.set_graph(

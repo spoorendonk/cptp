@@ -32,8 +32,9 @@ def main(argv: list[str] | None = None) -> int:
             "The instance may have m >= 1 capacity rows; a solution satisfies every row. "
             "Any other --key value pair goes to the solver as an option, the same as "
             "cptp-solve's (cptp-solve --help lists them), e.g. --capacity_cut_rows "
-            "all|most_violated|first, --capacity_cut_surrogate, --labeling_rows "
-            "first|all|surrogate|vector, --labeling_join load|min, --labeling_2cycle; "
+            "all|most_violated|first, --capacity_cut_surrogate true|false, --labeling_rows "
+            "first|all|surrogate|vector, --labeling_join load|min, "
+            "--labeling_2cycle true|false; "
             "an unrecognized one goes to HiGHS."
         ),
     )
