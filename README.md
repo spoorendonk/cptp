@@ -31,7 +31,7 @@ Here, `c_e` is edge cost, `p_i` node profit, `d^k_i` the demand of node `i` on c
 
 ### Several capacity rows
 
-Rows are numbered k = 1..m here; the code, its log and its option help call row 1 "row 0". A row is *bounded* when `Q_k < 1e17`; an unbounded row gives no capacity cuts or reachability fixing, and no hyperplanes unless it is row 1 (the labeling and the hyperplanes use row 1 even when it is unbounded). With m rows, each component uses by default:
+Rows are numbered k = 1..m here; the code, its log and its option help call row 1 "row 0". A row is *bounded* when `Q_k < 1e17`; an unbounded row gives no capacity cuts or reachability fixing, and no hyperplanes unless it is row 1 (the labeling and the hyperplanes use row 1 even when it is unbounded). A row with `Q_k = 0` gives no capacity cuts either, nor a hyperplane for k >= 2; reachability fixing removes its customers of positive demand. With m rows, each component uses by default:
 
 | Component | Rows it uses by default | Option (default first) | Issue |
 |---|---|---|---|
@@ -42,7 +42,7 @@ Rows are numbered k = 1..m here; the code, its log and its option help call row 
 | Surrogate capacity cuts (RCI, RGLM on `sum_k d^k / Q_k`) | off | `capacity_cut_surrogate`: `false`, `true` | [#112], left off by [#113] |
 | Labeling bounds: edge elimination, bounds propagation, reduced-cost fixing, all-pairs bounds (SPI) | row 1 | `labeling_rows`: `first`, `all`, `surrogate`, `vector` | [#101]–[#103], measured on [#104] |
 | Edge elimination's join of the two labeling halves | by row 1's load | `labeling_join`: `load`, `min` | [#144] |
-| 2-cycle elimination in the preprocessing labelings | off | `labeling_2cycle`: `false`, `true` | [#144] |
+| 2-cycle elimination in the preprocessing single-row labelings (not `labeling_rows=vector`'s vector labeling) | off | `labeling_2cycle`: `false`, `true` | [#144] |
 | Branching hyperplanes (`demand`, `clusters`) | row 1 and every bounded row k >= 2, each only when its demands are all integer; clusters are seeded by row 1's demands | `branch_hyper` (default `off`) | [#100] |
 
 SEC and Comb cuts use no capacity row. Bounds from row 1 alone are valid, since a relaxation of one row is a relaxation of the intersection, but weaker than per-row ones: `labeling_rows=all` gains mainly at m = 10, at about 1.2x total time, and `vector` costs 3x at m = 10, with labelings of up to 972 s ([#104], [#115]). Cross-capacity inequalities, which combine rows, were studied in a literature write-up ([#105], on [#86]); surrogate capacity cuts closed none of the root gap at m = 2, 5 and 10 ([#113]). Further work on cross-row cuts is on [#146].
@@ -69,7 +69,7 @@ SEC and Comb cuts use no capacity row. Bounds from row 1 alone are valid, since 
 - **Preprocessing / bounds**: Capacity-aware labeling with forward/backward bounds (on capacity row 1 by default; see [Several capacity rows](#several-capacity-rows)), optional all-pairs bounds, and bound-based edge/node elimination against the current upper bound.
 - **Domain propagation**: sweep fixing (remove edges/nodes inconsistent with bound + UB checks), chain fixing (propagate implications from newly fixed edges), and Lagrangian reduced-cost fixing from LP reduced costs and bound checks.
 - **Primal heuristics**: construction with 2-3 node seed routes, ILS neighborhoods (2-opt, relocate, swap, drop-add), and LP-guided in-tree ILS hooks on reduced graphs (threshold/RINS/neighborhood modes).
-- **Branching**: hyperplane branching (`branch_hyper`, default `off`) adds one integer column z = a·y per hyperplane, linked by the row z - a·y = 0, and HiGHS branches on z as on any other column. The hyperplanes are fixed before the solve: pairs (Ryan-Foster-style customer pairs), clusters (small demand-seeded customer groups, weighed by each bounded capacity row's demands), demand (one per bounded capacity row) and cardinality (the number of selected customers); `all` adds every family. A capacity row whose demands are not all integer gives no demand or cluster hyperplane, since z would not be integer there.
+- **Branching**: hyperplane branching (`branch_hyper`, default `off`) adds one integer column z = a·y per hyperplane, linked by the row z - a·y = 0, and HiGHS branches on z as on any other column. The hyperplanes are fixed before the solve: pairs (Ryan-Foster-style customer pairs), clusters (small customer groups seeded by row 1's demands, weighed by the demands of row 1 and each bounded row), demand (one for row 1 and each bounded row) and cardinality (the number of selected customers); `all` adds every family. A capacity row whose demands are not all integer gives no demand or cluster hyperplane, since z would not be integer there.
 
 ## Build
 
