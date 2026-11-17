@@ -3,6 +3,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <iostream>
+#include <regex>
+#include <sstream>
+#include <string>
 
 using Catch::Matchers::WithinAbs;
 
@@ -78,9 +82,9 @@ TEST_CASE("M-n101-k10-97 optimal (warm-start reroute)", "[optimal][slow]") {
     REQUIRE_THAT(r.objective, WithinAbs(-32628.0, 1.0));
 }
 
-// The user callbacks are thread_local, so Model::solve keeps HiGHS's tree
-// search serial even when asked for HiGHS's parallel MIP (the default from
-// v1.16): worker threads would skip the lazy SECs and prove a wrong optimum.
+// The bridge's callback state is not yet safe under concurrent tree workers
+// (#153), so Model::solve keeps HiGHS's tree search serial even when asked for
+// HiGHS's parallel MIP (the default from v1.16).
 TEST_CASE("B-n45-k6-54 optimal with parallel requested", "[optimal][slow]") {
     auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n45-k6-54.sppcc");
     cptp::Model model;
@@ -90,6 +94,60 @@ TEST_CASE("B-n45-k6-54 optimal with parallel requested", "[optimal][slow]") {
     auto r = model.solve(opts);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
+}
+
+// HiGHS's parallel tree search with its workers run one after another on the
+// calling thread (mip_search_simulate_concurrency): every worker path of the
+// patched callbacks runs, deterministically. A worker's incumbent must pass the
+// lazy-constraint check before it tightens the worker's bounds, and an integral
+// node whose LP solution has subtours must stay open (#152).
+TEST_CASE("optimal under simulated parallel tree search", "[optimal][slow][parallel]") {
+    struct Case {
+        const char* path;
+        double objective;
+    };
+    for (const auto& [path, objective] : {
+             Case{"tests/data/tiny4.txt", -11.0},
+             Case{"tests/data/tiny4_path.txt", -13.0},
+             Case{"benchmarks/instances/spprclib/B-n45-k6-54.sppcc", -74278.0},
+             Case{"benchmarks/instances/spprclib/B-n50-k8-40.sppcc", -12832.0},
+             Case{"benchmarks/instances/spprclib/B-n52-k7-15.sppcc", -74998.0},
+             Case{"benchmarks/instances/spprclib/A-n63-k10-44.sppcc", -32561.0},
+             Case{"benchmarks/instances/spprclib/A-n69-k9-42.sppcc", -43290.0},
+             Case{"benchmarks/instances/spprclib/M-n101-k10-97.sppcc", -32628.0},
+         }) {
+        INFO(path);
+        auto prob = cptp::io::load(path);
+        cptp::Model model;
+        model.set_problem(std::move(prob));
+        const cptp::SolverOptions opts = {{"output_flag", "true"},
+                                          {"time_limit", "180"},
+                                          {"parallel", "on"},
+                                          {"threads", "4"},
+                                          {"mip_search_simulate_concurrency", "true"}};
+        // The Model's logger writes to std::cout, HiGHS's log included.
+        std::ostringstream log;
+        cptp::SolveResult r;
+        {
+            struct CoutRedirect {
+                std::streambuf* old;
+                ~CoutRedirect() { std::cout.rdbuf(old); }
+            } redirect{std::cout.rdbuf(log.rdbuf())};
+            r = model.solve(opts);
+        }
+        REQUIRE(r.is_optimal());
+        REQUIRE_THAT(r.objective, WithinAbs(objective, 1.0));
+        // The main MIP runs more than one tree worker (a sub-MIP reports 1), so
+        // the parallel option was not forced off.
+        const std::string text = log.str();
+        const std::regex workers(R"(using up to (\d+) workers across)");
+        bool several_workers = false;
+        for (auto it = std::sregex_iterator(text.begin(), text.end(), workers);
+             it != std::sregex_iterator(); ++it) {
+            several_workers = several_workers || std::stoi((*it)[1].str()) > 1;
+        }
+        REQUIRE(several_workers);
+    }
 }
 
 // Hyperplane branching through auxiliary integer columns (#137): every mode

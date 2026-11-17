@@ -103,6 +103,31 @@ RCFixingStrategy parse_rc_fixing(const std::string& value) {
         "rc_fixing must be off, root_only, on_ub_improvement, periodic or adaptive, not " + value);
 }
 
+/// One branch-and-bound tree: the bridge's callback state is not yet safe
+/// under the parallel tree search HiGHS runs by default from v1.16 (#153), so
+/// "off" unless mip_search_simulate_concurrency is on: that runs HiGHS's tree
+/// workers one after another on this thread, which the tests use to check the
+/// workers' lazy-constraint paths. "off" changes only the MIP search (and
+/// HiPO); simplex behaves as under v1.15's default.
+void force_serial_tree_search(Logger& logger, Highs& highs,
+                              std::map<std::string, std::string>& accepted_highs_options) {
+    // HiGHS's stored value: its parser accepts spellings parse_bool_option does not.
+    bool simulate_concurrency = false;
+    highs.getOptionValue("mip_search_simulate_concurrency", simulate_concurrency);
+    if (simulate_concurrency) {
+        return;
+    }
+    if (auto it = accepted_highs_options.find("parallel");
+        it != accepted_highs_options.end() && it->second != "off") {
+        logger.log(
+            "Warning: HiGHS option parallel = {} ignored: the user callbacks need serial tree "
+            "search",
+            it->second);
+        accepted_highs_options.erase(it);
+    }
+    highs.setOptionValue("parallel", "off");
+}
+
 }  // namespace
 
 Model::Model() = default;
@@ -531,20 +556,7 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
-    // One branch-and-bound tree: the patched separator and feasibility-check
-    // callbacks are thread_local, so the parallel tree search HiGHS runs by
-    // default from v1.16 would explore nodes on worker threads that skip the
-    // lazy SECs and report wrong optima. "off" changes only the MIP search
-    // (and HiPO); simplex behaves as under v1.15's default.
-    if (auto it = accepted_highs_options.find("parallel");
-        it != accepted_highs_options.end() && it->second != "off") {
-        logger_.log(
-            "Warning: HiGHS option parallel = {} ignored: the user callbacks need serial tree "
-            "search",
-            it->second);
-        accepted_highs_options.erase(it);
-    }
-    highs.setOptionValue("parallel", "off");
+    force_serial_tree_search(logger_, highs, accepted_highs_options);
 
     // Before the settings line is built, so it reports the mode that runs.
     normalize_branch_hyper(logger_, branch_hyper);

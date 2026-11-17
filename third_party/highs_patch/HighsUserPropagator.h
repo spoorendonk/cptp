@@ -4,29 +4,28 @@
 #include "mip/HighsDomain.h"
 #include "mip/HighsLpRelaxation.h"
 #include "mip/HighsMipSolver.h"
-
-#include <functional>
+#include "mip/HighsUserHooks.h"
 
 /// User-defined domain propagator injected into HiGHS's search loop.
-/// Uses thread-local callback storage (same pattern as HighsUserSeparator).
+/// The setter fills the calling thread's pending hooks, which a MIP solve
+/// captures at run() (same pattern as HighsUserSeparator).
 ///
 /// Called after reduced-cost fixing in each node evaluation.
 /// The callback can fix variables via domain.changeBound().
 class HighsUserPropagator {
 public:
-    using Callback = std::function<void(HighsDomain& domain, const HighsMipSolver& mipsolver,
-                                        const HighsLpRelaxation& lp)>;
+    using Callback = HighsUserHooks::Propagator;
 
-    /// Set the thread-local propagator callback. Call before Highs::run().
+    /// Set this thread's pending propagator callback. Call before Highs::run().
     static void setCallback(Callback cb);
 
-    /// Clear the thread-local callback.
+    /// Clear this thread's pending propagator callback.
     static void clearCallback();
 
-    /// Check if a propagator callback is registered on this thread.
+    /// Whether this thread has a pending propagator callback.
     static bool hasCallback();
 
-    /// Run the propagator callback (called from HighsSearch.cpp).
+    /// Run the MIP solve's propagator callback (called from HighsSearch.cpp).
     static void propagate(HighsDomain& domain, const HighsMipSolver& mipsolver,
                           const HighsLpRelaxation& lp);
 };

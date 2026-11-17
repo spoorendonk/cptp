@@ -5,48 +5,61 @@
 #include "mip/HighsLpRelaxation.h"
 #include "mip/HighsMipSolver.h"
 #include "mip/HighsSeparator.h"
+#include "mip/HighsUserHooks.h"
 
-#include <functional>
 #include <vector>
 
 /// User-defined separator injected into HiGHS's separation loop.
-/// Uses thread-local callback storage so multiple Highs instances can
-/// run concurrently on different threads without interfering.
 ///
-/// Thread-local variables are defined in HighsUserSeparator.cpp.
+/// The setters fill the calling thread's pending hooks (HighsUserHooks), so
+/// several Highs instances can run concurrently on different threads without
+/// interfering. A MIP solve reads the hooks it captured at run()
+/// (HighsMipSolver::user_hooks_), on whatever thread its tree workers run.
 class HighsUserSeparator : public HighsSeparator {
 public:
-    using Callback = std::function<void(const HighsLpRelaxation& lpRelaxation,
-                                        HighsCutPool& cutpool, const HighsMipSolver& mipsolver)>;
+    using Callback = HighsUserHooks::Separator;
 
     /// Solution feasibility check: returns true if the solution is feasible
     /// (no violated lazy constraints). Called from addIncumbent() before
-    /// accepting any integer solution (including heuristic solutions).
-    using FeasibilityCheck = std::function<bool(const std::vector<double>& sol)>;
+    /// accepting any integer solution (including heuristic solutions), on the
+    /// main solver and on every worker of the parallel tree search.
+    using FeasibilityCheck = HighsUserHooks::FeasibilityCheck;
 
     HighsUserSeparator(const HighsMipSolver& mipsolver) : HighsSeparator(mipsolver, "User") {}
 
     void separateLpSolution(HighsLpRelaxation& lpRelaxation, HighsLpAggregator& /*lpAggregator*/,
                             HighsTransformedLp& /*transLp*/, HighsCutPool& cutpool) override;
 
-    /// Set the thread-local user separator callback. Call before Highs::run().
+    /// Set this thread's pending separator callback. Call before Highs::run().
     static void setCallback(Callback cb);
 
-    /// Set the thread-local solution feasibility check. Call before Highs::run().
+    /// Set this thread's pending solution feasibility check. Call before Highs::run().
     static void setFeasibilityCheck(FeasibilityCheck cb);
 
-    /// Clear all thread-local callbacks.
+    /// Clear this thread's pending separator callback and feasibility check.
     static void clearCallback();
 
-    /// Check if a separator callback is registered (for lazy constraint loop).
+    /// Whether this thread has a pending separator callback.
     static bool hasCallback();
 
-    /// Check if a solution is feasible w.r.t. user lazy constraints.
-    /// Returns true if no check is registered or if the solution passes.
+    /// Check a solution against this thread's pending feasibility check.
+    /// Returns true if no check is pending or if the solution passes.
     static bool isFeasible(const std::vector<double>& sol);
 
+    /// Whether the MIP solve has a separator callback (for the lazy
+    /// constraint loop on integral LP solutions).
+    static bool hasCallback(const HighsMipSolver& mipsolver);
+
+    /// Check a solution of the MIP solve against its lazy constraints. A
+    /// sub-MIP's solution is in its presolved space and is expanded to the
+    /// original space first. Returns true if the solve has no feasibility
+    /// check or if the solution passes.
+    static bool isFeasible(const HighsMipSolver& mipsolver, const std::vector<double>& sol);
+
     /// Record that addIncumbent() rejected a solution because it violates the
-    /// user lazy constraints (thread-local, like the callbacks).
+    /// user lazy constraints. thread_local: the mark and its take happen in one
+    /// synchronous call on one thread (HighsSearch::evaluateNode), on the main
+    /// solver or on a tree worker.
     static void markIncumbentRejected();
 
     /// Return whether a rejection was recorded since the last call, and clear it.

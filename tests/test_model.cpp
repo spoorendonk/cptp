@@ -924,8 +924,9 @@ TEST_CASE("Model: presolve option is captured and forced off", "[model][options]
     REQUIRE_THAT(r_forced.objective, WithinAbs(r_off.objective, 1e-9));
 }
 
-// The user callbacks are thread_local, so Model::solve forces HiGHS's
-// parallel=off even when asked for parallel tree search (#110). HiGHS logs its
+// The bridge's callback state is not yet safe under concurrent tree workers
+// (#153), so Model::solve forces HiGHS's parallel=off even when asked for
+// parallel tree search (#110). HiGHS logs its
 // worker count, which is 1 exactly when parallel is off, at the start of the
 // MIP solve, so this checks the setting HiGHS runs with, whether or not a
 // parallel search would add workers on this instance. The thread count must

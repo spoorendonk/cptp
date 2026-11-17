@@ -51,10 +51,12 @@ endfunction()
 set(MIP_DIR "${SOURCE_DIR}/highs/mip")
 set(SRC_PREFIX "mip")
 
-# Copy HighsUserSeparator and HighsUserPropagator (.h and .cpp). configure_file
-# gives the copy a fresh mtime; file(COPY) would keep the source's, and a
-# source older than its object (cp -p, rsync -t, tar) would not be rebuilt.
-foreach(_name IN ITEMS HighsUserSeparator.h HighsUserSeparator.cpp
+# Copy HighsUserHooks.h, HighsUserSeparator and HighsUserPropagator (.h and
+# .cpp). configure_file gives the copy a fresh mtime; file(COPY) would keep the
+# source's, and a source older than its object (cp -p, rsync -t, tar) would not
+# be rebuilt.
+foreach(_name IN ITEMS HighsUserHooks.h
+                       HighsUserSeparator.h HighsUserSeparator.cpp
                        HighsUserPropagator.h HighsUserPropagator.cpp)
     configure_file("${PATCH_DIR}/${_name}" "${MIP_DIR}/${_name}" COPYONLY)
 endforeach()
@@ -70,7 +72,7 @@ cptp_replace(SOURCES_CONTENT 1
 # Add .h after HighsModkSeparator.h
 cptp_replace(SOURCES_CONTENT 1
   "${SRC_PREFIX}/HighsModkSeparator.h"
-  "${SRC_PREFIX}/HighsModkSeparator.h\n    ${SRC_PREFIX}/HighsUserSeparator.h\n    ${SRC_PREFIX}/HighsUserPropagator.h")
+  "${SRC_PREFIX}/HighsModkSeparator.h\n    ${SRC_PREFIX}/HighsUserHooks.h\n    ${SRC_PREFIX}/HighsUserSeparator.h\n    ${SRC_PREFIX}/HighsUserPropagator.h")
 
 # Keep every source this patch adds or edits out of HiGHS's unity build (on
 # only if(APPLE) in highs/CMakeLists.txt): batched with neighbouring HiGHS
@@ -81,7 +83,8 @@ cptp_replace(SOURCES_CONTENT 1
 # A hunk below that edits another HiGHS .cpp adds it to this list.
 set(_cptp_patched_sources
   HighsUserSeparator.cpp HighsUserPropagator.cpp
-  HighsSeparation.cpp HighsMipSolverData.cpp HighsSearch.cpp)
+  HighsSeparation.cpp HighsMipSolverData.cpp HighsSearch.cpp
+  HighsMipSolver.cpp HighsMipWorker.cpp HighsPrimalHeuristics.cpp HighsCutPool.cpp)
 list(TRANSFORM _cptp_patched_sources PREPEND "${SRC_PREFIX}/")
 list(JOIN _cptp_patched_sources " " _cptp_patched_sources)
 string(APPEND SOURCES_CONTENT
@@ -106,18 +109,20 @@ cptp_replace(CONTENT 1
 
 # Patch separate() entry condition: also enter separation when user callback
 # is registered and LP is integer feasible (lazy constraint at non-root nodes).
+# The hooks are the MIP solve's (HighsUserHooks), so a tree worker on another
+# thread sees them too; `mipsolver` is lp->getMipSolver() here.
 # Original: if (lp->scaledOptimal(status) && !lp->getFractionalIntegers().empty())
-# New:      if (lp->scaledOptimal(status) && (!lp->getFractionalIntegers().empty() || HighsUserSeparator::hasCallback()))
+# New:      if (lp->scaledOptimal(status) && (!lp->getFractionalIntegers().empty() || HighsUserSeparator::hasCallback(mipsolver)))
 cptp_replace(CONTENT 1
   "if (lp->scaledOptimal(status) && !lp->getFractionalIntegers().empty())"
-  "if (lp->scaledOptimal(status) && (!lp->getFractionalIntegers().empty() || HighsUserSeparator::hasCallback()))")
+  "if (lp->scaledOptimal(status) && (!lp->getFractionalIntegers().empty() || HighsUserSeparator::hasCallback(mipsolver)))")
 
 # Patch inner loop break: don't break on integer feasible if user callback is registered.
 # Original: if (ncuts == 0 || !lp->scaledOptimal(status) || lp->getFractionalIntegers().empty())
-# New:      if (ncuts == 0 || !lp->scaledOptimal(status) || (lp->getFractionalIntegers().empty() && !HighsUserSeparator::hasCallback()))
+# New:      if (ncuts == 0 || !lp->scaledOptimal(status) || (lp->getFractionalIntegers().empty() && !HighsUserSeparator::hasCallback(mipsolver)))
 cptp_replace(CONTENT 1
   "if (ncuts == 0 || !lp->scaledOptimal(status) ||\n          lp->getFractionalIntegers().empty())"
-  "if (ncuts == 0 || !lp->scaledOptimal(status) ||\n          (lp->getFractionalIntegers().empty() && !HighsUserSeparator::hasCallback()))")
+  "if (ncuts == 0 || !lp->scaledOptimal(status) ||\n          (lp->getFractionalIntegers().empty() && !HighsUserSeparator::hasCallback(mipsolver)))")
 
 file(WRITE "${MIP_DIR}/HighsSeparation.cpp" "${CONTENT}")
 message(STATUS "Applied HighsUserSeparator patch to HighsSeparation.cpp")
@@ -136,26 +141,25 @@ cptp_replace(CONTENT2 1
 # New: while (... && (!lp.getFractionalIntegers().empty() || HighsUserSeparator::hasCallback()) && ...)
 cptp_replace(CONTENT2 1
   "!getLp().getFractionalIntegers().empty() && stall < 3"
-  "(!getLp().getFractionalIntegers().empty() || HighsUserSeparator::hasCallback()) && stall < 3")
+  "(!getLp().getFractionalIntegers().empty() || HighsUserSeparator::hasCallback(mipsolver)) && stall < 3")
 
 # Patch addIncumbent(): reject solutions that fail user feasibility check.
-# For sub-MIPs (with presolve on), expand reduced solution to original space
-# via postSolveStack.undoPrimal before checking feasibility.
+# isFeasible(mipsolver, sol) expands a sub-MIP's reduced solution to its
+# original space (postSolveStack.undoPrimal) before checking. Section 5 adds
+# the same check to HighsMipWorker::addIncumbent, the path every incumbent of
+# the parallel tree search takes while the parallel lock is active.
 # Original:  const bool execute_mip_solution_callback =
-# New:       { bool user_feasible = true;
-#              if (mipsolver.submip) { expand via undoPrimal, check }
-#              else { check directly }
-#              if (!user_feasible) { mark rejected; return false; } }
+# New:       if (!isFeasible(mipsolver, sol)) { mark rejected; return false; }
 #            const bool execute_mip_solution_callback =
 cptp_replace(CONTENT2 1
   "  const bool execute_mip_solution_callback ="
-  "  // Reject solutions that violate user lazy constraints (e.g. SEC/GSEC)\n  {\n    bool user_feasible;\n    if (mipsolver.submip) {\n      // Sub-MIP: sol is in reduced (presolved) space; expand to original\n      HighsSolution temp_sol;\n      temp_sol.col_value = sol;\n      temp_sol.value_valid = true;\n      postSolveStack.undoPrimal(*mipsolver.options_mip_, temp_sol);\n      user_feasible = HighsUserSeparator::isFeasible(temp_sol.col_value);\n    } else {\n      user_feasible = HighsUserSeparator::isFeasible(sol);\n    }\n    if (!user_feasible) {\n      HighsUserSeparator::markIncumbentRejected();\n      return false;\n    }\n  }\n  const bool execute_mip_solution_callback =")
+  "  // Reject solutions that violate user lazy constraints (e.g. SEC/GSEC)\n  if (!HighsUserSeparator::isFeasible(mipsolver, sol)) {\n    HighsUserSeparator::markIncumbentRejected();\n    return false;\n  }\n  const bool execute_mip_solution_callback =")
 
 # Patch runSetup(): also check user feasibility for MIP start solutions.
 # HiGHS accepts warm-start solutions directly without calling addIncumbent(),
 # bypassing our feasibility check. Add isFeasible() to the feasibility condition.
 # Original: if (feasible && solobj < upper_bound) {
-# New:      if (feasible && !mipsolver.submip) feasible = HighsUserSeparator::isFeasible(incumbent);
+# New:      if (feasible && !mipsolver.submip) feasible = HighsUserSeparator::isFeasible(mipsolver, incumbent);
 #           if (feasible && solobj < upper_bound) {
 # The reassigned flag also gates the MIP-solution callback further down.
 # From v1.16 checkAddSolution() declares it const: drop that so it can be
@@ -165,7 +169,7 @@ cptp_replace(CONTENT2 1
   "    bool feasible =\n        mipsolver.bound_violation_ <=")
 cptp_replace(CONTENT2 1
   "    if (feasible && solobj < upper_bound) {\n      double prev_upper_bound = upper_bound;"
-  "    if (feasible && !mipsolver.submip) feasible = HighsUserSeparator::isFeasible(incumbent);\n    if (feasible && solobj < upper_bound) {\n      double prev_upper_bound = upper_bound;")
+  "    if (feasible && !mipsolver.submip) feasible = HighsUserSeparator::isFeasible(mipsolver, incumbent);\n    if (feasible && solobj < upper_bound) {\n      double prev_upper_bound = upper_bound;")
 
 file(WRITE "${MIP_DIR}/HighsMipSolverData.cpp" "${CONTENT2}")
 message(STATUS "Applied lazy constraint + incumbent feasibility patch to HighsMipSolverData.cpp")
@@ -207,5 +211,68 @@ cptp_replace(CONTENT3C 1
 
 file(WRITE "${MIP_DIR}/HighsSearch.cpp" "${CONTENT3C}")
 message(STATUS "Applied lazy-rejection node patch to HighsSearch.cpp")
+
+# ── 5. Hooks per MIP solve, so the parallel tree search's workers see them ──
+# The setters fill a thread_local pending set on the Highs::run() caller.
+# Tree workers run on HiGHS's executor threads (parallel/HighsTaskExecutor.h),
+# so the callbacks live on the HighsMipSolver instead: a top-level run()
+# captures the pending set before any task is spawned, and a sub-MIP (RINS,
+# RENS), which may be started on any worker thread, copies its parent's.
+file(READ "${MIP_DIR}/HighsMipSolver.h" CONTENT5H)
+cptp_replace(CONTENT5H 1
+  "struct HighsMipSolverData;"
+  "struct HighsMipSolverData;\nstruct HighsUserHooks;")
+cptp_replace(CONTENT5H 1
+  "  void setParallelLock(bool lock) const;"
+  "  void setParallelLock(bool lock) const;\n\n  // cptp patch: the user callbacks this solve runs (mip/HighsUserHooks.h)\n  std::shared_ptr<const HighsUserHooks> user_hooks_;")
+file(WRITE "${MIP_DIR}/HighsMipSolver.h" "${CONTENT5H}")
+
+file(READ "${MIP_DIR}/HighsMipSolver.cpp" CONTENT5)
+cptp_replace(CONTENT5 1
+  "#include \"mip/HighsMipSolver.h\""
+  "#include \"mip/HighsMipSolver.h\"\n#include \"mip/HighsUserHooks.h\"")
+# run(), not runMipPresolve(), which also creates a HighsMipSolverData.
+cptp_replace(CONTENT5 1
+  "fopen(options_mip_->mip_improving_solution_file.c_str(), \"w\");\n\n  mipdata_ = decltype(mipdata_)(new HighsMipSolverData(*this));"
+  "fopen(options_mip_->mip_improving_solution_file.c_str(), \"w\");\n\n  if (!submip) user_hooks_ = HighsUserHooks::capture();\n  mipdata_ = decltype(mipdata_)(new HighsMipSolverData(*this));")
+file(WRITE "${MIP_DIR}/HighsMipSolver.cpp" "${CONTENT5}")
+
+file(READ "${MIP_DIR}/HighsPrimalHeuristics.cpp" CONTENT5P)
+cptp_replace(CONTENT5P 1
+  "  submipsolver.initialiseTerminator(mipsolver);"
+  "  submipsolver.initialiseTerminator(mipsolver);\n  submipsolver.user_hooks_ = mipsolver.user_hooks_;")
+file(WRITE "${MIP_DIR}/HighsPrimalHeuristics.cpp" "${CONTENT5P}")
+message(STATUS "Applied per-solve user hooks patch to HighsMipSolver and HighsPrimalHeuristics")
+
+# ── 6. Patch HighsMipWorker.cpp: lazy check on a tree worker's incumbent ──
+# While the parallel lock is active, HighsSearch and HighsPrimalHeuristics hand
+# incumbents to HighsMipWorker::addIncumbent, which tightens the worker's upper
+# bound and limit and buffers the solution; HighsMipSolverData::addIncumbent
+# (section 3) sees it only later, at syncSolutions. Check it here first, so a
+# solution with subtours neither tightens the worker's limits nor lets
+# evaluateNode prune its node (section 4c reads the rejection mark).
+file(READ "${MIP_DIR}/HighsMipWorker.cpp" CONTENT6)
+cptp_replace(CONTENT6 1
+  "#include \"mip/HighsMipWorker.h\""
+  "#include \"mip/HighsMipWorker.h\"\n#include \"mip/HighsUserSeparator.h\"")
+cptp_replace(CONTENT6 1
+  "                                  int solution_source) {\n  if (solobj < upper_bound) {"
+  "                                  int solution_source) {\n  // Reject solutions that violate user lazy constraints (e.g. SEC/GSEC)\n  if (!HighsUserSeparator::isFeasible(mipsolver_, sol)) {\n    HighsUserSeparator::markIncumbentRejected();\n    return false;\n  }\n  if (solobj < upper_bound) {")
+file(WRITE "${MIP_DIR}/HighsMipWorker.cpp" "${CONTENT6}")
+message(STATUS "Applied worker incumbent feasibility patch to HighsMipWorker.cpp")
+
+# ── 7. Patch HighsCutPool.cpp: keep a cut's propagate flag through a sync ──
+# syncCutPool copies a worker's cuts into the global pool with addCut's default
+# propagate = true, so a cut added with propagate = false (cptp's RCI cuts)
+# would be propagated once synced. columnsLinked(i) is the cut's current flag:
+# false also for a cut addCut found too dense, or one the worker pool later
+# unlinked to stay within its propagation budget. Such a cut syncs as
+# non-propagated, which is weaker but never wrong: it stays a valid cut.
+file(READ "${MIP_DIR}/HighsCutPool.cpp" CONTENT7)
+cptp_replace(CONTENT7 1
+  "      syncpool.addCut(mipsolver, idxs.data(), vals.data(), Rlen, rhs_[i],\n                      rowintegral[i]);"
+  "      syncpool.addCut(mipsolver, idxs.data(), vals.data(), Rlen, rhs_[i],\n                      rowintegral[i], matrix_.columnsLinked(i));")
+file(WRITE "${MIP_DIR}/HighsCutPool.cpp" "${CONTENT7}")
+message(STATUS "Applied cut propagate-flag sync patch to HighsCutPool.cpp")
 
 file(WRITE "${_stamp}" "${PATCH_HASH}")
