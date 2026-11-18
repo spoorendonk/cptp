@@ -120,6 +120,7 @@ if(CPTP_BUILD_TESTS)
         tests/test_hyperplane.cpp
         tests/test_model.cpp
         tests/test_multicap.cpp
+        tests/test_nested_submip.cpp
         tests/test_optimal.cpp
         tests/test_path_cut_validity.cpp
         tests/test_propagator.cpp

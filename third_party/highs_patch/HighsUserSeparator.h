@@ -56,6 +56,15 @@ public:
     /// check or if the solution passes.
     static bool isFeasible(const HighsMipSolver& mipsolver, const std::vector<double>& sol);
 
+    /// Expand a solution of the MIP solve to the top-level model's columns,
+    /// undoing the presolve of every sub-MIP level (HiGHS nests sub-MIPs).
+    static std::vector<double> toOriginalSpace(const HighsMipSolver& mipsolver,
+                                               const std::vector<double>& sol);
+
+    /// The top-level model's column of each of the solve's first num_col
+    /// columns, through every sub-MIP level.
+    static std::vector<HighsInt> originalColumns(const HighsMipSolver& mipsolver, HighsInt num_col);
+
     /// Record that addIncumbent() rejected a solution because it violates the
     /// user lazy constraints. thread_local: the mark and its take happen in one
     /// synchronous call on one thread (HighsSearch::evaluateNode), on the main

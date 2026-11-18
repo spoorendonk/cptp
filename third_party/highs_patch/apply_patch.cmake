@@ -144,8 +144,9 @@ cptp_replace(CONTENT2 1
   "(!getLp().getFractionalIntegers().empty() || HighsUserSeparator::hasCallback(mipsolver)) && stall < 3")
 
 # Patch addIncumbent(): reject solutions that fail user feasibility check.
-# isFeasible(mipsolver, sol) expands a sub-MIP's reduced solution to its
-# original space (postSolveStack.undoPrimal) before checking. Section 5 adds
+# isFeasible(mipsolver, sol) expands a sub-MIP's reduced solution to the
+# top-level model's space (postSolveStack.undoPrimal at every sub-MIP level,
+# through the parent links section 5 adds) before checking. Section 6 adds
 # the same check to HighsMipWorker::addIncumbent, the path every incumbent of
 # the parallel tree search takes while the parallel lock is active.
 # Original:  const bool execute_mip_solution_callback =
@@ -224,7 +225,7 @@ cptp_replace(CONTENT5H 1
   "struct HighsMipSolverData;\nstruct HighsUserHooks;")
 cptp_replace(CONTENT5H 1
   "  void setParallelLock(bool lock) const;"
-  "  void setParallelLock(bool lock) const;\n\n  // cptp patch: the user callbacks this solve runs (mip/HighsUserHooks.h)\n  std::shared_ptr<const HighsUserHooks> user_hooks_;")
+  "  void setParallelLock(bool lock) const;\n\n  // cptp patch: the user callbacks this solve runs (mip/HighsUserHooks.h)\n  std::shared_ptr<const HighsUserHooks> user_hooks_;\n  // cptp patch: the solve that started this sub-MIP, null at the top level\n  const HighsMipSolver* parent_mip_ = nullptr;")
 file(WRITE "${MIP_DIR}/HighsMipSolver.h" "${CONTENT5H}")
 
 file(READ "${MIP_DIR}/HighsMipSolver.cpp" CONTENT5)
@@ -240,7 +241,7 @@ file(WRITE "${MIP_DIR}/HighsMipSolver.cpp" "${CONTENT5}")
 file(READ "${MIP_DIR}/HighsPrimalHeuristics.cpp" CONTENT5P)
 cptp_replace(CONTENT5P 1
   "  submipsolver.initialiseTerminator(mipsolver);"
-  "  submipsolver.initialiseTerminator(mipsolver);\n  submipsolver.user_hooks_ = mipsolver.user_hooks_;")
+  "  submipsolver.initialiseTerminator(mipsolver);\n  submipsolver.user_hooks_ = mipsolver.user_hooks_;\n  submipsolver.parent_mip_ = &mipsolver;")
 file(WRITE "${MIP_DIR}/HighsPrimalHeuristics.cpp" "${CONTENT5P}")
 message(STATUS "Applied per-solve user hooks patch to HighsMipSolver and HighsPrimalHeuristics")
 

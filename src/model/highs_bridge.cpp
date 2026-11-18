@@ -324,28 +324,25 @@ void HiGHSBridge::install_separators() {
 
         if (mipsolver.submip) {
             // Sub-MIP: LP solution is in reduced (presolved) column space.
-            // Expand to original space so separators see the full model.
-            auto& post_solve_stack = mipsolver.mipdata_->postSolveStack;
+            // Expand to original space, through every sub-MIP level, so
+            // separators see the full model.
+            const std::vector<double> expanded =
+                HighsUserSeparator::toOriginalSpace(mipsolver, sol.col_value);
 
-            HighsSolution temp_sol;
-            temp_sol.col_value = sol.col_value;
-            temp_sol.value_valid = true;
-            post_solve_stack.undoPrimal(*mipsolver.options_mip_, temp_sol);
-
-            if (static_cast<int32_t>(temp_sol.col_value.size()) < m + n) {
+            if (static_cast<int32_t>(expanded.size()) < m + n) {
                 return;
             }
 
-            std::copy_n(temp_sol.col_value.begin(), m, x_vals.begin());
-            std::copy_n(temp_sol.col_value.begin() + m, n, y_vals.begin());
+            std::copy_n(expanded.begin(), m, x_vals.begin());
+            std::copy_n(expanded.begin() + m, n, y_vals.begin());
 
             // Build inverse column mapping (original → reduced) for cut translation
-            const auto& pss = mipsolver.mipdata_->postSolveStack;
-            int orig_ncol = pss.getOrigNumCol();
-            int reduced_ncol = static_cast<int>(sol.col_value.size());
-            orig_to_reduced.assign(orig_ncol, -1);
+            const int reduced_ncol = static_cast<int>(sol.col_value.size());
+            const std::vector<HighsInt> orig_cols =
+                HighsUserSeparator::originalColumns(mipsolver, reduced_ncol);
+            orig_to_reduced.assign(expanded.size(), -1);
             for (int r = 0; r < reduced_ncol; r++) {
-                orig_to_reduced[pss.getOrigColIndex(r)] = r;
+                orig_to_reduced[orig_cols[r]] = r;
             }
         } else {
             std::copy_n(sol.col_value.begin(), m, x_vals.begin());

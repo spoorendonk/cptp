@@ -2,6 +2,7 @@
 
 #include "mip/HighsMipSolverData.h"
 
+#include <numeric>
 #include <utility>
 
 namespace {
@@ -66,12 +67,37 @@ bool HighsUserSeparator::isFeasible(const HighsMipSolver& mipsolver,
     const auto& check = mipsolver.user_hooks_->feasibility_check;
     if (!mipsolver.submip)
         return check(sol);
-    // Sub-MIP: sol is in the reduced (presolved) space; expand to original.
-    HighsSolution temp_sol;
-    temp_sol.col_value = sol;
-    temp_sol.value_valid = true;
-    mipsolver.mipdata_->postSolveStack.undoPrimal(*mipsolver.options_mip_, temp_sol);
-    return check(temp_sol.col_value);
+    return check(toOriginalSpace(mipsolver, sol));
+}
+
+std::vector<double> HighsUserSeparator::toOriginalSpace(const HighsMipSolver& mipsolver,
+                                                        const std::vector<double>& sol) {
+    std::vector<double> col_value = sol;
+    // Each sub-MIP's model is its parent's presolved model, so one undo per
+    // level. The walk stops below the top-level solve, whose presolve is off;
+    // a sub-MIP runs on one thread, inside its parent's call, so the stacks
+    // read here are not in use elsewhere.
+    for (const HighsMipSolver* level = &mipsolver; level->submip; level = level->parent_mip_) {
+        // A fresh solution per level: undo sizes row_value for one level only.
+        HighsSolution expanded;
+        expanded.col_value = std::move(col_value);
+        expanded.value_valid = true;
+        level->mipdata_->postSolveStack.undoPrimal(*level->options_mip_, expanded);
+        col_value = std::move(expanded.col_value);
+    }
+    return col_value;
+}
+
+std::vector<HighsInt> HighsUserSeparator::originalColumns(const HighsMipSolver& mipsolver,
+                                                          HighsInt num_col) {
+    std::vector<HighsInt> cols(static_cast<size_t>(num_col));
+    std::iota(cols.begin(), cols.end(), HighsInt{0});
+    for (const HighsMipSolver* level = &mipsolver; level->submip; level = level->parent_mip_) {
+        const auto& stack = level->mipdata_->postSolveStack;
+        for (HighsInt& col : cols)
+            col = stack.getOrigColIndex(col);
+    }
+    return cols;
 }
 
 void HighsUserSeparator::markIncumbentRejected() {
