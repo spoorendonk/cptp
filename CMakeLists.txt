@@ -135,13 +135,14 @@ if(CPTP_BUILD_TESTS)
     target_link_libraries(cptp_tests PRIVATE cptp Catch2::Catch2WithMain)
     cptp_set_compiler_flags(cptp_tests)
     catch_discover_tests(cptp_tests
-        TEST_SPEC "~[optimal]"
+        TEST_SPEC "~[optimal]~[procs4]"
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
-    # The [optimal] tests solve with threads <= 4 (kOptimalThreads in
-    # tests/test_optimal.cpp): reserve 4 so ctest -j runs fewer side by side.
+    # The [optimal] and [procs4] tests solve non-trivial instances with
+    # threads <= 4 (kTestThreads in tests/test_threads.h): reserve 4 so
+    # ctest -j runs fewer side by side.
     catch_discover_tests(cptp_tests
-        TEST_SPEC "[optimal]"
+        TEST_SPEC "[optimal],[procs4]"
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         PROPERTIES PROCESSORS 4
     )

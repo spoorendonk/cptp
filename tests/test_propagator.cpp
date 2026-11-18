@@ -3,6 +3,7 @@
 #include "model/highs_bridge.h"
 #include "model/model.h"
 #include "preprocess/edge_elimination.h"
+#include "test_threads.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -319,6 +320,7 @@ static cptp::SolveResult solve_instance(const char* path, const cptp::SolverOpti
     cptp::Model model;
     model.set_problem(std::move(prob));
     auto opts = kQuiet;
+    opts.emplace_back("threads", cptp::test::kTestThreads);
     for (const auto& kv : extra) {
         opts.push_back(kv);
     }
@@ -346,14 +348,14 @@ TEST_CASE("All-pairs and default produce same objective", "[propagator][all_pair
     REQUIRE_THAT(r_default.objective, WithinAbs(r_ap.objective, 1e-6));
 }
 
-TEST_CASE("Propagator on larger instance B-n45-k6-54", "[propagator][slow]") {
+TEST_CASE("Propagator on larger instance B-n45-k6-54", "[propagator][slow][procs4]") {
     auto r =
         solve_instance("benchmarks/instances/spprclib/B-n45-k6-54.sppcc", {{"time_limit", "60"}});
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }
 
-TEST_CASE("All-pairs on larger instance B-n45-k6-54", "[propagator][all_pairs][slow]") {
+TEST_CASE("All-pairs on larger instance B-n45-k6-54", "[propagator][all_pairs][slow][procs4]") {
     auto r = solve_instance("benchmarks/instances/spprclib/B-n45-k6-54.sppcc",
                             {{"time_limit", "60"}, {"all_pairs_bounds", "true"}});
     REQUIRE(r.is_optimal());
@@ -437,7 +439,8 @@ TEST_CASE("RC-fixing with integer obj tightening preserves optimal on path",
     REQUIRE_THAT(r_default.objective, WithinAbs(r_rc.objective, 1e-6));
 }
 
-TEST_CASE("RC-fixing with integer obj on B-n45-k6-54", "[propagator][obj_integrality][slow]") {
+TEST_CASE("RC-fixing with integer obj on B-n45-k6-54",
+          "[propagator][obj_integrality][slow][procs4]") {
     auto r = solve_instance("benchmarks/instances/spprclib/B-n45-k6-54.sppcc",
                             {{"time_limit", "60"}, {"rc_fixing", "adaptive"}});
     REQUIRE(r.is_optimal());

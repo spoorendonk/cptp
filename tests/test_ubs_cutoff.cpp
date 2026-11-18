@@ -1,5 +1,6 @@
 #include "core/io.h"
 #include "model/model.h"
+#include "test_threads.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -17,6 +18,7 @@ static cptp::SolveResult prove_instance(const char* path, double cutoff, int tim
     model.set_problem(std::move(prob));
     auto opts = kQuiet;
     opts.emplace_back("time_limit", std::to_string(time_limit));
+    opts.emplace_back("threads", cptp::test::kTestThreads);
     opts.emplace_back("cutoff", std::to_string(cutoff));
     opts.emplace_back("heu_ws", "false");
     return model.solve(opts);
@@ -29,6 +31,7 @@ static cptp::SolveResult solve_instance(const char* path, int time_limit = 120) 
     model.set_problem(std::move(prob));
     auto opts = kQuiet;
     opts.emplace_back("time_limit", std::to_string(time_limit));
+    opts.emplace_back("threads", cptp::test::kTestThreads);
     return model.solve(opts);
 }
 
@@ -48,31 +51,31 @@ TEST_CASE("prove-only: tiny4 path", "[prove]") {
 
 // ── SPPRCLIB instances: prove-only with known optimal UBS ──
 
-TEST_CASE("prove-only: B-n45-k6-54", "[prove][slow]") {
+TEST_CASE("prove-only: B-n45-k6-54", "[prove][slow][procs4]") {
     auto r = prove_instance("benchmarks/instances/spprclib/B-n45-k6-54.sppcc", -74278.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }
 
-TEST_CASE("prove-only: B-n50-k8-40", "[prove][slow]") {
+TEST_CASE("prove-only: B-n50-k8-40", "[prove][slow][procs4]") {
     auto r = prove_instance("benchmarks/instances/spprclib/B-n50-k8-40.sppcc", -12832.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-12832.0, 1.0));
 }
 
-TEST_CASE("prove-only: B-n52-k7-15", "[prove][slow]") {
+TEST_CASE("prove-only: B-n52-k7-15", "[prove][slow][procs4]") {
     auto r = prove_instance("benchmarks/instances/spprclib/B-n52-k7-15.sppcc", -74998.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74998.0, 1.0));
 }
 
-TEST_CASE("prove-only: A-n63-k10-44", "[prove][slow]") {
+TEST_CASE("prove-only: A-n63-k10-44", "[prove][slow][procs4]") {
     auto r = prove_instance("benchmarks/instances/spprclib/A-n63-k10-44.sppcc", -32561.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-32561.0, 1.0));
 }
 
-TEST_CASE("prove-only: A-n69-k9-42", "[prove][slow]") {
+TEST_CASE("prove-only: A-n69-k9-42", "[prove][slow][procs4]") {
     auto r = prove_instance("benchmarks/instances/spprclib/A-n69-k9-42.sppcc", -43290.0, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-43290.0, 1.0));
@@ -100,6 +103,7 @@ static cptp::SolveResult prove_rc_fixing(const char* path, double cutoff,
     model.set_problem(std::move(prob));
     auto opts = kQuiet;
     opts.emplace_back("time_limit", std::to_string(time_limit));
+    opts.emplace_back("threads", cptp::test::kTestThreads);
     opts.emplace_back("cutoff", std::to_string(cutoff));
     opts.emplace_back("heu_ws", "false");
     opts.emplace_back("rc_fixing", strategy);
@@ -244,14 +248,14 @@ TEST_CASE("rc_fixing on_ub_improvement + fix_to_one: tiny4 path", "[prove][rc_fi
 
 // ── RC fixing on SPPRCLIB (slow) ──
 
-TEST_CASE("rc_fixing root_only: B-n45-k6-54", "[prove][rc_fixing][slow]") {
+TEST_CASE("rc_fixing root_only: B-n45-k6-54", "[prove][rc_fixing][slow][procs4]") {
     auto r = prove_rc_fixing("benchmarks/instances/spprclib/B-n45-k6-54.sppcc", -74278.0,
                              "root_only", false, 60);
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
 }
 
-TEST_CASE("rc_fixing on_ub_improvement: B-n45-k6-54", "[prove][rc_fixing][slow]") {
+TEST_CASE("rc_fixing on_ub_improvement: B-n45-k6-54", "[prove][rc_fixing][slow][procs4]") {
     auto r = prove_rc_fixing("benchmarks/instances/spprclib/B-n45-k6-54.sppcc", -74278.0,
                              "on_ub_improvement", false, 60);
     REQUIRE(r.is_optimal());

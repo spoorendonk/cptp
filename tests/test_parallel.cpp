@@ -85,7 +85,7 @@ TEST_CASE("parallel_for: peak counts spawned threads running at once", "[paralle
 // the whole budget. Not counted: HiGHS's own threads and stage-1's
 // forward/backward labeling thread.
 TEST_CASE("Model: a solve's parallel_for spawns at most threads - 1 threads",
-          "[parallel][model][slow]") {
+          "[parallel][model][slow][procs4]") {
     const int threads = GENERATE(1, 3);
     const std::string parallel = GENERATE("off", "on");
     INFO("threads = " << threads << ", parallel = " << parallel);
