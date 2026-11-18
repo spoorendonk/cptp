@@ -1,6 +1,7 @@
 #include "core/io.h"
 #include "model/model.h"
 
+#include <algorithm>
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -10,14 +11,16 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <thread>
 
 using Catch::Matchers::WithinAbs;
 
-// Every [optimal] test solves on at most kOptimalThreads threads, and CMake
-// declares that many PROCESSORS for them, so ctest -j does not oversubscribe
-// the cores and push a time-limited solve past its limit (#160). The default
-// would be (hw+1)/2 tree workers per test.
-static constexpr const char* kOptimalThreads = "4";
+// The [optimal] tests solve with a threads option of at most 4, and CMake
+// declares 4 PROCESSORS for them, so ctest -j runs fewer of them side by side
+// and a time-limited solve stays clear of its limit (#160). The default,
+// (hw+1)/2, grows with the host; below 8 logical CPUs it stays in force.
+static const std::string kOptimalThreads =
+    std::to_string(std::min(4U, (std::max(1U, std::thread::hardware_concurrency()) + 1U) / 2U));
 
 static const cptp::SolverOptions kQuiet = {
     {"output_flag", "false"},
@@ -85,7 +88,9 @@ TEST_CASE("A-n69-k9-42 optimal", "[optimal][slow]") {
 // Regression guard for the HiGHS 1.15 warm-start reroute: feeding the
 // warm-start via setSolution() together with the LP-guided user-solution
 // callback corrupted branch-and-bound on this instance and proved a wrong
-// optimum (-30950 instead of -32628). Runs the default heu_ws + heu_lpg path.
+// optimum (-30950 instead of -32628). Runs the default heu_ws + heu_lpg path,
+// at the threads value kOptimalThreads gives (the default on hosts below 8
+// logical CPUs).
 TEST_CASE("M-n101-k10-97 optimal (warm-start reroute)", "[optimal][slow]") {
     auto r = solve_instance("benchmarks/instances/spprclib/M-n101-k10-97.sppcc", 120);
     REQUIRE(r.is_optimal());

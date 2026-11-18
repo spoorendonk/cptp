@@ -136,8 +136,8 @@ if(CPTP_BUILD_TESTS)
         TEST_SPEC "~[optimal]"
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
-    # The [optimal] tests solve on at most 4 threads (kOptimalThreads in
-    # tests/test_optimal.cpp): reserve them so ctest -j does not oversubscribe.
+    # The [optimal] tests solve with threads <= 4 (kOptimalThreads in
+    # tests/test_optimal.cpp): reserve 4 so ctest -j runs fewer side by side.
     catch_discover_tests(cptp_tests
         TEST_SPEC "[optimal]"
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
