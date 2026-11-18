@@ -103,25 +103,6 @@ RCFixingStrategy parse_rc_fixing(const std::string& value) {
         "rc_fixing must be off, root_only, on_ub_improvement, periodic or adaptive, not " + value);
 }
 
-/// One branch-and-bound tree unless the user asks for HiGHS's parallel tree
-/// search (`parallel` = on or choose), which HiGHS runs by default from v1.16:
-/// the callbacks are safe under it (#153), but whether it pays is measured in
-/// #154. "off" changes only the MIP search (and HiPO); simplex behaves as under
-/// v1.15's default. `mip_search_simulate_concurrency` needs the parallel
-/// search, so it is left alone when that simulation is asked for.
-void default_serial_tree_search(Highs& highs,
-                                const std::map<std::string, std::string>& accepted_highs_options) {
-    if (accepted_highs_options.contains("parallel")) {
-        return;
-    }
-    bool simulate = false;
-    if (highs.getOptionValue("mip_search_simulate_concurrency", simulate) == HighsStatus::kOk &&
-        simulate) {
-        return;
-    }
-    highs.setOptionValue("parallel", "off");
-}
-
 }  // namespace
 
 Model::Model() = default;
@@ -550,7 +531,9 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
     }
 
-    default_serial_tree_search(highs, accepted_highs_options);
+    // HiGHS's own `parallel` default ("choose") stands: its parallel tree
+    // search is on unless the user sets parallel=off. The callbacks are safe
+    // under it (#152, #153) and it was faster on the #154 smoke set.
 
     // Before the settings line is built, so it reports the mode that runs.
     normalize_branch_hyper(logger_, branch_hyper);

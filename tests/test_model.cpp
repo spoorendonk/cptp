@@ -925,14 +925,13 @@ TEST_CASE("Model: presolve option is captured and forced off", "[model][options]
     REQUIRE_THAT(r_forced.objective, WithinAbs(r_off.objective, 1e-9));
 }
 
-// HiGHS's parallel tree search is an opt-in (#153): Model::solve sets
-// parallel=off unless the user sets it (#110). HiGHS logs its worker count,
-// which is 1 exactly when parallel is off, at the start of the MIP solve, so
-// this checks the setting HiGHS runs with, whether or not a parallel search
-// would add workers on this instance. The thread count must be above 1 for
-// the check to mean anything. Asking for mip_search_simulate_concurrency asks
-// for the parallel search too, so that alone leaves parallel alone as well.
-TEST_CASE("Model: parallel tree search is off unless requested", "[model][options][parallel]") {
+// HiGHS's parallel tree search is on by default (#154): Model::solve keeps
+// HiGHS's own default and honours the user's parallel option. HiGHS logs its
+// worker count, which is 1 exactly when parallel is off, at the start of the
+// MIP solve, so this checks the setting HiGHS runs with, whether or not a
+// parallel search would add workers on this instance. The thread count must
+// be above 1 for the check to mean anything.
+TEST_CASE("Model: parallel tree search is on unless turned off", "[model][options][parallel]") {
     cptp::Model model;
     std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -950,14 +949,12 @@ TEST_CASE("Model: parallel tree search is off unless requested", "[model][option
         ~CoutRedirect() { std::cout.rdbuf(old); }
     } redirect{std::cout.rdbuf(log.rdbuf())};
 
-    const std::string request = GENERATE("none", "parallel", "simulate");
-    INFO("requested: " << request);
-    const bool requested = request != "none";
+    const std::string request = GENERATE("default", "on", "off");
+    INFO("parallel: " << request);
+    const bool parallel = request != "off";
     cptp::SolverOptions opts = {{"time_limit", "30"}, {"output_flag", "true"}, {"threads", "4"}};
-    if (request == "parallel") {
-        opts.emplace_back("parallel", "on");
-    } else if (request == "simulate") {
-        opts.emplace_back("mip_search_simulate_concurrency", "true");
+    if (request != "default") {
+        opts.emplace_back("parallel", request);
     }
     auto r = model.solve(opts);
     const std::string text = log.str();
@@ -971,7 +968,7 @@ TEST_CASE("Model: parallel tree search is off unless requested", "[model][option
     const std::vector<std::smatch> lines(std::sregex_iterator(text.begin(), text.end(), workers),
                                          std::sregex_iterator());
     REQUIRE(lines.size() == 1);
-    if (requested) {
+    if (parallel) {
         REQUIRE(std::stoi(lines[0][1].str()) > 1);
     } else {
         REQUIRE(lines[0][1].str() == "1");

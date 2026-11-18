@@ -181,9 +181,15 @@ ctest --test-dir build --output-on-failure
 pytest tests/python/test_solver.py
 ```
 
-HiGHS's parallel tree search (`parallel=on`) is off by default. Its
-acceptance matrix (threads 2/4/8 × three seeds) is hidden from the default
-run: `./build/cptp_tests "[parallel-matrix]"`.
+HiGHS's parallel tree search is on by default (HiGHS's own `parallel=choose`);
+`parallel=off` runs one branch-and-bound tree, with cptp's separators and
+labeling parallel inside it instead. On a smoke set (six SPPRCLIB instances
+and their two-row multicap versions, three seeds, four threads, Mac mini) the
+parallel search took a median 0.82 of the serial tree's time (IQR 0.62-0.92)
+and reached the same optima (#154). Under it, cptp's LP-guided heuristic does
+not run in the parallel tree phase (HiGHS skips the user heuristic callback
+there). Its acceptance matrix (threads 2/4/8 × three seeds) is hidden from the
+default run: `./build/cptp_tests "[parallel-matrix]"`.
 
 ThreadSanitizer: configure a separate build with `-fsanitize=thread` in the
 global flags, so the fetched HiGHS is instrumented too, and run the hidden
