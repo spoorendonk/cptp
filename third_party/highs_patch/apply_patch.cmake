@@ -139,11 +139,14 @@ cptp_replace(CONTENT2 1
 # pass at 2*sqrt(maxTreeSizeLog2) rounds and stops after 3 stalled rounds,
 # which can leave violated user cuts at the root. The solve's hooks may
 # replace either limit (HighsUserHooks::root_sepa_rounds, root_sepa_stall);
-# a sub-MIP, and a solve that sets neither, keeps HiGHS's. A root restart
-# (presolve on) still lowers the cap to the rounds done, as in HiGHS.
+# a sub-MIP, and a solve that sets neither, keeps HiGHS's. The round cap, like
+# HiGHS's, applies to the first root pass only (numRestarts == 0): the root
+# pass after a tree restart stays uncapped. The stall limit applies to every
+# root pass. A root restart (presolve on) still lowers the cap to the rounds
+# done, as in HiGHS.
 cptp_replace(CONTENT2 1
   "    maxSepaRounds =\n        std::min(HighsInt(2 * std::sqrt(maxTreeSizeLog2)), maxSepaRounds);\n"
-  "    maxSepaRounds =\n        std::min(HighsInt(2 * std::sqrt(maxTreeSizeLog2)), maxSepaRounds);\n  // cptp patch: the solve's root cut-loop limits in place of HiGHS's\n  maxSepaRounds = HighsUserSeparator::rootSepaRounds(mipsolver, maxSepaRounds);\n  const HighsInt cptp_root_stall = HighsUserSeparator::rootSepaStall(mipsolver, 3);\n")
+  "    maxSepaRounds =\n        std::min(HighsInt(2 * std::sqrt(maxTreeSizeLog2)), maxSepaRounds);\n  // cptp patch: the solve's root cut-loop limits in place of HiGHS's\n  if (numRestarts == 0)\n    maxSepaRounds = HighsUserSeparator::rootSepaRounds(mipsolver, maxSepaRounds);\n  const HighsInt cptp_root_stall = HighsUserSeparator::rootSepaStall(mipsolver, 3);\n")
 
 # Modify the root separation loop condition to also run on integer solutions
 # when user separator has a callback (lazy constraint behavior), and to stop

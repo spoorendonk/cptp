@@ -1,3 +1,4 @@
+#include "core/io.h"
 #include "Highs.h"
 #include "mip/HighsMipSolverData.h"
 #include "mip/HighsUserSeparator.h"
@@ -80,6 +81,9 @@ RootRun run_root_loop(int max_rounds, int stall_limit) {
     highs.setOptionValue("presolve", "off");
     highs.setOptionValue("threads", 1);
     highs.setOptionValue("time_limit", 60.0);
+    // An earlier solve on this thread may have left a scheduler of another
+    // size, and HiGHS refuses threads = 1 against it.
+    Highs::resetThreadScheduler(true);
     if (highs.passModel(lp) == HighsStatus::kOk) {
         run.status = highs.run();
     }
@@ -99,11 +103,12 @@ TEST_CASE("Root separation: limits are pending until clearCallback resets them",
     // Limits alone make a solve capture the hooks.
     HighsUserSeparator::setRootSeparationLimits(5, kUnlimited);
     const auto hooks = HighsUserHooks::capture();
+    // Before any REQUIRE, so a failure leaves no limits pending.
+    HighsUserSeparator::clearCallback();
     REQUIRE(hooks != nullptr);
     CHECK(hooks->root_sepa_rounds == 5);
     CHECK(hooks->root_sepa_stall == kUnlimited);
 
-    HighsUserSeparator::clearCallback();
     CHECK(HighsUserHooks::pending().root_sepa_rounds == kHighs);
     CHECK(HighsUserHooks::pending().root_sepa_stall == kHighs);
     REQUIRE(HighsUserHooks::capture() == nullptr);
@@ -140,6 +145,58 @@ TEST_CASE("Root separation: the round cap reaches HiGHS's root cut loop",
         CHECK(run.seen_rounds == 7);
         CHECK(run.seen_stall == 11);
     }
+}
+
+TEST_CASE("Root separation: the stall limit ends HiGHS's root cut loop",
+          "[highs_patch][root_separation]") {
+    // Each cut moves the bound by 1/1000, which HiGHS counts as a stall once
+    // the first rounds are past: from there each extra stalled round allowed
+    // is one more separator call, until the last cut is in.
+    const RootRun highs3 = run_root_loop(kUnlimited, kHighs);
+    REQUIRE(highs3.status == HighsStatus::kOk);
+    CHECK(highs3.seen_stall == 3);
+    CHECK(highs3.calls < kMaxCuts);
+    CHECK(run_root_loop(kUnlimited, 3).calls == highs3.calls);
+    for (const int stall : {5, 11}) {
+        INFO("stall " << stall);
+        const RootRun run = run_root_loop(kUnlimited, stall);
+        REQUIRE(run.status == HighsStatus::kOk);
+        CHECK(run.calls == highs3.calls + (stall - 3));
+    }
+    CHECK(run_root_loop(kUnlimited, kUnlimited).calls == kMaxCuts);
+}
+
+// The options reach HiGHS through Model::solve: on a root-only solve
+// (mip_max_nodes 1, optimum -74998 as the cutoff), a round cap of 1 leaves a
+// weaker root bound than HiGHS's cap, and no cap closes the root (Mac mini:
+// -219062, -88009 and -74998, each in under a second).
+TEST_CASE("Root separation: Model::solve hands the options to HiGHS (#150)",
+          "[model][root_separation]") {
+    auto root_bound = [](const char* rounds) {
+        cptp::Model model;
+        model.set_problem(cptp::io::load("benchmarks/instances/spprclib/B-n52-k7-15.sppcc"));
+        const cptp::SolverOptions opts = {
+            {"output_flag", "false"},
+            {"time_limit", "60"},
+            {"threads", "1"},
+            {"mip_max_nodes", "1"},
+            {"heu_ws", "false"},
+            {"heu_lpg", "false"},
+            {"cutoff", "-74997.9"},
+            {"root_sepa_rounds", rounds},
+            {"root_sepa_stall", "unlimited"},
+        };
+        const auto r = model.solve(opts);
+        REQUIRE(r.nodes <= 1);
+        return r.bound;
+    };
+    const double one = root_bound("1");
+    const double highs = root_bound("highs");
+    const double unlimited = root_bound("unlimited");
+    INFO("bounds: 1 " << one << ", highs " << highs << ", unlimited " << unlimited);
+    CHECK(one < highs - 1.0);
+    CHECK(highs < unlimited - 1.0);
+    CHECK(unlimited > -74998.5);
 }
 
 TEST_CASE("Root separation: root_sepa_rounds and root_sepa_stall parse (#150)",
