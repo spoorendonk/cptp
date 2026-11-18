@@ -43,13 +43,16 @@ Observed run_parallel_for(int range, int num_threads) {
 
 }  // namespace
 
-TEST_CASE("parallel_for: at most num_threads threads, the caller among them", "[parallel]") {
+// The calling thread is one of the num_threads, but it may find every index
+// already taken by the spawned ones, so the test does not require it ran one.
+TEST_CASE("parallel_for: runs each index once on at most num_threads threads", "[parallel]") {
     const int num_threads = GENERATE(2, 3, 5);
     INFO("num_threads = " << num_threads);
+    cptp::parallel::reset_peak_spawned_threads();
     const auto observed = run_parallel_for(64, num_threads);
     REQUIRE(observed.each_once);
     REQUIRE(observed.threads.size() <= static_cast<size_t>(num_threads));
-    REQUIRE(observed.threads.contains(std::this_thread::get_id()));
+    REQUIRE(cptp::parallel::peak_spawned_threads() <= num_threads - 1);
 }
 
 // No thread count falls back to hardware_concurrency (#159).
