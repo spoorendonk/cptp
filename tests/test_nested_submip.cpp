@@ -121,9 +121,14 @@ TEST_CASE("Nested sub-MIP: callbacks see the top-level column space", "[highs_pa
     highs.setOptionValue("threads", 1);
     highs.setOptionValue("mip_heuristic_effort", 0.8);
     highs.setOptionValue("time_limit", 60.0);
-    REQUIRE(highs.passModel(lp) == HighsStatus::kOk);
-    REQUIRE(highs.run() != HighsStatus::kError);
+    const HighsStatus pass_status = highs.passModel(lp);
+    const HighsStatus run_status =
+        pass_status == HighsStatus::kOk ? highs.run() : HighsStatus::kError;
+    // Clear before any REQUIRE: the hooks capture this frame's locals, and
+    // a later test on this thread must not run them.
     HighsUserSeparator::clearCallback();
+    REQUIRE(pass_status == HighsStatus::kOk);
+    REQUIRE(run_status != HighsStatus::kError);
 
     // Without a level-2 sub-MIP the test would prove nothing.
     REQUIRE(deepest_level.load() >= 2);
