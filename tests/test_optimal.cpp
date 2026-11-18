@@ -13,8 +13,15 @@
 
 using Catch::Matchers::WithinAbs;
 
+// Every [optimal] test solves on at most kOptimalThreads threads, and CMake
+// declares that many PROCESSORS for them, so ctest -j does not oversubscribe
+// the cores and push a time-limited solve past its limit (#160). The default
+// would be (hw+1)/2 tree workers per test.
+static constexpr const char* kOptimalThreads = "4";
+
 static const cptp::SolverOptions kQuiet = {
     {"output_flag", "false"},
+    {"threads", kOptimalThreads},
 };
 
 static cptp::SolveResult solve_instance(const char* path, int time_limit = 120) {
@@ -204,6 +211,7 @@ TEST_CASE("SolveResult per-phase stats are populated and consistent", "[optimal]
     model.set_problem(std::move(prob));
     cptp::SolverOptions opts = {{"output_flag", "false"},
                                 {"time_limit", "60"},
+                                {"threads", kOptimalThreads},
                                 {"rc_fixing", "adaptive"},
                                 {"bounds_propagation", "true"}};
     auto r = model.solve(opts);

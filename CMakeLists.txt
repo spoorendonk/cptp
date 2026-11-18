@@ -133,7 +133,15 @@ if(CPTP_BUILD_TESTS)
     target_link_libraries(cptp_tests PRIVATE cptp Catch2::Catch2WithMain)
     cptp_set_compiler_flags(cptp_tests)
     catch_discover_tests(cptp_tests
+        TEST_SPEC "~[optimal]"
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+    # The [optimal] tests solve on at most 4 threads (kOptimalThreads in
+    # tests/test_optimal.cpp): reserve them so ctest -j does not oversubscribe.
+    catch_discover_tests(cptp_tests
+        TEST_SPEC "[optimal]"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        PROPERTIES PROCESSORS 4
     )
 
     # Extended unit tests (kept separate to control runtime impact).
