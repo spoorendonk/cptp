@@ -35,11 +35,12 @@ struct SeparationContext {
     /// designated initializers that leave it out.
     std::span<const double> all_pairs = {};  // NOLINT(readability-redundant-member-init)
 
-    /// Threads the separator may use for its own loops, the calling thread
-    /// included; 1 runs on the calling thread. The bridge gives it what the
-    /// solve's `threads` budget leaves after the separators running beside
-    /// it, and 1 under HiGHS's parallel tree search, whose workers already
-    /// use the budget.
+    /// Threads a separator may use for its own loop, the calling thread
+    /// included; 1 runs on the calling thread. The bridge sets it to what the
+    /// solve's `threads` budget leaves after the threads running the
+    /// separators, and 1 under HiGHS's parallel tree search, whose workers
+    /// already use the budget. Every separator sees the same value, so the
+    /// budget holds only while a single separator (RCI) reads it (#159).
     int32_t threads = 1;
 };
 

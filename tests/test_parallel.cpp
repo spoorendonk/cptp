@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <latch>
 #include <mutex>
 #include <set>
 #include <string>
@@ -62,18 +63,26 @@ TEST_CASE("parallel_for: num_threads <= 1 runs on the calling thread", "[paralle
     REQUIRE(cptp::parallel::peak_spawned_threads() == 0);
 }
 
+// The latch holds every thread inside the body until all four are there, so
+// the three spawned ones run at once and the peak must see exactly them.
 TEST_CASE("parallel_for: peak counts spawned threads running at once", "[parallel]") {
     cptp::parallel::reset_peak_spawned_threads();
-    run_parallel_for(64, 4);
-    REQUIRE(cptp::parallel::peak_spawned_threads() <= 3);
+    std::latch all_in(4);
+    cptp::parallel::parallel_for(0, 4, [&](int) { all_in.arrive_and_wait(); }, 4);
+    REQUIRE(cptp::parallel::peak_spawned_threads() == 3);
+    cptp::parallel::reset_peak_spawned_threads();
+    REQUIRE(cptp::parallel::peak_spawned_threads() == 0);
 }
 
-// A solve keeps its own threads within `threads` (#159): the separators, RCI's
-// candidate loop, reduced-cost fixing (fix-to-one too) and the LP-guided
-// heuristic share the budget, the calling thread among them, so at most
-// threads - 1 spawned ones run at once. parallel=off keeps HiGHS's parallel
-// lock inactive, so every callback may use the whole budget.
-TEST_CASE("Model: a solve spawns at most threads - 1 threads", "[parallel][model][slow]") {
+// A solve keeps its parallel_for threads within `threads` (#159): the
+// separators, RCI's candidate loop, reduced-cost fixing (fix-to-one too), the
+// LP-guided heuristic and the all-pairs labeling share the budget, the calling
+// thread among them, so at most threads - 1 spawned ones run at once.
+// parallel=off keeps HiGHS's parallel lock inactive, so every callback may use
+// the whole budget. Not counted: HiGHS's own threads and stage-1's
+// forward/backward labeling thread.
+TEST_CASE("Model: a solve's parallel_for spawns at most threads - 1 threads",
+          "[parallel][model][slow]") {
     const int threads = GENERATE(1, 3);
     const std::string parallel = GENERATE("off", "on");
     INFO("threads = " << threads << ", parallel = " << parallel);

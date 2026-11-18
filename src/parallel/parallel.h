@@ -43,8 +43,9 @@ inline void reset_peak_spawned_threads() {
                                std::memory_order_relaxed);
 }
 
-/// Split [begin, end) across at most num_threads threads, the calling thread
-/// among them: it spawns num_threads - 1 and runs the last chunk itself.
+/// Run f(i) for every i in [begin, end) on at most num_threads threads, the
+/// calling thread among them: it spawns num_threads - 1, and each thread takes
+/// the next index until none is left, so slow indices do not hold up others.
 /// num_threads <= 1 runs everything on the calling thread.
 template <typename F>
 void parallel_for(int begin, int end, F&& f, int num_threads) {
@@ -60,44 +61,32 @@ void parallel_for(int begin, int end, F&& f, int num_threads) {
         return;
     }
 
+    std::atomic<int> next{begin};
+    auto work = [&f, &next, end] {
+        for (int i = next.fetch_add(1, std::memory_order_relaxed); i < end;
+             i = next.fetch_add(1, std::memory_order_relaxed)) {
+            f(i);
+        }
+    };
     std::vector<std::jthread> threads;
     threads.reserve(static_cast<size_t>(num_threads - 1));
-    const int chunk = range / num_threads;
-    const int remainder = range % num_threads;
-
-    int lo = begin;
     for (int t = 0; t < num_threads - 1; ++t) {
-        const int hi = lo + chunk + (t < remainder ? 1 : 0);
-        threads.emplace_back([&f, lo, hi] {
+        threads.emplace_back([&work] {
             const detail::SpawnedThreadScope counted;
-            for (int i = lo; i < hi; ++i) {
-                f(i);
-            }
+            work();
         });
-        lo = hi;
     }
-    for (int i = lo; i < end; ++i) {
-        f(i);
-    }
+    work();
     // jthreads auto-join on destruction
 }
 
-/// Spawn tasks that auto-join on destruction (thin jthread wrapper). A serial
-/// group runs each task on the calling thread inside run().
+/// Spawn tasks that auto-join on destruction (thin jthread wrapper).
 class task_group {
     std::vector<std::jthread> threads_;
-    bool serial_ = false;
 
 public:
-    task_group() = default;
-    explicit task_group(bool serial) : serial_(serial) {}
-
     template <typename F>
     void run(F&& f) {
-        if (serial_) {
-            std::forward<F>(f)();
-            return;
-        }
         threads_.emplace_back([fn = std::forward<F>(f)] { fn(); });
     }
 

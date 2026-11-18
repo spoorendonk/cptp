@@ -51,6 +51,14 @@ bool should_run_rc_fixing(const RCFixingSettings& settings, bool ub_improved,
     }
 }
 
+/// Threads a separation or propagation callback may use, its own included
+/// (#159): the solve's `threads`, or its own thread alone under HiGHS's
+/// parallel tree search, whose workers already use the budget. HiGHS's own
+/// root tasks (symmetry detection, the analytic centre) are not counted (#163).
+int32_t callback_threads(const HighsMipSolver& mipsolver, int32_t threads) {
+    return mipsolver.mipdata_->parallelLockActive() ? 1 : threads;
+}
+
 }  // namespace
 
 HiGHSBridge::HiGHSBridge(const Problem& prob, Highs& highs, Logger& logger, double frac_tol)
@@ -374,12 +382,11 @@ void HiGHSBridge::install_separators() {
         // Build Gomory-Hu tree: n-1 max-flows instead of 3*n
         gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
 
-        // Thread budget (#159): the solve's `threads`, or this thread alone
-        // under HiGHS's parallel tree search, whose workers already use it.
-        // The separators run on `sep_threads` of it, and each may use what
-        // the others leave for its own loops, so at most `budget` threads
-        // separate at once.
-        const int32_t budget = mipsolver.mipdata_->parallelLockActive() ? 1 : threads_;
+        // Thread budget (#159): the separators run on `sep_threads` of it,
+        // and the rest, plus the thread it runs on, goes to RCI's candidate
+        // loop, the one separator loop that reads ctx.threads. So at most
+        // `budget` threads separate at once.
+        const int32_t budget = callback_threads(mipsolver, threads_);
         const int32_t sep_threads =
             std::clamp(static_cast<int32_t>(separators_.size()), int32_t{1}, budget);
 
@@ -651,9 +658,8 @@ void HiGHSBridge::install_propagator() {
             }
             state = slot.get();
         }
-        // The labeling below uses the solve's thread budget, or this thread
-        // alone under parallel tree search, whose workers share it (#159).
-        const int32_t threads = mipsolver.mipdata_->parallelLockActive() ? 1 : threads_budget;
+        // The labeling below keeps to the thread budget (#159).
+        const int32_t threads = callback_threads(mipsolver, threads_budget);
         CallbackStats* const stats = &state->stats;
         double* const last_ub = &state->last_ub;
         std::vector<bool>* const processed_edge = &state->processed_edge;
@@ -1217,8 +1223,10 @@ void HiGHSBridge::install_heuristic_callback() {
 
             stats->heuristic_calls++;
             const auto heuristic_t0 = std::chrono::steady_clock::now();
-            // HiGHS queries user solutions on its main loop, between batches of
-            // tree-search work, so the whole thread budget is free (#159).
+            // HiGHS queries user solutions on its main thread, never inside a
+            // batch of tree-search work, so the heuristic takes the whole
+            // thread budget (#159); HiGHS's own root tasks may still be
+            // running beside a root query (#163).
             heuristic::HeuristicResult result = heuristic::lp_guided_heuristic(
                 prob_, x_lp, y_lp, incumbent, 0.0, strategy, deterministic_restarts,
                 static_cast<uint32_t>(current_nodes), lpg_edge_threshold, lpg_node_threshold,
