@@ -30,6 +30,7 @@
 #include "sep/rglm_separator.h"
 #include "sep/sec_separator.h"
 #include "sep/spi_separator.h"
+#include "sep/xcover_separator.h"
 #include "util/timer.h"
 
 namespace cptp {
@@ -1123,6 +1124,9 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (cut_flags.enable_rglm) {
         bridge.add_separator(std::make_unique<sep::RGLMSeparator>(
             sep::parse_capacity_rows(capacity_cut_rows), cut_flags.capacity_cut_surrogate));
+    }
+    if (cut_flags.enable_xcover) {
+        bridge.add_separator(std::make_unique<sep::XCoverSeparator>());
     }
     if (cut_flags.enable_comb) {
         bridge.add_separator(std::make_unique<sep::CombSeparator>());

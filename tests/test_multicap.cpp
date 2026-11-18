@@ -579,6 +579,79 @@ TEST_CASE("Multicap: multistar_largest_side keeps every row's optimum", "[multic
     }
 }
 
+TEST_CASE("Multicap: enable_xcover keeps every row's optimum", "[multicap][xcover]") {
+    struct Case {
+        int32_t rows;
+        double objective;
+    };
+    for (const auto& c : {Case{1, -29.0}, Case{2, -20.0}, Case{3, -18.0}}) {
+        INFO("m = " << c.rows);
+        cptp::Model model;
+        fill_model(model, c.rows);
+        model.set_depot(0);
+        auto options = kQuiet;
+        options.emplace_back("enable_xcover", "true");
+        const auto result = model.solve(options);
+        REQUIRE(result.is_optimal());
+        REQUIRE_THAT(result.objective, WithinAbs(c.objective, 1e-6));
+        require_tour_fits(model.problem(), result.tour);
+    }
+    cptp::Model path;
+    fill_model(path, 3);
+    path.set_source(0);
+    path.set_target(3);
+    auto options = kQuiet;
+    options.emplace_back("enable_xcover", "true");
+    const auto result = path.solve(options);
+    REQUIRE(result.is_optimal());
+    REQUIRE_THAT(result.objective, WithinAbs(-19.0, 1e-6));
+    require_tour_fits(path.problem(), result.tour);
+}
+
+TEST_CASE("Multicap: enable_xcover agrees with off on random two-row instances",
+          "[multicap][xcover]") {
+    // Random tours (t = 0) and s-t paths (t = 7) with two binding rows: the
+    // cross-row cover cuts must not cut off the optimum found without them.
+    std::mt19937 rng(1661);
+    std::uniform_int_distribution<int> cost(1, 20);
+    std::uniform_int_distribution<int> profit(0, 30);
+    std::uniform_int_distribution<int> dem(0, 4);
+    constexpr int32_t kNodes = 8;
+    for (int trial = 0; trial < 16; ++trial) {
+        std::vector<cptp::Edge> edges;
+        std::vector<double> costs;
+        for (int32_t u = 0; u < kNodes; ++u) {
+            for (int32_t v = u + 1; v < kNodes; ++v) {
+                edges.push_back({u, v});
+                costs.push_back(cost(rng));
+            }
+        }
+        std::vector<double> profits(kNodes);
+        std::vector<std::vector<double>> rows(2, std::vector<double>(kNodes));
+        for (int32_t v = 0; v < kNodes; ++v) {
+            profits[static_cast<size_t>(v)] = profit(rng);
+            for (auto& row : rows) {
+                row[static_cast<size_t>(v)] = dem(rng);
+            }
+        }
+        const int32_t target = trial % 2 == 0 ? 0 : kNodes - 1;
+        cptp::Problem prob;
+        prob.build(kNodes, edges, costs, profits, rows, std::vector<double>{8.0, 8.0}, 0, target);
+        auto solve = [&](const char* xcover) {
+            cptp::Model model;
+            model.set_problem(prob);
+            auto opts = kQuiet;
+            opts.emplace_back("enable_xcover", xcover);
+            const auto result = model.solve(opts);
+            REQUIRE(result.is_optimal());
+            require_tour_fits(model.problem(), result.tour);
+            return result.objective;
+        };
+        INFO("trial " << trial);
+        REQUIRE_THAT(solve("true"), WithinAbs(solve("false"), 1e-6));
+    }
+}
+
 TEST_CASE("Multicap: most_violated keeps the most violated row's multistar", "[multicap][glm]") {
     using cptp::sep::CapacityRows;
     // Both rows of make_problem(2) cut S = {1, 2, 3}: row 0 by 2 - 1 = 1,

@@ -91,6 +91,9 @@ struct CutFamilyFlags {
     // Multistar also separates on each target's largest depot-target min-cut
     // side, not only the Gomory-Hu tree's smallest (#168). Off until measured.
     bool multistar_largest_side = false;
+    // Cross-row lifted cover w-GLMs (#166): covers lifted against every
+    // bounded row. Off until measured (#167).
+    bool enable_xcover = false;
 
     /// Parse `value` into the switch `key` names and return true, or return
     /// false when `key` names none. Throws as parse_bool_option does.
@@ -118,7 +121,7 @@ struct CutFamilyFlags {
 private:
     using Flag = bool CutFamilyFlags::*;
     using Entry = std::pair<std::string_view, Flag>;
-    static std::array<Entry, 8> flags() {
+    static std::array<Entry, 9> flags() {
         return std::to_array<Entry>({
             {"enable_sec", &CutFamilyFlags::enable_sec},
             {"enable_rci", &CutFamilyFlags::enable_rci},
@@ -128,6 +131,7 @@ private:
             {"enable_spi", &CutFamilyFlags::enable_spi},
             {"capacity_cut_surrogate", &CutFamilyFlags::capacity_cut_surrogate},
             {"multistar_largest_side", &CutFamilyFlags::multistar_largest_side},
+            {"enable_xcover", &CutFamilyFlags::enable_xcover},
         });
     }
 };
