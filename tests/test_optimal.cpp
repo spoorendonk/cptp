@@ -1,10 +1,13 @@
 #include "core/io.h"
 #include "model/model.h"
 
+#include <array>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <iostream>
 #include <regex>
+#include <span>
 #include <sstream>
 #include <string>
 
@@ -82,49 +85,40 @@ TEST_CASE("M-n101-k10-97 optimal (warm-start reroute)", "[optimal][slow]") {
     REQUIRE_THAT(r.objective, WithinAbs(-32628.0, 1.0));
 }
 
-// The bridge's callback state is not yet safe under concurrent tree workers
-// (#153), so Model::solve keeps HiGHS's tree search serial even when asked for
-// HiGHS's parallel MIP (the default from v1.16).
-TEST_CASE("B-n45-k6-54 optimal with parallel requested", "[optimal][slow]") {
-    auto prob = cptp::io::load("benchmarks/instances/spprclib/B-n45-k6-54.sppcc");
-    cptp::Model model;
-    model.set_problem(std::move(prob));
-    cptp::SolverOptions opts = {
-        {"output_flag", "false"}, {"time_limit", "60"}, {"parallel", "on"}, {"threads", "4"}};
-    auto r = model.solve(opts);
-    REQUIRE(r.is_optimal());
-    REQUIRE_THAT(r.objective, WithinAbs(-74278.0, 1.0));
-}
+namespace {
 
-// HiGHS's parallel tree search with its workers run one after another on the
-// calling thread (mip_search_simulate_concurrency): every worker path of the
-// patched callbacks runs, deterministically. A worker's incumbent must pass the
-// lazy-constraint check before it tightens the worker's bounds, and an integral
-// node whose LP solution has subtours must stay open (#152).
-TEST_CASE("optimal under simulated parallel tree search", "[optimal][slow][parallel]") {
-    struct Case {
-        const char* path;
-        double objective;
-    };
-    for (const auto& [path, objective] : {
-             Case{"tests/data/tiny4.txt", -11.0},
-             Case{"tests/data/tiny4_path.txt", -13.0},
-             Case{"benchmarks/instances/spprclib/B-n45-k6-54.sppcc", -74278.0},
-             Case{"benchmarks/instances/spprclib/B-n50-k8-40.sppcc", -12832.0},
-             Case{"benchmarks/instances/spprclib/B-n52-k7-15.sppcc", -74998.0},
-             Case{"benchmarks/instances/spprclib/A-n63-k10-44.sppcc", -32561.0},
-             Case{"benchmarks/instances/spprclib/A-n69-k9-42.sppcc", -43290.0},
-             Case{"benchmarks/instances/spprclib/M-n101-k10-97.sppcc", -32628.0},
-         }) {
+struct OptimumCase {
+    const char* path;
+    double objective;
+};
+
+// Eight instances whose optima the parallel tree search must reach.
+constexpr std::array kParallelCases = {
+    OptimumCase{"tests/data/tiny4.txt", -11.0},
+    OptimumCase{"tests/data/tiny4_path.txt", -13.0},
+    OptimumCase{"benchmarks/instances/spprclib/B-n45-k6-54.sppcc", -74278.0},
+    OptimumCase{"benchmarks/instances/spprclib/B-n50-k8-40.sppcc", -12832.0},
+    OptimumCase{"benchmarks/instances/spprclib/B-n52-k7-15.sppcc", -74998.0},
+    OptimumCase{"benchmarks/instances/spprclib/A-n63-k10-44.sppcc", -32561.0},
+    OptimumCase{"benchmarks/instances/spprclib/A-n69-k9-42.sppcc", -43290.0},
+    OptimumCase{"benchmarks/instances/spprclib/M-n101-k10-97.sppcc", -32628.0},
+};
+
+}  // namespace
+
+// Solves `cases` with HiGHS's parallel tree search on (plus `extra`) and
+// checks each optimum, and that the main MIP ran more than one tree worker
+// (a sub-MIP reports 1), so the parallel option was not forced off.
+static void check_optima_under_parallel_tree_search(
+    const cptp::SolverOptions& extra, std::span<const OptimumCase> cases = kParallelCases) {
+    for (const auto& [path, objective] : cases) {
         INFO(path);
         auto prob = cptp::io::load(path);
         cptp::Model model;
         model.set_problem(std::move(prob));
-        const cptp::SolverOptions opts = {{"output_flag", "true"},
-                                          {"time_limit", "180"},
-                                          {"parallel", "on"},
-                                          {"threads", "4"},
-                                          {"mip_search_simulate_concurrency", "true"}};
+        cptp::SolverOptions opts = {
+            {"output_flag", "true"}, {"time_limit", "180"}, {"parallel", "on"}};
+        opts.insert(opts.end(), extra.begin(), extra.end());
         // The Model's logger writes to std::cout, HiGHS's log included.
         std::ostringstream log;
         cptp::SolveResult r;
@@ -137,8 +131,6 @@ TEST_CASE("optimal under simulated parallel tree search", "[optimal][slow][paral
         }
         REQUIRE(r.is_optimal());
         REQUIRE_THAT(r.objective, WithinAbs(objective, 1.0));
-        // The main MIP runs more than one tree worker (a sub-MIP reports 1), so
-        // the parallel option was not forced off.
         const std::string text = log.str();
         const std::regex workers(R"(using up to (\d+) workers across)");
         bool several_workers = false;
@@ -148,6 +140,40 @@ TEST_CASE("optimal under simulated parallel tree search", "[optimal][slow][paral
         }
         REQUIRE(several_workers);
     }
+}
+
+// HiGHS's parallel tree search with its workers run one after another on the
+// calling thread (mip_search_simulate_concurrency): every worker path of the
+// patched callbacks runs, deterministically. A worker's incumbent must pass the
+// lazy-constraint check before it tightens the worker's bounds, and an integral
+// node whose LP solution has subtours must stay open (#152).
+TEST_CASE("optimal under simulated parallel tree search", "[optimal][slow][parallel]") {
+    check_optima_under_parallel_tree_search(
+        {{"threads", "4"}, {"mip_search_simulate_concurrency", "true"}});
+}
+
+// Real parallel tree search: the workers call the bridge's callbacks at once
+// (#153). Timing-dependent, so the gate solves one instance; the hidden tests
+// below cover the rest.
+TEST_CASE("optimal under parallel tree search", "[optimal][slow][parallel]") {
+    check_optima_under_parallel_tree_search({{"threads", "4"}},
+                                            std::span(kParallelCases).subspan(2, 1));
+}
+
+// Every instance at threads 4, hidden from the gate: the TSan stress run,
+// ./cptp_tests "[parallel-stress]".
+TEST_CASE("optimal under parallel tree search, all instances", "[.parallel-stress]") {
+    check_optima_under_parallel_tree_search({{"threads", "4"}});
+}
+
+// The #153 acceptance matrix, hidden from the default run (and so from the
+// gate): ./build/cptp_tests "[parallel-matrix]".
+TEST_CASE("optimal under parallel tree search, threads x seeds", "[.parallel-matrix]") {
+    const int threads = GENERATE(2, 4, 8);
+    const int seed = GENERATE(0, 1, 2);
+    INFO("threads=" << threads << " random_seed=" << seed);
+    check_optima_under_parallel_tree_search(
+        {{"threads", std::to_string(threads)}, {"random_seed", std::to_string(seed)}});
 }
 
 // Hyperplane branching through auxiliary integer columns (#137): every mode

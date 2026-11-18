@@ -181,6 +181,29 @@ ctest --test-dir build --output-on-failure
 pytest tests/python/test_solver.py
 ```
 
+HiGHS's parallel tree search (`parallel=on`) is off by default. Its
+acceptance matrix (threads 2/4/8 × three seeds) is hidden from the default
+run: `./build/cptp_tests "[parallel-matrix]"`.
+
+ThreadSanitizer: configure a separate build with `-fsanitize=thread` in the
+global flags, so the fetched HiGHS is instrumented too, and run the hidden
+stress test, every instance under real parallel tree search at four threads
+(the simulated-concurrency tests run on one thread, so TSan finds no race in
+them):
+
+```bash
+cmake -B build-tsan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_C_FLAGS=-fsanitize=thread -DCMAKE_CXX_FLAGS=-fsanitize=thread \
+  -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread \
+  -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=thread
+cmake --build build-tsan --target cptp_tests
+TSAN_OPTIONS=symbolize=0 ./build-tsan/cptp_tests "[parallel-stress]"
+```
+
+`symbolize=0` because on macOS TSan's symbolizer (`atos`) can hang on a
+report; symbolize the addresses afterwards with `atos -o` if one shows up.
+No HiGHS-internal suppressions are needed (2026-11-18, HiGHS v1.16).
+
 ## Citing
 
 Cite the paper for the result and the archived release for the code.

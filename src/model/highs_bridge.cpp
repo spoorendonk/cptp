@@ -441,11 +441,13 @@ void HiGHSBridge::install_separators() {
                 }
             }
         } else {
-            // Main MIP: run all separators in parallel, timing each one
+            // Main MIP: run all separators in parallel, timing each one. Under
+            // HiGHS's parallel tree search the workers already use the thread
+            // budget, so each worker runs its separators one after another.
             using clock = std::chrono::steady_clock;
             std::vector<std::vector<sep::Cut>> results(separators_.size());
             std::vector<double> elapsed(separators_.size(), 0.0);
-            parallel::task_group tg;
+            parallel::task_group tg(mipsolver.mipdata_->parallelLockActive());
             for (size_t i = 0; i < separators_.size(); ++i) {
                 tg.run([&, i] {
                     auto t0 = clock::now();
@@ -462,9 +464,11 @@ void HiGHSBridge::install_separators() {
                 double violation;
             };
             std::vector<PooledCut> pool;
+            // This round's stats, merged into separator_stats_ at its end.
+            std::vector<SeparatorStats> round_stats(separators_.size());
             for (size_t i = 0; i < separators_.size(); ++i) {
                 const std::string sep_name = separators_[i]->name();
-                auto& stats = separator_stats_[sep_name];
+                auto& stats = round_stats[i];
                 stats.time_seconds += elapsed[i];
                 if (!results[i].empty()) {
                     stats.rounds_called++;
@@ -499,8 +503,7 @@ void HiGHSBridge::install_separators() {
                     break;
                 }
                 auto& cut = results[pc.sep_idx][pc.cut_idx];
-                const std::string& sep_name = separators_[pc.sep_idx]->name();
-                auto& stats = separator_stats_[sep_name];
+                auto& stats = round_stats[pc.sep_idx];
                 std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
                 // Disable domain propagation for user cuts: fractional
                 // coefficients (e.g. RCI's 2*q_i/Q_r) can cause HiGHS
@@ -514,8 +517,16 @@ void HiGHSBridge::install_separators() {
                 total_cuts_++;
                 round_added++;
             }
-            separation_time_seconds_ +=
+            const double round_seconds =
                 std::chrono::duration<double>(clock::now() - sep_t0).count();
+            std::scoped_lock lock(cut_stats_mutex_);
+            for (size_t i = 0; i < separators_.size(); ++i) {
+                auto& stats = separator_stats_[separators_[i]->name()];
+                stats.time_seconds += round_stats[i].time_seconds;
+                stats.rounds_called += round_stats[i].rounds_called;
+                stats.cuts_added += round_stats[i].cuts_added;
+            }
+            separation_time_seconds_ += round_seconds;
         }
         separation_rounds_++;
     });
@@ -563,19 +574,15 @@ void HiGHSBridge::install_propagator() {
     const int32_t n = num_nodes_;
     constexpr double kInf = std::numeric_limits<double>::infinity();
 
-    // Shared state for the propagator callback (captured by the lambda).
-    // These are mutable across callback invocations.
-    auto last_ub = std::make_shared<double>(kInf);
-    auto processed_edge = std::make_shared<std::vector<bool>>(m, false);
+    // The callback's mutable state, one set per tree worker (PropagatorWorkerState).
     // Reset stats for this propagator installation.
     *stats_ = CallbackStats{};
-    auto stats = stats_;
+    propagator_states_ = std::make_shared<PropagatorStates>();
+    auto states = propagator_states_;
     auto rc_settings = rc_settings_;
     int64_t labeling_limit = labeling_max_queue_pops_;
     const preprocess::LabelRows label_rows = label_rows_;
     const preprocess::LabelingDeadline labeling_deadline = labeling_deadline_;
-    auto rc_adaptive_disabled = std::make_shared<bool>(false);
-    auto rc_low_yield_streak = std::make_shared<int32_t>(0);
 
     // All-pairs bounds for stronger Trigger B (empty if not computed)
     auto ap = std::make_shared<std::vector<double>>(std::move(all_pairs_));
@@ -626,7 +633,25 @@ void HiGHSBridge::install_propagator() {
             return;
         }
 
+        PropagatorWorkerState* state = nullptr;
+        {
+            std::scoped_lock lock(states->mutex);
+            auto& slot = states->by_lp[{&lp, mipsolver.mipdata_->numRestarts}];
+            if (!slot) {
+                slot = std::make_unique<PropagatorWorkerState>();
+                slot->processed_edge.assign(m, false);
+            }
+            state = slot.get();
+        }
+        // Under parallel tree search the workers share the thread budget, so
+        // the labeling below runs on this thread.
+        const bool serial = mipsolver.mipdata_->parallelLockActive();
+        CallbackStats* const stats = &state->stats;
+        double* const last_ub = &state->last_ub;
+        std::vector<bool>* const processed_edge = &state->processed_edge;
+
         stats->propagator_calls++;
+        const int64_t propagator_calls = ++states->propagator_calls;
         const auto propagator_t0 = std::chrono::steady_clock::now();
         const auto& ec = *edge_costs;
         const auto& pr = *profits;
@@ -661,10 +686,22 @@ void HiGHSBridge::install_propagator() {
                 }
             };
 
+        // The RC strategies decide on the solve's UB improvements, not this
+        // worker's: each worker's first call sees its own last_ub at +inf, as
+        // does every worker after a restart, and root_only would run each time.
+        bool rc_ub_improved = false;
+        int64_t rc_ub_improvements = states->ub_improvements.load();
+        for (double best = states->best_ub.load(); ub < best - 1e-9;) {
+            if (states->best_ub.compare_exchange_weak(best, ub)) {
+                rc_ub_improved = true;
+                rc_ub_improvements = ++states->ub_improvements;
+                break;
+            }
+        }
+
         bool ub_improved = (ub < *last_ub - 1e-9);
         if (ub_improved) {
             *last_ub = ub;
-            stats->ub_improvements++;
         }
 
         // ── Trigger A: UB improved → full sweep ──
@@ -821,8 +858,8 @@ void HiGHSBridge::install_propagator() {
         // ── Trigger D: Lagrangian reduced-cost fixing (nodes → 1) ──
         if (rc_settings.strategy != RCFixingStrategy::off) {
             const bool run_rc =
-                should_run_rc_fixing(rc_settings, ub_improved, stats->ub_improvements,
-                                     stats->propagator_calls, *rc_adaptive_disabled);
+                should_run_rc_fixing(rc_settings, rc_ub_improved, rc_ub_improvements,
+                                     propagator_calls, states->rc_adaptive_disabled.load());
 
             if (run_rc && lp.getStatus() == HighsLpRelaxation::Status::kOptimal) {
                 auto rc_t0 = std::chrono::steady_clock::now();
@@ -887,15 +924,22 @@ void HiGHSBridge::install_propagator() {
                                                            -1, nullptr, labeling_deadline);
                         rc_bwd = rc_fwd;
                     } else {
-                        {
-                            std::jthread t_fwd([&] {
-                                rc_fwd = preprocess::labeling_from(
-                                    prob, prob.source(), rc_edge_costs, rc_profits, labeling_limit,
-                                    label_rows, -1, nullptr, labeling_deadline);
-                            });
+                        auto label_fwd = [&] {
+                            rc_fwd = preprocess::labeling_from(
+                                prob, prob.source(), rc_edge_costs, rc_profits, labeling_limit,
+                                label_rows, -1, nullptr, labeling_deadline);
+                        };
+                        auto label_bwd = [&] {
                             rc_bwd = preprocess::labeling_from(
                                 prob, prob.target(), rc_edge_costs, rc_profits, labeling_limit,
                                 label_rows, -1, nullptr, labeling_deadline);
+                        };
+                        if (serial) {
+                            label_fwd();
+                            label_bwd();
+                        } else {
+                            std::jthread t_fwd(label_fwd);
+                            label_bwd();
                         }
                     }
                     stats->rc_label_runs += prob.is_tour() ? 1 : 2;
@@ -988,7 +1032,8 @@ void HiGHSBridge::install_propagator() {
                                 // Parallel labeling with each node forbidden
                                 std::vector<double> z_LR_minus(candidates.size(), kInf);
                                 parallel::parallel_for(
-                                    0, static_cast<int>(candidates.size()), [&](int idx) {
+                                    0, static_cast<int>(candidates.size()),
+                                    [&](int idx) {
                                         int32_t node_i = candidates[idx];
                                         // Copy profits and set forbidden node to -1e30
                                         std::vector<double> mod_profits = rc_profits;
@@ -1018,7 +1063,8 @@ void HiGHSBridge::install_propagator() {
                                         } else {
                                             z_LR_minus[idx] = fwd_i[prob.target()];
                                         }
-                                    });
+                                    },
+                                    serial ? 1 : 0);
 
                                 stats->rc_label_runs += static_cast<int64_t>(candidates.size());
 
@@ -1039,22 +1085,19 @@ void HiGHSBridge::install_propagator() {
                 }  // if (!rc_fwd.empty() && !rc_bwd.empty())
 
                 stats->rc_callback_runs++;
+                const int64_t rc_callback_runs = ++states->rc_callback_runs;
                 auto rc_t1 = std::chrono::steady_clock::now();
                 stats->rc_time_seconds += std::chrono::duration<double>(rc_t1 - rc_t0).count();
 
-                if (rc_settings.strategy == RCFixingStrategy::adaptive &&
-                    stats->rc_callback_runs >= 2) {
+                if (rc_settings.strategy == RCFixingStrategy::adaptive && rc_callback_runs >= 2) {
                     const int64_t delta_fix =
                         (stats->rc_fix0_count - fix0_before) + (stats->rc_fix1_count - fix1_before);
-                    if (delta_fix < 5) {
-                        (*rc_low_yield_streak)++;
-                    } else {
-                        *rc_low_yield_streak = 0;
-                    }
-
-                    // Two low-yield UB-improvement rounds in a row => disable.
-                    if (*rc_low_yield_streak >= 2) {
-                        *rc_adaptive_disabled = true;
+                    // Two low-yield UB-improvement rounds in a row, solve-wide
+                    // => disable.
+                    if (delta_fix >= 5) {
+                        states->rc_low_yield_streak = 0;
+                    } else if (++states->rc_low_yield_streak >= 2) {
+                        states->rc_adaptive_disabled = true;
                     }
                 }
             }
@@ -1353,6 +1396,31 @@ SolveResult HiGHSBridge::extract_result() const {
     // Order the tour by following edges from depot
     result.tour = order_path(visited_nodes, active_edges);
     result.tour_arcs = std::move(active_edges);
+
+    // Merge the workers' propagator and RC stats; the heuristic fields are the
+    // heuristic callback's own.
+    if (propagator_states_) {
+        std::scoped_lock lock(propagator_states_->mutex);
+        auto& total = *stats_;
+        for (const auto& [lp, state] : propagator_states_->by_lp) {
+            const auto& s = state->stats;
+            total.propagator_fixings += s.propagator_fixings;
+            total.sweep_fixings += s.sweep_fixings;
+            total.chain_fixings += s.chain_fixings;
+            total.sweep_node_fixings += s.sweep_node_fixings;
+            total.chain_node_fixings += s.chain_node_fixings;
+            total.propagator_calls += s.propagator_calls;
+            total.propagator_time_seconds += s.propagator_time_seconds;
+            total.rc_fix0_count += s.rc_fix0_count;
+            total.rc_fix1_count += s.rc_fix1_count;
+            total.rc_label_runs += s.rc_label_runs;
+            total.rc_callback_runs += s.rc_callback_runs;
+            total.rc_time_seconds += s.rc_time_seconds;
+        }
+        // Solve-wide, not summed: every worker counts the first UB it sees.
+        total.ub_improvements += propagator_states_->ub_improvements.exchange(0);
+        propagator_states_->by_lp.clear();
+    }
 
     // Print propagator statistics
     if (propagator_installed_) {

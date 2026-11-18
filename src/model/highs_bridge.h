@@ -17,6 +17,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 namespace cptp {
 
@@ -56,6 +57,35 @@ struct CallbackStats {
     int64_t heuristic_calls = 0;
     int64_t heuristic_solutions = 0;
     double heuristic_time_seconds = 0.0;
+};
+
+/// The propagator's mutable state for one HiGHS tree worker, keyed by the
+/// worker's LP relaxation and the solve's restart count: a worker runs its
+/// nodes one after another, so its state needs no lock, while workers of a
+/// parallel tree search run at once. A restart recreates the workers at the
+/// same addresses, and the restart count keeps them from inheriting state.
+/// This relies on HiGHS v1.16 recreating workers only at a restart; recheck it
+/// on a HiGHS bump.
+struct PropagatorWorkerState {
+    double last_ub = std::numeric_limits<double>::infinity();
+    std::vector<bool> processed_edge;
+    CallbackStats stats;  // propagator and RC fields only, ub_improvements not
+};
+
+struct PropagatorStates {
+    std::mutex mutex;  // guards by_lp, not the states
+    // (&lp, mipdata_->numRestarts) -> that worker's state.
+    std::map<std::pair<const void*, int64_t>, std::unique_ptr<PropagatorWorkerState>> by_lp;
+    // What the RC fixing strategies decide on, solve-wide so that it neither
+    // multiplies with the workers nor resets at a restart: the best UB seen by
+    // any worker and how often it improved, the propagator calls and RC runs,
+    // and the adaptive strategy's low-yield streak.
+    std::atomic<double> best_ub = std::numeric_limits<double>::infinity();
+    std::atomic<int64_t> ub_improvements = 0;
+    std::atomic<int64_t> propagator_calls = 0;
+    std::atomic<int64_t> rc_callback_runs = 0;
+    std::atomic<int32_t> rc_low_yield_streak = 0;
+    std::atomic<bool> rc_adaptive_disabled = false;
 };
 
 /// Wires the CPTP formulation and custom separators into HiGHS.
@@ -236,15 +266,20 @@ private:
     preprocess::LabelingDeadline labeling_deadline_ = preprocess::kNoLabelingDeadline;
     RCFixingSettings rc_settings_;
 
-    // Cut statistics (updated from callback)
+    // Cut statistics, updated from the separator callback, which HiGHS's
+    // parallel tree search calls from several workers at once: the counters
+    // are atomic, and each round merges its per-separator stats and time
+    // under cut_stats_mutex_.
+    mutable std::mutex cut_stats_mutex_;
     mutable std::map<std::string, SeparatorStats> separator_stats_;
-    mutable int64_t total_cuts_ = 0;
-    mutable int64_t separation_rounds_ = 0;
-    mutable int64_t separation_calls_ = 0;  // total callback invocations
+    mutable std::atomic<int64_t> total_cuts_ = 0;
+    mutable std::atomic<int64_t> separation_rounds_ = 0;
+    mutable std::atomic<int64_t> separation_calls_ = 0;  // total callback invocations
     // Wall-clock time of the separation phase: one span per round covering
     // support-graph/Gomory-Hu construction, the parallel separators, and cut
     // pooling (not the sum of per-family times, which would overcount the
-    // parallelism). Accumulated across rounds on the callback thread.
+    // parallelism). Summed over rounds, so over workers under parallel tree
+    // search.
     mutable double separation_time_seconds_ = 0.0;
 
     // Heuristic callback: LP-guided primal heuristic
@@ -261,6 +296,9 @@ private:
 
     // Callback statistics (single allocation shared with callback lambdas)
     std::shared_ptr<CallbackStats> stats_;
+
+    // The propagator's state per tree worker, merged into stats_ at the end.
+    std::shared_ptr<PropagatorStates> propagator_states_;
 };
 
 }  // namespace cptp

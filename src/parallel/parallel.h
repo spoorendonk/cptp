@@ -7,7 +7,7 @@
 namespace cptp::parallel {
 
 /// Split [begin, end) across jthreads. num_threads=0 means
-/// hardware_concurrency.
+/// hardware_concurrency; num_threads=1 runs on the calling thread.
 template <typename F>
 void parallel_for(int begin, int end, F&& f, int num_threads = 0) {
     if (begin >= end) {
@@ -18,6 +18,12 @@ void parallel_for(int begin, int end, F&& f, int num_threads = 0) {
     }
     const int range = end - begin;
     num_threads = std::min(num_threads, range);
+    if (num_threads == 1) {
+        for (int i = begin; i < end; ++i) {
+            f(i);
+        }
+        return;
+    }
 
     std::vector<std::jthread> threads;
     threads.reserve(static_cast<size_t>(num_threads));
@@ -37,13 +43,22 @@ void parallel_for(int begin, int end, F&& f, int num_threads = 0) {
     // jthreads auto-join on destruction
 }
 
-/// Spawn tasks that auto-join on destruction (thin jthread wrapper).
+/// Spawn tasks that auto-join on destruction (thin jthread wrapper). A serial
+/// group runs each task on the calling thread inside run().
 class task_group {
     std::vector<std::jthread> threads_;
+    bool serial_ = false;
 
 public:
+    task_group() = default;
+    explicit task_group(bool serial) : serial_(serial) {}
+
     template <typename F>
     void run(F&& f) {
+        if (serial_) {
+            std::forward<F>(f)();
+            return;
+        }
         threads_.emplace_back([fn = std::forward<F>(f)] { fn(); });
     }
 

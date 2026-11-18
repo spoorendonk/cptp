@@ -4,6 +4,7 @@
 #include "model/options.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <chrono>
 #include <cmath>
@@ -924,14 +925,14 @@ TEST_CASE("Model: presolve option is captured and forced off", "[model][options]
     REQUIRE_THAT(r_forced.objective, WithinAbs(r_off.objective, 1e-9));
 }
 
-// The bridge's callback state is not yet safe under concurrent tree workers
-// (#153), so Model::solve forces HiGHS's parallel=off even when asked for
-// parallel tree search (#110). HiGHS logs its
-// worker count, which is 1 exactly when parallel is off, at the start of the
-// MIP solve, so this checks the setting HiGHS runs with, whether or not a
-// parallel search would add workers on this instance. The thread count must
-// be above 1 for the check to mean anything.
-TEST_CASE("Model: parallel tree search is forced off", "[model][options][parallel]") {
+// HiGHS's parallel tree search is an opt-in (#153): Model::solve sets
+// parallel=off unless the user sets it (#110). HiGHS logs its worker count,
+// which is 1 exactly when parallel is off, at the start of the MIP solve, so
+// this checks the setting HiGHS runs with, whether or not a parallel search
+// would add workers on this instance. The thread count must be above 1 for
+// the check to mean anything. Asking for mip_search_simulate_concurrency asks
+// for the parallel search too, so that alone leaves parallel alone as well.
+TEST_CASE("Model: parallel tree search is off unless requested", "[model][options][parallel]") {
     cptp::Model model;
     std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
     std::vector<double> costs = {10.0, 8.0, 12.0, 6.0, 7.0, 5.0};
@@ -949,21 +950,32 @@ TEST_CASE("Model: parallel tree search is forced off", "[model][options][paralle
         ~CoutRedirect() { std::cout.rdbuf(old); }
     } redirect{std::cout.rdbuf(log.rdbuf())};
 
-    const cptp::SolverOptions opts = {
-        {"time_limit", "30"}, {"output_flag", "true"}, {"parallel", "on"}, {"threads", "4"}};
+    const std::string request = GENERATE("none", "parallel", "simulate");
+    INFO("requested: " << request);
+    const bool requested = request != "none";
+    cptp::SolverOptions opts = {{"time_limit", "30"}, {"output_flag", "true"}, {"threads", "4"}};
+    if (request == "parallel") {
+        opts.emplace_back("parallel", "on");
+    } else if (request == "simulate") {
+        opts.emplace_back("mip_search_simulate_concurrency", "true");
+    }
     auto r = model.solve(opts);
     const std::string text = log.str();
     INFO(text);
 
     REQUIRE(r.is_optimal());
     REQUIRE_THAT(r.objective, WithinAbs(-11.0, 1e-6));
-    REQUIRE(text.contains("Warning: HiGHS option parallel = on ignored"));
+    REQUIRE_FALSE(text.contains("HiGHS rejected option parallel"));
     // Exactly one such line, the main MIP's: a sub-MIP always reports 1 worker.
     const std::regex workers(R"(using up to (\d+) workers across (\d+) threads)");
     const std::vector<std::smatch> lines(std::sregex_iterator(text.begin(), text.end(), workers),
                                          std::sregex_iterator());
     REQUIRE(lines.size() == 1);
-    REQUIRE(lines[0][1].str() == "1");
+    if (requested) {
+        REQUIRE(std::stoi(lines[0][1].str()) > 1);
+    } else {
+        REQUIRE(lines[0][1].str() == "1");
+    }
     REQUIRE(lines[0][2].str() == "4");
 }
 
