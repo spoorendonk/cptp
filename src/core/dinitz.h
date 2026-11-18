@@ -183,8 +183,11 @@ private:
 
 /// The largest sink side of a minimum s-t cut: after a max-flow from `s` to
 /// `t`, the nodes the residual graph does not reach from `s`. Every minimum
-/// s-t cut's sink side is a subset of it (#168). Returns the cut value and,
-/// per node, whether it is on that side.
+/// s-t cut's sink side is a subset of it (#168). Only the part connected to
+/// `t` within that set is kept: nodes without arcs (an unvisited customer) or
+/// components cut off from both ends would add nothing to the cut value but
+/// would make every target's side differ from its Gomory-Hu one. Returns the
+/// cut value and, per node, whether it is on that side.
 struct LargestSinkSide {
     double value;
     std::vector<bool> on_sink_side;
@@ -195,9 +198,19 @@ inline LargestSinkSide largest_min_cut_sink_side(const digraph& g, const std::ve
     dinitz alg(g, cap, s, t);
     alg.run();
     const int32_t n = g.num_nodes();
-    std::vector<bool> sink_side(n);
-    for (int32_t v = 0; v < n; ++v) {
-        sink_side[v] = !alg.on_source_side(v);
+    std::vector<bool> sink_side(n, false);
+    std::vector<int32_t> stack = {t};
+    sink_side[t] = true;
+    while (!stack.empty()) {
+        const int32_t v = stack.back();
+        stack.pop_back();
+        for (const int32_t a : g.out_arcs(v)) {
+            const int32_t w = g.arc_target(a);
+            if (!sink_side[w] && cap[a] > 0.0 && !alg.on_source_side(w)) {
+                sink_side[w] = true;
+                stack.push_back(w);
+            }
+        }
     }
     return {alg.flow_value(), std::move(sink_side)};
 }

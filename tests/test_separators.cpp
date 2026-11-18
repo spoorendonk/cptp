@@ -803,6 +803,37 @@ TEST_CASE("Multistar largest_side cuts on the largest tied min-cut side", "[mult
     REQUIRE(with_largest.separate(ctx).empty());
 }
 
+TEST_CASE("Multistar largest side leaves out nodes the support does not reach", "[multistar]") {
+    // As above plus customer 3, unvisited (x = 0 on its edges, y_3 = 0). The
+    // depot's residual does not reach 3 either, but 3 is not connected to the
+    // target, so the largest side stays {1, 2} and no second cut appears.
+    cptp::Problem prob;
+    const std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}, {0, 3}, {1, 3}, {2, 3}};
+    prob.build(4, edges, {1.0, 1.0, 1.0, 1.0, 1.0, 1.0}, {0.0, 5.0, 5.0, 5.0}, {0.0, 3.0, 3.0, 3.0},
+               10.0, 0, 0);
+    const int32_t m = prob.num_edges();
+    const std::vector<double> x_values = {0.5, 0.5, 0.5, 0.0, 0.0, 0.0};
+    const std::vector<double> y_values = {1.0, 1.0, 1.0, 0.0};
+    auto support = build_support(prob, x_values);
+
+    const auto largest = cptp::largest_min_cut_sink_side(support.graph, support.capacity, 0, 2);
+    REQUIRE(largest.on_sink_side == std::vector<bool>{false, true, true, false});
+
+    const cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .support_graph = &support.graph,
+        .support_capacity = &support.capacity,
+    };
+    cptp::sep::MultistarSeparator with_largest(cptp::sep::CapacityRows::kAll, true);
+    REQUIRE(with_largest.separate(ctx).size() == 1);
+}
+
 TEST_CASE("Comb separator basic test", "[comb]") {
     auto prob = make_small_problem();
     int32_t m = prob.num_edges();

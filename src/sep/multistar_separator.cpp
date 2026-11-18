@@ -106,8 +106,17 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
 
     const bool try_largest =
         largest_side_ && ctx.support_graph != nullptr && ctx.support_capacity != nullptr;
-    // Largest sides already tried: targets often share one.
-    std::set<std::vector<bool>> largest_seen;
+    // Effective sets S (the path target stripped) cut so far. The smallest
+    // sides are cut as before, even when repeated; a largest side is cut only
+    // when no target's side gave its S yet.
+    std::set<std::vector<bool>> seen;
+    auto effective = [&](const std::vector<bool>& side) {
+        std::vector<bool> in_S(side);
+        if (!is_tour) {
+            in_S[path_target] = false;
+        }
+        return in_S;
+    };
 
     for (int32_t target = 0; target < n; ++target) {
         if (target == depot || (!is_tour && target == path_target) || ctx.y_values[target] <= tol) {
@@ -122,10 +131,11 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
         add_glms(smallest);
 
         if (try_largest) {
-            auto largest =
+            seen.insert(effective(smallest));
+            auto largest = effective(
                 largest_min_cut_sink_side(*ctx.support_graph, *ctx.support_capacity, depot, target)
-                    .on_sink_side;
-            if (largest != smallest && largest_seen.insert(largest).second) {
+                    .on_sink_side);
+            if (seen.insert(largest).second) {
                 add_glms(largest);
             }
         }

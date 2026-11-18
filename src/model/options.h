@@ -117,8 +117,9 @@ struct CutFamilyFlags {
 
 private:
     using Flag = bool CutFamilyFlags::*;
-    static std::array<std::pair<std::string_view, Flag>, 8> flags() {
-        return {{
+    using Entry = std::pair<std::string_view, Flag>;
+    static std::array<Entry, 8> flags() {
+        return std::to_array<Entry>({
             {"enable_sec", &CutFamilyFlags::enable_sec},
             {"enable_rci", &CutFamilyFlags::enable_rci},
             {"enable_multistar", &CutFamilyFlags::enable_multistar},
@@ -127,7 +128,7 @@ private:
             {"enable_spi", &CutFamilyFlags::enable_spi},
             {"capacity_cut_surrogate", &CutFamilyFlags::capacity_cut_surrogate},
             {"multistar_largest_side", &CutFamilyFlags::multistar_largest_side},
-        }};
+        });
     }
 };
 
