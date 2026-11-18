@@ -1,9 +1,11 @@
 #include "sep/multistar_separator.h"
 
+#include "core/dinitz.h"
 #include "core/gomory_hu.h"
 #include "core/problem.h"
 
 #include <cmath>
+#include <set>
 #include <vector>
 
 namespace cptp::sep {
@@ -33,21 +35,15 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
 
     std::vector<Cut> all_cuts;
 
-    for (int32_t target = 0; target < n; ++target) {
-        if (target == depot || (!is_tour && target == path_target) || ctx.y_values[target] <= tol) {
-            continue;
-        }
-
-        auto [flow, reachable] = ctx.flow_tree->min_cut(target);
-
-        // S = {u : !reachable[u]} (target side, not containing depot)
-        // GLM for CPTP, per row k (d = d^k, Q = Q_k):
-        //   sum_{e in delta(S)} (1 - 2*q_{t(e)}/Q)*x_e
-        //     - (2/Q)*sum_{i in S} q_i*y_i >= 0
-        // In <= form:
-        //   (2/Q)*sum_{i in S} q_i*y_i
-        //     - sum_{e in delta(S)} (1 - 2*q_{t(e)}/Q)*x_e <= 0
-        // One cut per row (kAll), or the most violated row's (otherwise).
+    // The GLMs on S = {u : target_side[u]} (the side without the depot; the
+    // path's target is never in S), per row k (d = d^k, Q = Q_k):
+    //   sum_{e in delta(S)} (1 - 2*q_{t(e)}/Q)*x_e
+    //     - (2/Q)*sum_{i in S} q_i*y_i >= 0
+    // In <= form:
+    //   (2/Q)*sum_{i in S} q_i*y_i
+    //     - sum_{e in delta(S)} (1 - 2*q_{t(e)}/Q)*x_e <= 0
+    // One cut per row (kAll), or the most violated row's (otherwise).
+    auto add_glms = [&](const std::vector<bool>& target_side) {
         Cut best;
         bool have_best = false;
 
@@ -59,8 +55,8 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
             for (auto e : graph.edges()) {
                 int32_t u = graph.edge_source(e);
                 int32_t v = graph.edge_target(e);
-                bool u_in_S = !reachable[u] && (is_tour || u != path_target);
-                bool v_in_S = !reachable[v] && (is_tour || v != path_target);
+                bool u_in_S = target_side[u] && (is_tour || u != path_target);
+                bool v_in_S = target_side[v] && (is_tour || v != path_target);
                 if (u_in_S == v_in_S) {
                     continue;
                 }
@@ -75,7 +71,7 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
             }
 
             for (int32_t i = 0; i < n; ++i) {
-                if (reachable[i] || (!is_tour && i == path_target)) {
+                if (!target_side[i] || (!is_tour && i == path_target)) {
                     continue;
                 }
                 double q_i = prob.demand(row, i);
@@ -105,6 +101,33 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
 
         if (have_best) {
             all_cuts.push_back(std::move(best));
+        }
+    };
+
+    const bool try_largest =
+        largest_side_ && ctx.support_graph != nullptr && ctx.support_capacity != nullptr;
+    // Largest sides already tried: targets often share one.
+    std::set<std::vector<bool>> largest_seen;
+
+    for (int32_t target = 0; target < n; ++target) {
+        if (target == depot || (!is_tour && target == path_target) || ctx.y_values[target] <= tol) {
+            continue;
+        }
+
+        auto [flow, reachable] = ctx.flow_tree->min_cut(target);
+        std::vector<bool> smallest(n);
+        for (int32_t u = 0; u < n; ++u) {
+            smallest[u] = !reachable[u];
+        }
+        add_glms(smallest);
+
+        if (try_largest) {
+            auto largest =
+                largest_min_cut_sink_side(*ctx.support_graph, *ctx.support_capacity, depot, target)
+                    .on_sink_side;
+            if (largest != smallest && largest_seen.insert(largest).second) {
+                add_glms(largest);
+            }
         }
     }
 

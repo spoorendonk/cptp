@@ -403,6 +403,8 @@ void HiGHSBridge::install_separators() {
             .y_offset = y_offset(),
             .tol = frac_tol_,
             .flow_tree = &flow_tree,
+            .support_graph = &support_graph,
+            .support_capacity = &capacity,
             .upper_bound = mipsolver.mipdata_->upper_limit,
             .all_pairs = std::span<const double>(*all_pairs_),
             .threads = budget - sep_threads + 1,

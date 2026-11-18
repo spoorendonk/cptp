@@ -181,4 +181,25 @@ private:
     double flow_value_ = 0.0;
 };
 
+/// The largest sink side of a minimum s-t cut: after a max-flow from `s` to
+/// `t`, the nodes the residual graph does not reach from `s`. Every minimum
+/// s-t cut's sink side is a subset of it (#168). Returns the cut value and,
+/// per node, whether it is on that side.
+struct LargestSinkSide {
+    double value;
+    std::vector<bool> on_sink_side;
+};
+
+inline LargestSinkSide largest_min_cut_sink_side(const digraph& g, const std::vector<double>& cap,
+                                                 int32_t s, int32_t t) {
+    dinitz alg(g, cap, s, t);
+    alg.run();
+    const int32_t n = g.num_nodes();
+    std::vector<bool> sink_side(n);
+    for (int32_t v = 0; v < n; ++v) {
+        sink_side[v] = !alg.on_source_side(v);
+    }
+    return {alg.flow_value(), std::move(sink_side)};
+}
+
 }  // namespace cptp

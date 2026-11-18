@@ -560,6 +560,25 @@ TEST_CASE("Multicap: capacity_cut_surrogate keeps every row's optimum", "[multic
     }
 }
 
+TEST_CASE("Multicap: multistar_largest_side keeps every row's optimum", "[multicap][glm]") {
+    struct Case {
+        int32_t rows;
+        double objective;
+    };
+    for (const auto& c : {Case{1, -29.0}, Case{2, -20.0}, Case{3, -18.0}}) {
+        INFO("m = " << c.rows);
+        cptp::Model model;
+        fill_model(model, c.rows);
+        model.set_depot(0);
+        auto options = kQuiet;
+        options.emplace_back("multistar_largest_side", "true");
+        const auto result = model.solve(options);
+        REQUIRE(result.is_optimal());
+        REQUIRE_THAT(result.objective, WithinAbs(c.objective, 1e-6));
+        require_tour_fits(model.problem(), result.tour);
+    }
+}
+
 TEST_CASE("Multicap: most_violated keeps the most violated row's multistar", "[multicap][glm]") {
     using cptp::sep::CapacityRows;
     // Both rows of make_problem(2) cut S = {1, 2, 3}: row 0 by 2 - 1 = 1,

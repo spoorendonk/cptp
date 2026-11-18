@@ -3,9 +3,11 @@
 #include <cstdint>
 #include <limits>
 #include <span>
+#include <vector>
 
 namespace cptp {
 class Problem;
+class digraph;
 class gomory_hu_tree;
 }  // namespace cptp
 
@@ -25,6 +27,13 @@ struct SeparationContext {
     int32_t y_offset;                  // LP column offset for node vars
     double tol = 1e-6;                 // cut violation tolerance
     const gomory_hu_tree* flow_tree = nullptr;
+
+    /// The support graph `flow_tree` was built on (arcs both ways, x_e as
+    /// capacity), for separators that run their own max-flows on it, such as
+    /// the multistar separator's largest-side option (#168). Null when the
+    /// caller does not provide it.
+    const digraph* support_graph = nullptr;
+    const std::vector<double>* support_capacity = nullptr;
 
     /// Current incumbent upper bound (for cost-based separators).
     double upper_bound = std::numeric_limits<double>::infinity();

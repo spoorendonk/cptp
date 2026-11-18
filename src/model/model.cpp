@@ -264,12 +264,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bool labeling_2cycle = false;
 
     // --- Cut families ---
-    bool enable_sec = true;
-    bool enable_rci = true;
-    bool enable_multistar = true;
-    bool enable_comb = false;
-    bool enable_rglm = false;
-    bool enable_spi = false;
+    CutFamilyFlags cut_flags;
     int32_t max_cuts_sec = -1;
     int32_t max_cuts_rci = -1;
     int32_t max_cuts_multistar = -1;
@@ -281,9 +276,6 @@ SolveResult Model::solve(const SolverOptions& options) {
     // the nodes on the m = 2, 5, 10 smoke set; most_violated tied at the median
     // with a worse upper quartile in nodes and time.
     std::string capacity_cut_rows = "all";
-    // RCI and RGLM also separate on the surrogate row of all bounded rows
-    // (#112), next to the rows above. Off until measured (#113).
-    bool capacity_cut_surrogate = false;
 
     // --- Other ---
     std::string branch_hyper = "off";
@@ -438,37 +430,12 @@ SolveResult Model::solve(const SolverOptions& options) {
             continue;
         }
         // --- Cut families ---
-        if (key == "enable_sec") {
-            enable_sec = parse_bool(value);
-            continue;
-        }
-        if (key == "enable_rci") {
-            enable_rci = parse_bool(value);
+        if (cut_flags.parse(key, value)) {
             continue;
         }
         if (key == "capacity_cut_rows") {
             sep::parse_capacity_rows(value);  // reject an unknown value here
             capacity_cut_rows = value;
-            continue;
-        }
-        if (key == "capacity_cut_surrogate") {
-            capacity_cut_surrogate = parse_bool(value);
-            continue;
-        }
-        if (key == "enable_multistar") {
-            enable_multistar = parse_bool(value);
-            continue;
-        }
-        if (key == "enable_comb") {
-            enable_comb = parse_bool(value);
-            continue;
-        }
-        if (key == "enable_rglm") {
-            enable_rglm = parse_bool(value);
-            continue;
-        }
-        if (key == "enable_spi") {
-            enable_spi = parse_bool(value);
             continue;
         }
         if (key == "max_cuts_sec") {
@@ -754,29 +721,9 @@ SolveResult Model::solve(const SolverOptions& options) {
             nondefault_settings.emplace_back("rc_fixing_to_one=on");
         }
     }
-    if (!enable_sec) {
-        nondefault_settings.emplace_back("enable_sec=off");
-    }
-    if (!enable_rci) {
-        nondefault_settings.emplace_back("enable_rci=off");
-    }
+    cut_flags.append_nondefault(nondefault_settings);
     if (capacity_cut_rows != "all") {
         nondefault_settings.push_back("capacity_cut_rows=" + capacity_cut_rows);
-    }
-    if (capacity_cut_surrogate) {
-        nondefault_settings.emplace_back("capacity_cut_surrogate=on");
-    }
-    if (!enable_multistar) {
-        nondefault_settings.emplace_back("enable_multistar=off");
-    }
-    if (enable_comb) {
-        nondefault_settings.emplace_back("enable_comb=on");
-    }
-    if (enable_spi) {
-        nondefault_settings.emplace_back("enable_spi=on");
-    }
-    if (enable_rglm) {
-        nondefault_settings.emplace_back("enable_rglm=on");
     }
     if (max_cuts_sec != -1) {
         nondefault_settings.push_back("max_cuts_sec=" + std::to_string(max_cuts_sec));
@@ -1162,25 +1109,25 @@ SolveResult Model::solve(const SolverOptions& options) {
     }
 
     // Add separators (same default families for tour and s-t path).
-    if (enable_sec) {
+    if (cut_flags.enable_sec) {
         bridge.add_separator(std::make_unique<sep::SECSeparator>());
     }
-    if (enable_rci) {
+    if (cut_flags.enable_rci) {
         bridge.add_separator(std::make_unique<sep::RCISeparator>(
-            sep::parse_capacity_rows(capacity_cut_rows), capacity_cut_surrogate));
+            sep::parse_capacity_rows(capacity_cut_rows), cut_flags.capacity_cut_surrogate));
     }
-    if (enable_multistar) {
-        bridge.add_separator(
-            std::make_unique<sep::MultistarSeparator>(sep::parse_capacity_rows(capacity_cut_rows)));
+    if (cut_flags.enable_multistar) {
+        bridge.add_separator(std::make_unique<sep::MultistarSeparator>(
+            sep::parse_capacity_rows(capacity_cut_rows), cut_flags.multistar_largest_side));
     }
-    if (enable_rglm) {
+    if (cut_flags.enable_rglm) {
         bridge.add_separator(std::make_unique<sep::RGLMSeparator>(
-            sep::parse_capacity_rows(capacity_cut_rows), capacity_cut_surrogate));
+            sep::parse_capacity_rows(capacity_cut_rows), cut_flags.capacity_cut_surrogate));
     }
-    if (enable_comb) {
+    if (cut_flags.enable_comb) {
         bridge.add_separator(std::make_unique<sep::CombSeparator>());
     }
-    if (all_pairs_bounds && enable_spi) {
+    if (all_pairs_bounds && cut_flags.enable_spi) {
         auto spi = std::make_unique<sep::SPISeparator>();
         spi->set_max_dp_size(spi_max_dp_size);
         spi->set_max_seeds(spi_max_seeds);

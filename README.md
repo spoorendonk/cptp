@@ -40,6 +40,7 @@ Rows are numbered k = 1..m here; the code, its log and its option help call row 
 | Primal heuristics | feasibility under every row; the LP-guided heuristic breaks ties by row 1's profit/demand | — | [#90] |
 | Capacity cuts (RCI, multistar/GLM, RGLM) | every bounded row, each round | `capacity_cut_rows`: `all`, `most_violated`, `first` | [#91], measured on [#99] |
 | Surrogate capacity cuts (RCI, RGLM on `sum_k d^k / Q_k`) | off | `capacity_cut_surrogate`: `false`, `true` | [#112], left off by [#113] |
+| Multistar/GLM also on each target's largest depot–target min-cut side, not only the Gomory–Hu tree's smallest (any m) | off | `multistar_largest_side`: `false`, `true` | [#168] |
 | Labeling bounds: edge elimination, bounds propagation, reduced-cost fixing, all-pairs bounds (SPI) | row 1 | `labeling_rows`: `first`, `all`, `surrogate`, `vector` | [#101]–[#103], measured on [#104] |
 | Edge elimination's join of the two labeling halves | by row 1's load | `labeling_join`: `load`, `min` | [#144] |
 | 2-cycle elimination in the preprocessing single-row labelings (not `labeling_rows=vector`'s vector labeling) | off | `labeling_2cycle`: `false`, `true` | [#144] |
@@ -61,6 +62,7 @@ SEC and Comb cuts use no capacity row. Bounds from row 1 alone are valid, since 
 [#115]: https://github.com/spoorendonk/cptp/issues/115
 [#144]: https://github.com/spoorendonk/cptp/issues/144
 [#146]: https://github.com/spoorendonk/cptp/issues/146
+[#168]: https://github.com/spoorendonk/cptp/issues/168
 
 ## Capabilities
 

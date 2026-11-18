@@ -1,12 +1,14 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace cptp {
@@ -74,6 +76,60 @@ inline std::string root_limit_name(int limit) {
     }
     return std::to_string(limit);
 }
+
+/// The on/off switches of the cut families, each at its default.
+struct CutFamilyFlags {
+    bool enable_sec = true;
+    bool enable_rci = true;
+    bool enable_multistar = true;
+    bool enable_comb = false;
+    bool enable_rglm = false;
+    bool enable_spi = false;
+    // RCI and RGLM also separate on the surrogate row of all bounded rows
+    // (#112), next to the capacity rows. Off until measured (#113).
+    bool capacity_cut_surrogate = false;
+    // Multistar also separates on each target's largest depot-target min-cut
+    // side, not only the Gomory-Hu tree's smallest (#168). Off until measured.
+    bool multistar_largest_side = false;
+
+    /// Parse `value` into the switch `key` names and return true, or return
+    /// false when `key` names none. Throws as parse_bool_option does.
+    bool parse(std::string_view key, std::string_view value) {
+        const auto all = flags();
+        const auto* it =
+            std::ranges::find_if(all, [key](const auto& entry) { return entry.first == key; });
+        if (it == all.end()) {
+            return false;
+        }
+        this->*(it->second) = parse_bool_option(key, value);
+        return true;
+    }
+
+    /// Append each switch that is not at its default as "key=on" or "key=off".
+    void append_nondefault(std::vector<std::string>& settings) const {
+        const CutFamilyFlags defaults;
+        for (const auto& [name, flag] : flags()) {
+            if (this->*flag != defaults.*flag) {
+                settings.push_back(std::string(name) + (this->*flag ? "=on" : "=off"));
+            }
+        }
+    }
+
+private:
+    using Flag = bool CutFamilyFlags::*;
+    static std::array<std::pair<std::string_view, Flag>, 8> flags() {
+        return {{
+            {"enable_sec", &CutFamilyFlags::enable_sec},
+            {"enable_rci", &CutFamilyFlags::enable_rci},
+            {"enable_multistar", &CutFamilyFlags::enable_multistar},
+            {"enable_comb", &CutFamilyFlags::enable_comb},
+            {"enable_rglm", &CutFamilyFlags::enable_rglm},
+            {"enable_spi", &CutFamilyFlags::enable_spi},
+            {"capacity_cut_surrogate", &CutFamilyFlags::capacity_cut_surrogate},
+            {"multistar_largest_side", &CutFamilyFlags::multistar_largest_side},
+        }};
+    }
+};
 
 /// The limits of HiGHS's root cut loop on the main MIP (#150), each in
 /// parse_root_limit_option's encoding: -1 keeps HiGHS's own (a cap of

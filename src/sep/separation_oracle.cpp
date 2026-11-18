@@ -58,6 +58,8 @@ std::vector<Cut> SeparationOracle::separate(std::span<const double> x_values,
         .y_offset = y_offset,
         .tol = tol,
         .flow_tree = &flow_tree,
+        .support_graph = &support_graph,
+        .support_capacity = &capacity,
     };
 
     // Run all separators in parallel

@@ -740,6 +740,69 @@ TEST_CASE("Multistar separator basic test", "[multistar]") {
     REQUIRE(true);
 }
 
+TEST_CASE("Multistar largest_side cuts on the largest tied min-cut side", "[multistar]") {
+    // Depot 0, customers 1 and 2, every x_e = 0.5 and y = 1. Both min cuts
+    // around 2 (and around 1) have value 1: {2} and {1, 2} ({1} and {1, 2}).
+    // The Gomory-Hu tree gives the smallest sides {1} and {2}, whose GLMs
+    // (Q = 10, q = 3) are 0.6 + 0.3 - 1 = -0.1, not violated; the largest
+    // side {1, 2} gives 2 * 6 / 10 - 1 = 0.2.
+    cptp::Problem prob;
+    const std::vector<cptp::Edge> edges = {{0, 1}, {0, 2}, {1, 2}};
+    prob.build(3, edges, {1.0, 1.0, 1.0}, {0.0, 5.0, 5.0}, {0.0, 3.0, 3.0}, 10.0, 0, 0);
+    const int32_t m = prob.num_edges();
+    const std::vector<double> x_values(m, 0.5);
+    const std::vector<double> y_values = {1.0, 1.0, 1.0};
+    auto support = build_support(prob, x_values);
+
+    const auto largest = cptp::largest_min_cut_sink_side(support.graph, support.capacity, 0, 2);
+    REQUIRE_THAT(largest.value, WithinAbs(1.0, 1e-12));
+    REQUIRE(largest.on_sink_side == std::vector<bool>{false, true, true});
+    REQUIRE(support.tree->min_cut(2).on_source_side == std::vector<bool>{true, true, false});
+
+    cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .support_graph = &support.graph,
+        .support_capacity = &support.capacity,
+    };
+
+    cptp::sep::MultistarSeparator smallest_only;
+    REQUIRE(smallest_only.separate(ctx).empty());
+
+    cptp::sep::MultistarSeparator with_largest(cptp::sep::CapacityRows::kAll, true);
+    const auto cuts = with_largest.separate(ctx);
+    // Targets 1 and 2 share the largest side: one cut.
+    REQUIRE(cuts.size() == 1);
+    const auto& cut = cuts.front();
+    REQUIRE_THAT(cut.violation, WithinAbs(0.2, 1e-9));
+    REQUIRE_THAT(cut.rhs, WithinAbs(0.0, 1e-12));
+    // delta({1, 2}) = {0,1}, {0,2} at -(1 - 0) each; y_1, y_2 at 2 * 3 / 10.
+    std::vector<std::pair<int32_t, double>> terms;
+    terms.reserve(cut.indices.size());
+    for (size_t i = 0; i < cut.indices.size(); ++i) {
+        terms.emplace_back(cut.indices[i], cut.values[i]);
+    }
+    std::ranges::sort(terms);
+    REQUIRE(terms.size() == 4);
+    REQUIRE(terms[0].first == 0);
+    REQUIRE_THAT(terms[0].second, WithinAbs(-1.0, 1e-12));
+    REQUIRE(terms[1].first == 1);
+    REQUIRE_THAT(terms[1].second, WithinAbs(-1.0, 1e-12));
+    REQUIRE(terms[2].first == m + 1);
+    REQUIRE_THAT(terms[2].second, WithinAbs(0.6, 1e-12));
+    REQUIRE(terms[3].first == m + 2);
+    REQUIRE_THAT(terms[3].second, WithinAbs(0.6, 1e-12));
+
+    // Without the support graph in the context the option tries nothing more.
+    ctx.support_graph = nullptr;
+    REQUIRE(with_largest.separate(ctx).empty());
+}
+
 TEST_CASE("Comb separator basic test", "[comb]") {
     auto prob = make_small_problem();
     int32_t m = prob.num_edges();
