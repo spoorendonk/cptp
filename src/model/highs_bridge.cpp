@@ -383,8 +383,7 @@ void HiGHSBridge::install_separators() {
             .tol = frac_tol_,
             .flow_tree = &flow_tree,
             .upper_bound = mipsolver.mipdata_->upper_limit,
-            .all_pairs = all_pairs_.empty() ? std::span<const double>{}
-                                            : std::span<const double>(all_pairs_),
+            .all_pairs = std::span<const double>(*all_pairs_),
             .serial = mipsolver.mipdata_->parallelLockActive(),
         };
 
@@ -557,7 +556,7 @@ void HiGHSBridge::set_labeling_bounds(std::vector<double> f, std::vector<double>
 }
 
 void HiGHSBridge::set_all_pairs_bounds(std::vector<double> dist) {
-    all_pairs_ = std::move(dist);
+    all_pairs_ = std::make_shared<const std::vector<double>>(std::move(dist));
 }
 
 void HiGHSBridge::install_propagator() {
@@ -582,8 +581,9 @@ void HiGHSBridge::install_propagator() {
     const preprocess::LabelRows label_rows = label_rows_;
     const preprocess::LabelingDeadline labeling_deadline = labeling_deadline_;
 
-    // All-pairs bounds for stronger Trigger B (empty if not computed)
-    auto ap = std::make_shared<std::vector<double>>(std::move(all_pairs_));
+    // All-pairs bounds for stronger Trigger B (empty if not computed). Shared
+    // with the separator callback, which SPI reads them through (#156).
+    auto ap = all_pairs_;
 
     // Pre-build adjacency: for each node, list of (edge_idx, neighbor).
     auto adj = std::make_shared<std::vector<std::vector<AdjEntry>>>(n);

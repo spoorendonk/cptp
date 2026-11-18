@@ -165,6 +165,14 @@ releases, and the tables of the arXiv v1 / EJCO submission (2026-07-05).
 They have not been rerun. Regenerate any result you rely on from cf191b2 or
 later, the first commit with both fixes.
 
+A third bug left SPI without its all-pairs bounds
+([#156](https://github.com/spoorendonk/cptp/issues/156)): the propagator moved
+them out of the bridge before the solve, so the SPI separator always saw an
+empty matrix and returned no cut. **Every result produced with
+`enable_spi=true` before the fix ran without SPI**, the `spi_on` rows of
+`benchmarks/ablation.csv` included (their `spi_cuts` are all 0); `spi_on`
+vs `spi_off` measured nothing about SPI.
+
 ## Tests
 
 Tests use multiple threads by default (parallel separation is exercised at

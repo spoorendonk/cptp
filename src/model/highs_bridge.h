@@ -254,8 +254,11 @@ private:
     std::vector<int8_t> fixed_y_;                  // optional fixed y-vars: -1 unset, 0/1 fixed
     std::vector<detail::Hyperplane> hyperplanes_;  // one z column each, after x and y
 
-    // All-pairs labeling bounds for stronger Trigger B propagation
-    std::vector<double> all_pairs_;  // flat n×n: d(s,v) = all_pairs_[s*n+v]
+    // All-pairs labeling bounds, flat n×n: d(s,v) = (*all_pairs_)[s*n+v]. Shared,
+    // not moved, between the separator callback (SPI) and the propagator
+    // (Trigger B), which both read them for the whole solve (#156). Never null.
+    std::shared_ptr<const std::vector<double>> all_pairs_ =
+        std::make_shared<const std::vector<double>>();
     std::shared_ptr<std::atomic<bool>> interrupt_flag_;
 
     // RC fixing settings and statistics

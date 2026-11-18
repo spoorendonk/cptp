@@ -856,6 +856,55 @@ TEST_CASE(
     REQUIRE(result.objective >= 0.0);
 }
 
+TEST_CASE("Model: SPI separates with all-pairs bounds on (#156)", "[model][options][cuts][spi]") {
+    // Two cheap triangles, A = {1, 3, 5} 10 from the depot and B = {2, 4, 6}
+    // 200 from it, with every A-B edge costing 1000. No tour pays to visit B,
+    // so a tour visiting both 1 and 2 costs far more than the best one (which
+    // the all-pairs bounds see, even routing through the depot twice) and SPI
+    // cuts y1 + y2 <= 1. The root LP has no SECs yet and takes B as a free
+    // subtour beside the tour through A (y1 = y2 = 1). Capacity fits every
+    // customer at once, so HiGHS's clique and cover cuts see no conflict
+    // between 1 and 2, but it stops the (non-elementary) labeling from
+    // collecting A's profits over and over. Edge and node elimination would
+    // fix B's nodes to 0 before the LP: they are off.
+    constexpr int32_t kNodes = 7;
+    auto in_a = [](int32_t v) { return v % 2 == 1; };
+    std::vector<cptp::Edge> edges;
+    std::vector<double> costs;
+    for (int32_t i = 0; i < kNodes; ++i) {
+        for (int32_t j = i + 1; j < kNodes; ++j) {
+            edges.push_back({i, j});
+            if (i == 0) {
+                costs.push_back(in_a(j) ? 10.0 : 200.0);
+            } else {
+                costs.push_back(in_a(i) == in_a(j) ? 1.0 : 1000.0);
+            }
+        }
+    }
+    std::vector<double> profits = {0.0, 100.0, 100.0, 10.0, 10.0, 10.0, 10.0};
+    std::vector<double> demands = {0.0, 1.0, 1.0, 0.1, 0.1, 0.1, 0.1};
+
+    cptp::Model model;
+    model.set_graph(kNodes, edges, costs);
+    model.set_depot(0);
+    model.set_profits(profits);
+    model.add_capacity_resource(demands, 2.5);
+
+    auto opts = kQuiet;
+    opts.emplace_back("threads", "1");
+    opts.emplace_back("all_pairs_bounds", "true");
+    opts.emplace_back("enable_spi", "true");
+    opts.emplace_back("edge_elimination", "false");
+    opts.emplace_back("edge_elimination_nodes", "false");
+    auto result = model.solve(opts);
+
+    REQUIRE(result.is_optimal());
+    // Best tour: 0-1-3-5-0, 10 + 1 + 1 + 10 - (100 + 10 + 10).
+    REQUIRE_THAT(result.objective, WithinAbs(-98.0, 1e-6));
+    REQUIRE(result.separator_stats.contains("SPI"));
+    CHECK(result.separator_stats.at("SPI").cuts_added > 0);
+}
+
 TEST_CASE("Model: edge elimination toggles preserve tiny optimum", "[model][options][presolve]") {
     cptp::Model model_on;
     cptp::Model model_off;
