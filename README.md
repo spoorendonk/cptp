@@ -170,7 +170,8 @@ A third bug left SPI without its all-pairs bounds
 them out of the bridge before the solve, so the SPI separator always saw an
 empty matrix and returned no cut. **Every result produced with
 `enable_spi=true` before the fix ran without SPI**, the `spi_on` rows of
-`benchmarks/ablation.csv` included (their `spi_cuts` are all 0); `spi_on`
+`benchmarks/ablation.csv` included (their `spi_cuts` are 0, or empty where
+the run left no stats); `spi_on`
 vs `spi_off` measured nothing about SPI.
 
 ## Tests
