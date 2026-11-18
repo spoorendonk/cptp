@@ -106,9 +106,9 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
 
     const bool try_largest =
         largest_side_ && ctx.support_graph != nullptr && ctx.support_capacity != nullptr;
-    // Effective sets S (the path target stripped) cut so far. The smallest
-    // sides are cut as before, even when repeated; a largest side is cut only
-    // when no target's side gave its S yet.
+    // With largest_side, the effective sets S (the path target stripped) cut
+    // so far: each S is cut once over all targets, smallest or largest side.
+    // Without it the smallest sides are cut as before, even when repeated.
     std::set<std::vector<bool>> seen;
     auto effective = [&](const std::vector<bool>& side) {
         std::vector<bool> in_S(side);
@@ -128,16 +128,18 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
         for (int32_t u = 0; u < n; ++u) {
             smallest[u] = !reachable[u];
         }
-        add_glms(smallest);
-
-        if (try_largest) {
-            seen.insert(effective(smallest));
-            auto largest = effective(
-                largest_min_cut_sink_side(*ctx.support_graph, *ctx.support_capacity, depot, target)
-                    .on_sink_side);
-            if (seen.insert(largest).second) {
-                add_glms(largest);
-            }
+        if (!try_largest) {
+            add_glms(smallest);
+            continue;
+        }
+        if (seen.insert(effective(smallest)).second) {
+            add_glms(smallest);
+        }
+        auto largest = effective(
+            largest_min_cut_sink_side(*ctx.support_graph, *ctx.support_capacity, depot, target)
+                .on_sink_side);
+        if (seen.insert(largest).second) {
+            add_glms(largest);
         }
     }
 
