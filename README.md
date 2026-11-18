@@ -167,7 +167,8 @@ later, the first commit with both fixes.
 
 ## Tests
 
-Tests use multiple threads by default (parallel separation is exercised).
+Tests use multiple threads by default (parallel separation is exercised at
+the root, before HiGHS's tree workers start, and in `parallel=off` runs).
 
 ```bash
 # C++ tests (Catch2-discovered; runs cptp_tests + cptp_tests_extra)
@@ -186,9 +187,10 @@ HiGHS's parallel tree search is on by default (HiGHS's own `parallel=choose`);
 labeling parallel inside it instead. On a smoke set (six SPPRCLIB instances
 and their two-row multicap versions, three seeds, four threads, Mac mini) the
 parallel search took a median 0.82 of the serial tree's time (IQR 0.62-0.92)
-and reached the same optima (#154). Under it, cptp's LP-guided heuristic does
-not run in the parallel tree phase (HiGHS skips the user heuristic callback
-there). Its acceptance matrix (threads 2/4/8 × three seeds) is hidden from the
+and reached the same optima (#154). With more than one thread, its result
+depends on timing: node counts, statistics and, among tied optima, the tour
+can differ between runs with the same seed; `parallel=off` or `threads=1`
+gives a reproducible solve. Its acceptance matrix (threads 2/4/8 × three seeds) is hidden from the
 default run: `./build/cptp_tests "[parallel-matrix]"`.
 
 ThreadSanitizer: configure a separate build with `-fsanitize=thread` in the

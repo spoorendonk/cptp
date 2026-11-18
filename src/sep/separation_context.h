@@ -34,6 +34,10 @@ struct SeparationContext {
     /// `= {}` keeps gcc's -Wmissing-field-initializers quiet for the
     /// designated initializers that leave it out.
     std::span<const double> all_pairs = {};  // NOLINT(readability-redundant-member-init)
+
+    /// Run on the calling thread: set under HiGHS's parallel tree search,
+    /// whose workers already use the thread budget.
+    bool serial = false;
 };
 
 }  // namespace cptp::sep

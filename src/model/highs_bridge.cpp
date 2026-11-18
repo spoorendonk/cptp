@@ -388,6 +388,7 @@ void HiGHSBridge::install_separators() {
             .upper_bound = mipsolver.mipdata_->upper_limit,
             .all_pairs = all_pairs_.empty() ? std::span<const double>{}
                                             : std::span<const double>(all_pairs_),
+            .serial = mipsolver.mipdata_->parallelLockActive(),
         };
 
         const bool is_submip = !orig_to_reduced.empty();

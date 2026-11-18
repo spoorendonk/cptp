@@ -356,44 +356,47 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
     };
     std::vector<std::vector<CutResult>> per_candidate(candidates.size());
 
-    parallel::parallel_for(0, static_cast<int>(candidates.size()), [&](int idx) {
-        auto& cr = candidates[static_cast<size_t>(idx)];
-        auto& out = per_candidate[static_cast<size_t>(idx)];
+    parallel::parallel_for(
+        0, static_cast<int>(candidates.size()),
+        [&](int idx) {
+            auto& cr = candidates[static_cast<size_t>(idx)];
+            auto& out = per_candidate[static_cast<size_t>(idx)];
 
-        for (const auto& row : rows) {
-            const double Q = row.capacity;
-            const std::span<const double> d = row.demand;
+            for (const auto& row : rows) {
+                const double Q = row.capacity;
+                const std::span<const double> d = row.demand;
 
-            auto c = make_candidate(tree, cr.node, prob, d, ctx);
+                auto c = make_candidate(tree, cr.node, prob, d, ctx);
 
-            double Q_r = std::fmod(c.d_S, Q);
-            if (Q_r <= tol) {
-                continue;
-            }
-            double k = std::ceil(c.d_S / Q);
-            if (k <= 1.0) {
-                continue;
-            }
-
-            double viol = compute_violation(c, Q, tol);
-
-            // Run add/drop on violated candidates to strengthen.
-            if (viol > tol) {
-                viol = add_drop_search(c, prob, d, ctx, Q, tol);
-            }
-
-            if (viol <= tol) {
-                continue;
-            }
-            if (rows_ == CapacityRows::kMostViolated && !out.empty()) {
-                if (viol <= out.front().violation) {
+                double Q_r = std::fmod(c.d_S, Q);
+                if (Q_r <= tol) {
                     continue;
                 }
-                out.clear();
+                double k = std::ceil(c.d_S / Q);
+                if (k <= 1.0) {
+                    continue;
+                }
+
+                double viol = compute_violation(c, Q, tol);
+
+                // Run add/drop on violated candidates to strengthen.
+                if (viol > tol) {
+                    viol = add_drop_search(c, prob, d, ctx, Q, tol);
+                }
+
+                if (viol <= tol) {
+                    continue;
+                }
+                if (rows_ == CapacityRows::kMostViolated && !out.empty()) {
+                    if (viol <= out.front().violation) {
+                        continue;
+                    }
+                    out.clear();
+                }
+                out.push_back({build_cut(c, prob, d, ctx, Q, tol), viol});
             }
-            out.push_back({build_cut(c, prob, d, ctx, Q, tol), viol});
-        }
-    });
+        },
+        ctx.serial ? 1 : 0);
 
     // Step 3: Collect, sort by violation, and cap output.
     std::vector<CutResult> results;

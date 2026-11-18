@@ -33,10 +33,11 @@ struct SolveResult {
     int64_t total_cuts = 0;
     int64_t separation_rounds = 0;
 
-    /// Per-phase wall-clock times (seconds), accumulated on the callback thread.
-    /// Callbacks run single-threaded; their internal parallelism (parallel
-    /// separators, parallel labeling) is measured as one span per call, so these
-    /// credit the parallelism rather than summing concurrent work.
+    /// Per-phase wall-clock times (seconds), one span per callback call: a
+    /// call's internal parallelism (parallel separators, parallel labeling) is
+    /// credited, not summed. Under HiGHS's parallel tree search (the default)
+    /// the tree workers' calls run at once and their spans are summed, so the
+    /// phases can add up to more than the solve's wall time.
     double separation_time_seconds = 0.0;
     double propagator_time_seconds = 0.0;
     double rc_time_seconds = 0.0;         // subset of propagator_time_seconds (runs inside it)

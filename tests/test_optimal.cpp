@@ -108,7 +108,7 @@ constexpr std::array kParallelCases = {
 
 // Solves `cases` with HiGHS's parallel tree search on (plus `extra`) and
 // checks each optimum, and that the main MIP ran more than one tree worker
-// (a sub-MIP reports 1), so the parallel option was not forced off.
+// (a sub-MIP reports 1), so the parallel search really ran.
 static void check_optima_under_parallel_tree_search(
     const cptp::SolverOptions& extra, std::span<const OptimumCase> cases = kParallelCases) {
     for (const auto& [path, objective] : cases) {
