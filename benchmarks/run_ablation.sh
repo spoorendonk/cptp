@@ -228,8 +228,10 @@ for cfg in $CONFIGS; do
         logdir="$LOGROOT/$cfg"
         mkdir -p "$logdir"
         logfile="$logdir/$name.log"
+        # One tree, as every committed row was run: the parallel tree search's default
+        # would add run-to-run noise to the contrasts between configs.
         # shellcheck disable=SC2086
-        "$SOLVER" "$inst" --time_limit "$TIME_LIMIT" $flags > "$logfile" 2>&1 || true
+        "$SOLVER" "$inst" --time_limit "$TIME_LIMIT" --parallel off $flags > "$logfile" 2>&1 || true
         OUTPUT="$(cat "$logfile")"
         gzip -f "$logfile"
 

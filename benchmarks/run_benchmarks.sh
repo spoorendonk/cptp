@@ -231,7 +231,9 @@ for inst in "${INSTANCES[@]}"; do
     logdir="$LOGROOT/$suite"
     mkdir -p "$logdir"
     logfile="$logdir/$name.log"
-    "$SOLVER" "$inst" --time_limit "$TIME_LIMIT" > "$logfile" 2>&1 || true
+    # One tree, as every committed row was run: the parallel tree search's default
+    # would mix timing-dependent rows, and summed worker phase times, into the CSV.
+    "$SOLVER" "$inst" --time_limit "$TIME_LIMIT" --parallel off > "$logfile" 2>&1 || true
     output="$(cat "$logfile")"
     gzip -f "$logfile"
 

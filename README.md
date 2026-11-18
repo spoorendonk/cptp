@@ -182,12 +182,14 @@ ctest --test-dir build --output-on-failure
 pytest tests/python/test_solver.py
 ```
 
-HiGHS's parallel tree search is on by default (HiGHS's own `parallel=choose`);
-`parallel=off` runs one branch-and-bound tree, with cptp's separators and
-labeling parallel inside it instead. On a smoke set (six SPPRCLIB instances
-and their two-row multicap versions, three seeds, four threads, Mac mini) the
-parallel search took a median 0.82 of the serial tree's time (IQR 0.62-0.92)
-and reached the same optima (#154). With more than one thread, its result
+HiGHS's parallel tree search is on by default (HiGHS's own `parallel=choose`)
+whenever a solve has more than one thread; `python -m cptp` defaults to
+`--threads 1`, so it needs `--threads N` to use it. `parallel=off` runs one
+branch-and-bound tree, with cptp's separators and labeling parallel inside it
+instead. On a smoke set (six SPPRCLIB instances and their two-row multicap
+versions, three seeds, `threads=4`, Mac mini) the parallel search took a median
+0.81 of the serial tree's time (IQR 0.62-0.91) and reached the same optima
+(#154). With more than one thread, its result
 depends on timing: node counts, statistics and, among tied optima, the tour
 can differ between runs with the same seed; `parallel=off` or `threads=1`
 gives a reproducible solve. Its acceptance matrix (threads 2/4/8 × three seeds) is hidden from the
