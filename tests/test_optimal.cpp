@@ -18,7 +18,7 @@ using Catch::Matchers::WithinAbs;
 // The [optimal] tests solve with a threads option of at most 4, and CMake
 // declares 4 PROCESSORS for them, so ctest -j runs fewer of them side by side
 // and a time-limited solve stays clear of its limit (#160). The default,
-// (hw+1)/2, grows with the host; below 8 logical CPUs it stays in force.
+// (hw+1)/2, grows with the host; up to 8 logical CPUs it stays in force.
 static const std::string kOptimalThreads =
     std::to_string(std::min(4U, (std::max(1U, std::thread::hardware_concurrency()) + 1U) / 2U));
 
@@ -89,8 +89,8 @@ TEST_CASE("A-n69-k9-42 optimal", "[optimal][slow]") {
 // warm-start via setSolution() together with the LP-guided user-solution
 // callback corrupted branch-and-bound on this instance and proved a wrong
 // optimum (-30950 instead of -32628). Runs the default heu_ws + heu_lpg path,
-// at the threads value kOptimalThreads gives (the default on hosts below 8
-// logical CPUs).
+// at the threads value kOptimalThreads gives (the default on hosts with up to
+// 8 logical CPUs).
 TEST_CASE("M-n101-k10-97 optimal (warm-start reroute)", "[optimal][slow]") {
     auto r = solve_instance("benchmarks/instances/spprclib/M-n101-k10-97.sppcc", 120);
     REQUIRE(r.is_optimal());
