@@ -54,7 +54,7 @@ public:
         while (bfs()) {
             std::ranges::fill(iter_, 0);
             double f;
-            while ((f = dfs(source_, std::numeric_limits<double>::infinity())) > 0) {
+            while ((f = dfs()) > 0) {
                 flow_value_ += f;
             }
         }
@@ -96,47 +96,79 @@ private:
         return level_[target_] >= 0;
     }
 
-    double dfs(int32_t v, double pushed) {
-        if (v == target_) {
-            return pushed;
-        }
+    /// One augmenting path in the level graph, found with the current-arc
+    /// pointers `iter_`; returns its bottleneck, or 0 when none is left.
+    ///
+    /// Iterative, with the path on the heap: the recursion it replaces went
+    /// one frame per BFS level, up to n-1 deep on a path-like support, and
+    /// overflowed the 512 KB stack of a macOS secondary thread (HiGHS worker
+    /// threads run this) at a few thousand nodes (#161). It finds the same
+    /// path the recursion did: an arc is skipped, advancing `iter_[v]`, only
+    /// when the search below it is exhausted, and the arc that led to the
+    /// target stays current.
+    double dfs() {
+        path_.clear();
+        int32_t v = source_;
+        while (v != target_) {
+            auto out = g_.out_arcs(v);
+            auto in = g_.in_arcs(v);
+            auto num_out = static_cast<int32_t>(out.size());
+            auto total = static_cast<int32_t>(out.size() + in.size());
 
-        // Try forward arcs
-        auto out = g_.out_arcs(v);
-        auto in = g_.in_arcs(v);
-        auto total = static_cast<int32_t>(out.size() + in.size());
-
-        for (int32_t& i = iter_[v]; i < total; ++i) {
-            if (i < static_cast<int32_t>(out.size())) {
-                int32_t a = out[i];
-                int32_t w = g_.arc_target(a);
-                double r = residual(a);
-                if (r > 1e-12 && level_[w] == level_[v] + 1) {
-                    double f = dfs(w, std::min(pushed, r));
-                    if (f > 1e-12) {
-                        flow_[a] += f;
-                        return f;
+            int32_t next = -1;
+            for (int32_t& i = iter_[v]; i < total; ++i) {
+                if (i < num_out) {
+                    int32_t a = out[i];
+                    int32_t w = g_.arc_target(a);
+                    if (residual(a) > 1e-12 && level_[w] == level_[v] + 1) {
+                        path_.push_back({.from = v, .arc = a, .forward = true});
+                        next = w;
+                        break;
                     }
-                }
-            } else {
-                // Reverse direction: push back flow on in-arc
-                int32_t idx = i - static_cast<int32_t>(out.size());
-                int32_t a = in[idx];
-                int32_t w = g_.arc_source(a);
-                if (flow_[a] > 1e-12 && level_[w] == level_[v] + 1) {
-                    double f = dfs(w, std::min(pushed, flow_[a]));
-                    if (f > 1e-12) {
-                        flow_[a] -= f;
-                        return f;
+                } else {
+                    // Reverse direction: push back flow on in-arc
+                    int32_t a = in[i - num_out];
+                    int32_t w = g_.arc_source(a);
+                    if (flow_[a] > 1e-12 && level_[w] == level_[v] + 1) {
+                        path_.push_back({.from = v, .arc = a, .forward = false});
+                        next = w;
+                        break;
                     }
                 }
             }
+
+            if (next >= 0) {
+                v = next;
+                continue;
+            }
+            // v is a dead end: retreat and skip the arc that led here.
+            if (path_.empty()) {
+                return 0.0;
+            }
+            v = path_.back().from;
+            path_.pop_back();
+            ++iter_[v];
         }
 
-        return 0.0;
+        double f = std::numeric_limits<double>::infinity();
+        for (const Step& s : path_) {
+            f = std::min(f, s.forward ? residual(s.arc) : flow_[s.arc]);
+        }
+        for (const Step& s : path_) {
+            flow_[s.arc] += s.forward ? f : -f;
+        }
+        return f;
     }
 
     [[nodiscard]] double residual(int32_t a) const { return cap_[a] - flow_[a]; }
+
+    /// An arc of the current augmenting path, taken out of node `from`:
+    /// forward along its residual, or backward against its flow.
+    struct Step {
+        int32_t from;
+        int32_t arc;
+        bool forward;
+    };
 
     const digraph& g_;
     const std::vector<double>& cap_;
@@ -145,6 +177,7 @@ private:
     std::vector<int32_t> level_;
     std::vector<int32_t> iter_;
     std::vector<int32_t> rev_;
+    std::vector<Step> path_;
     double flow_value_ = 0.0;
 };
 

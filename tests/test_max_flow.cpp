@@ -3,6 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <cstdint>
+#include <thread>
 
 using Catch::Matchers::WithinAbs;
 
@@ -109,4 +111,36 @@ TEST_CASE("Dinitz on symmetric graph (like SEC support)", "[maxflow]") {
 
     // Max flow should be 2 * 0.5 = 1.0 (bottleneck at edges to node 3)
     REQUIRE_THAT(alg.flow_value(), WithinAbs(1.0, 1e-9));
+}
+
+TEST_CASE("Dinitz on a long path runs on a default-stack thread", "[maxflow]") {
+    // A path-like support puts t n-1 BFS levels from s. The recursive search
+    // this replaced took a stack frame per level and overflowed a default
+    // std::thread stack (512 KB on macOS, where HiGHS's workers run it) at a
+    // few thousand nodes (#161); 100000 levels is ~22 MB of those frames.
+    constexpr int32_t kNodes = 100000;
+    constexpr int32_t kNarrow = kNodes / 2;
+    cptp::digraph_builder builder(kNodes);
+    for (int32_t i = 0; i + 1 < kNodes; ++i) {
+        const double cap = i == kNarrow ? 0.25 : 1.0;
+        builder.add_arc(i, i + 1, cap);
+        builder.add_arc(i + 1, i, cap);
+    }
+    auto [graph, capacity] = builder.build();
+
+    double flow = -1.0;
+    bool narrow_on_source_side = false;
+    bool after_narrow_on_source_side = true;
+    std::thread worker([&] {
+        cptp::dinitz alg(graph, capacity, 0, kNodes - 1);
+        alg.run();
+        flow = alg.flow_value();
+        narrow_on_source_side = alg.on_source_side(kNarrow);
+        after_narrow_on_source_side = alg.on_source_side(kNarrow + 1);
+    });
+    worker.join();
+
+    REQUIRE_THAT(flow, WithinAbs(0.25, 1e-9));
+    CHECK(narrow_on_source_side);
+    CHECK_FALSE(after_narrow_on_source_side);
 }
