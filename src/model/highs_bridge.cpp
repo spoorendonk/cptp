@@ -288,6 +288,11 @@ void HiGHSBridge::complete_solution(std::vector<double>& sol) const {
 }
 
 void HiGHSBridge::install_separators() {
+    // parse_root_limit_option's encoding is HighsUserHooks's.
+    static_assert(HighsUserHooks::kRootLimitHighs == -1);
+    static_assert(HighsUserHooks::kRootLimitUnlimited == 0);
+    HighsUserSeparator::setRootSeparationLimits(root_sepa_rounds_, root_sepa_stall_);
+
     const bool sec_enabled_for_callbacks =
         std::ranges::any_of(separators_, [](const auto& s) { return s && s->name() == "SEC"; });
     // Capture what the callback needs by pointer/reference.

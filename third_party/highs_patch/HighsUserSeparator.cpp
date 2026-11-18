@@ -18,7 +18,9 @@ HighsUserHooks& HighsUserHooks::pending() {
 
 std::shared_ptr<const HighsUserHooks> HighsUserHooks::capture() {
     const HighsUserHooks& hooks = pending_hooks_;
-    if (!hooks.separator && !hooks.feasibility_check && !hooks.propagator)
+    if (!hooks.separator && !hooks.feasibility_check && !hooks.propagator &&
+        hooks.root_sepa_rounds == HighsUserHooks::kRootLimitHighs &&
+        hooks.root_sepa_stall == HighsUserHooks::kRootLimitHighs)
         return nullptr;
     return std::make_shared<const HighsUserHooks>(hooks);
 }
@@ -41,9 +43,40 @@ void HighsUserSeparator::setFeasibilityCheck(FeasibilityCheck cb) {
     pending_hooks_.feasibility_check = std::move(cb);
 }
 
+void HighsUserSeparator::setRootSeparationLimits(int max_rounds, int stall_limit) {
+    pending_hooks_.root_sepa_rounds = max_rounds;
+    pending_hooks_.root_sepa_stall = stall_limit;
+}
+
 void HighsUserSeparator::clearCallback() {
     pending_hooks_.separator = nullptr;
     pending_hooks_.feasibility_check = nullptr;
+    pending_hooks_.root_sepa_rounds = HighsUserHooks::kRootLimitHighs;
+    pending_hooks_.root_sepa_stall = HighsUserHooks::kRootLimitHighs;
+}
+
+namespace {
+// A root limit of the solve's hooks in place of HiGHS's own (HighsUserHooks).
+HighsInt rootLimit(const HighsMipSolver& mipsolver, int HighsUserHooks::* limit,
+                   HighsInt highs_value) {
+    if (mipsolver.submip || !mipsolver.user_hooks_)
+        return highs_value;
+    const int value = (*mipsolver.user_hooks_).*limit;
+    if (value == HighsUserHooks::kRootLimitUnlimited)
+        return kHighsIInf;
+    if (value > 0)
+        return value;
+    return highs_value;
+}
+}  // namespace
+
+HighsInt HighsUserSeparator::rootSepaRounds(const HighsMipSolver& mipsolver,
+                                            HighsInt highs_rounds) {
+    return rootLimit(mipsolver, &HighsUserHooks::root_sepa_rounds, highs_rounds);
+}
+
+HighsInt HighsUserSeparator::rootSepaStall(const HighsMipSolver& mipsolver, HighsInt highs_stall) {
+    return rootLimit(mipsolver, &HighsUserHooks::root_sepa_stall, highs_stall);
 }
 
 bool HighsUserSeparator::hasCallback() {

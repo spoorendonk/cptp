@@ -32,10 +32,20 @@ struct HighsUserHooks {
     FeasibilityCheck feasibility_check;
     Propagator propagator;
 
+    /// Limits of the main MIP's root cut loop (evaluateRootNode): its round
+    /// cap and its stall limit (rounds without progress before it stops).
+    /// kRootLimitHighs keeps HiGHS's own value, kRootLimitUnlimited lifts the
+    /// limit, a positive value replaces HiGHS's. A sub-MIP keeps HiGHS's.
+    static constexpr int kRootLimitHighs = -1;
+    static constexpr int kRootLimitUnlimited = 0;
+    int root_sepa_rounds = kRootLimitHighs;
+    int root_sepa_stall = kRootLimitHighs;
+
     /// The pending set of the calling thread (defined in HighsUserSeparator.cpp).
     static HighsUserHooks& pending();
 
-    /// A copy of the calling thread's pending set, or null when it is empty.
+    /// A copy of the calling thread's pending set, or null when it has no
+    /// callback and HiGHS's root limits.
     static std::shared_ptr<const HighsUserHooks> capture();
 };
 

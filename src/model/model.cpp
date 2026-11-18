@@ -214,6 +214,8 @@ SolveResult Model::solve(const SolverOptions& options) {
     int32_t separation_interval = 1;
     double separation_tol = sep::kDefaultFracTol;
     int32_t max_cuts_per_round = 10;
+    // HiGHS's root cut loop on the main MIP (#150): HiGHS's limits by default.
+    RootSeparationLimits root_limits;
 
     // --- Heuristics: warm-start ---
     bool heu_ws = true;
@@ -336,6 +338,9 @@ SolveResult Model::solve(const SolverOptions& options) {
         }
         if (key == "max_cuts_per_round") {
             max_cuts_per_round = std::stoi(value);
+            continue;
+        }
+        if (root_limits.parse(key, value)) {
             continue;
         }
         // --- Heuristics: warm-start ---
@@ -659,6 +664,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     if (max_cuts_per_round != 10) {
         nondefault_settings.push_back("max_cuts_per_round=" + std::to_string(max_cuts_per_round));
     }
+    root_limits.append_nondefault(nondefault_settings);
     if (!heu_ws) {
         nondefault_settings.emplace_back("heu_ws=off");
     }
@@ -1119,6 +1125,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     bridge.set_threads(preproc_thread_limit);
     bridge.set_max_cuts_per_round(max_cuts_per_round);
     bridge.set_submip_separation(heu_highs_submip_sec);
+    bridge.set_root_separation_limits(root_limits.rounds, root_limits.stall);
     bridge.set_upper_bound(warm_start_ub);
     bridge.set_rc_fixing(rc_settings);
     bridge.set_labeling_max_queue_pops(labeling_max_queue_pops);

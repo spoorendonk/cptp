@@ -36,8 +36,22 @@ public:
     /// Set this thread's pending solution feasibility check. Call before Highs::run().
     static void setFeasibilityCheck(FeasibilityCheck cb);
 
-    /// Clear this thread's pending separator callback and feasibility check.
+    /// Set this thread's pending root cut-loop limits: the round cap and the
+    /// stall limit, each HighsUserHooks::kRootLimitHighs (HiGHS's own),
+    /// kRootLimitUnlimited or a positive value. Call before Highs::run().
+    static void setRootSeparationLimits(int max_rounds, int stall_limit);
+
+    /// Clear this thread's pending separator callback and feasibility check,
+    /// and reset its root cut-loop limits to HiGHS's.
     static void clearCallback();
+
+    /// The round cap of the MIP solve's root cut loop, given HiGHS's own:
+    /// the solve's root limit (kHighsIInf when unlimited), or highs_rounds
+    /// for a sub-MIP or when the solve keeps HiGHS's.
+    static HighsInt rootSepaRounds(const HighsMipSolver& mipsolver, HighsInt highs_rounds);
+
+    /// The stall limit of the MIP solve's root cut loop, as rootSepaRounds.
+    static HighsInt rootSepaStall(const HighsMipSolver& mipsolver, HighsInt highs_stall);
 
     /// Whether this thread has a pending separator callback.
     static bool hasCallback();

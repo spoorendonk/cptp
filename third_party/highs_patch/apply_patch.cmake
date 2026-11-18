@@ -135,13 +135,24 @@ cptp_replace(CONTENT2 1
   "#include \"mip/HighsMipSolverData.h\""
   "#include \"mip/HighsMipSolverData.h\"\n#include \"mip/HighsUserSeparator.h\"")
 
+# Root cut-loop limits (#150): evaluateRootNode caps the main MIP's first root
+# pass at 2*sqrt(maxTreeSizeLog2) rounds and stops after 3 stalled rounds,
+# which can leave violated user cuts at the root. The solve's hooks may
+# replace either limit (HighsUserHooks::root_sepa_rounds, root_sepa_stall);
+# a sub-MIP, and a solve that sets neither, keeps HiGHS's. A root restart
+# (presolve on) still lowers the cap to the rounds done, as in HiGHS.
+cptp_replace(CONTENT2 1
+  "    maxSepaRounds =\n        std::min(HighsInt(2 * std::sqrt(maxTreeSizeLog2)), maxSepaRounds);\n"
+  "    maxSepaRounds =\n        std::min(HighsInt(2 * std::sqrt(maxTreeSizeLog2)), maxSepaRounds);\n  // cptp patch: the solve's root cut-loop limits in place of HiGHS's\n  maxSepaRounds = HighsUserSeparator::rootSepaRounds(mipsolver, maxSepaRounds);\n  const HighsInt cptp_root_stall = HighsUserSeparator::rootSepaStall(mipsolver, 3);\n")
+
 # Modify the root separation loop condition to also run on integer solutions
-# when user separator has a callback (lazy constraint behavior).
-# Original: while (... && !lp.getFractionalIntegers().empty() && ...)
-# New: while (... && (!lp.getFractionalIntegers().empty() || HighsUserSeparator::hasCallback()) && ...)
+# when user separator has a callback (lazy constraint behavior), and to stop
+# at the solve's stall limit (above) in place of HiGHS's 3.
+# Original: while (... && !lp.getFractionalIntegers().empty() && stall < 3)
+# New: while (... && (!lp.getFractionalIntegers().empty() || HighsUserSeparator::hasCallback()) && stall < cptp_root_stall)
 cptp_replace(CONTENT2 1
   "!getLp().getFractionalIntegers().empty() && stall < 3"
-  "(!getLp().getFractionalIntegers().empty() || HighsUserSeparator::hasCallback(mipsolver)) && stall < 3")
+  "(!getLp().getFractionalIntegers().empty() || HighsUserSeparator::hasCallback(mipsolver)) && stall < cptp_root_stall")
 
 # Patch addIncumbent(): reject solutions that fail user feasibility check.
 # isFeasible(mipsolver, sol) expands a sub-MIP's reduced solution to the

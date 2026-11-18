@@ -135,6 +135,15 @@ public:
     /// reduced/original space.
     void set_submip_separation(bool enable) { submip_separation_ = enable; }
 
+    /// Limits of HiGHS's root cut loop on the main MIP (#150), as
+    /// parse_root_limit_option returns them: -1 keeps HiGHS's own (a cap of
+    /// 2*sqrt(maxTreeSizeLog2) rounds, a stall limit of 3), 0 lifts it, N > 0
+    /// replaces it. install_separators hands them to HiGHS.
+    void set_root_separation_limits(int32_t max_rounds, int32_t stall_limit) {
+        root_sepa_rounds_ = max_rounds;
+        root_sepa_stall_ = stall_limit;
+    }
+
     /// Set upper bound for edge elimination preprocessing.
     void set_upper_bound(double ub) { upper_bound_ = ub; }
 
@@ -242,6 +251,8 @@ private:
     int32_t max_cuts_per_round_ = 0;   // global cut cap per round (0 = unlimited)
     std::unordered_map<std::string, int32_t> per_separator_max_cuts_;
     bool submip_separation_ = true;  // SEC separation at sub-MIP root node
+    int32_t root_sepa_rounds_ = -1;  // root cut-loop round cap (-1 = HiGHS's)
+    int32_t root_sepa_stall_ = -1;   // root cut-loop stall limit (-1 = HiGHS's)
     double upper_bound_ = std::numeric_limits<double>::infinity();
     std::vector<double> warm_start_solution_;
     bool edge_elimination_enabled_ = true;

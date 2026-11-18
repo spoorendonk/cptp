@@ -130,6 +130,13 @@ static void print_usage(const char* prog) {
                  "cuts, sort by\n"
               << "                                           violation, add top N "
                  "(default 10, 0=unlimited)\n"
+              << "  --root_sepa_rounds highs|unlimited|N     Round cap of HiGHS's root "
+                 "cut loop\n"
+              << "                                           (default highs: "
+                 "2*sqrt(log2 tree size))\n"
+              << "  --root_sepa_stall highs|unlimited|N      Stalled rounds before the "
+                 "root cut loop\n"
+              << "                                           stops (default highs: 3)\n"
               //
               << "\nSeparation (per cut family):\n"
               << "  --enable_<family> true/false             Enable/disable a cut "
