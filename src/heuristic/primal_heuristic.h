@@ -318,13 +318,14 @@ inline HeuristicResult build_warm_start(
 }
 
 /// LP-guided primal heuristic: builds reduced graphs from LP relaxation
-/// values and runs combinatorial construction + local search on them.
+/// values and runs combinatorial construction + local search on them. Its
+/// restarts run on at most `num_threads` threads, the calling one included.
 HeuristicResult lp_guided_heuristic(const Problem& prob, std::span<const double> x_lp,
                                     std::span<const double> y_lp, std::span<const double> incumbent,
                                     double time_budget_ms = 20.0, int strategy = 0,
                                     int max_restarts = 0, uint32_t restart_seed = 0,
                                     double lpg_edge_threshold = 0.1,
                                     double lpg_node_threshold = 0.5, double lpg_lp_threshold = 0.1,
-                                    double lpg_seed_threshold = 0.3);
+                                    double lpg_seed_threshold = 0.3, int32_t num_threads = 1);
 
 }  // namespace cptp::heuristic

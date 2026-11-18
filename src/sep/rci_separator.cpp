@@ -396,7 +396,7 @@ std::vector<Cut> RCISeparator::separate(const SeparationContext& ctx) {
                 out.push_back({build_cut(c, prob, d, ctx, Q, tol), viol});
             }
         },
-        ctx.serial ? 1 : 0);
+        ctx.threads);
 
     // Step 3: Collect, sort by violation, and cap output.
     std::vector<CutResult> results;

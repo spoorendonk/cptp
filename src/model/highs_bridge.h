@@ -10,6 +10,7 @@
 #include "sep/separator.h"
 #include "util/logger.h"
 
+#include <algorithm>
 #include <atomic>
 #include <limits>
 #include <map>
@@ -113,6 +114,12 @@ public:
     /// Set separation skip interval: separate every N-th callback invocation.
     /// 1 = every round (default), 2 = every other round, etc.
     void set_separation_interval(int32_t interval) { separation_interval_ = interval; }
+
+    /// The solve's thread budget (the resolved `threads` option, >= 1). Work
+    /// in the callbacks (separation, reduced-cost fixing, the LP-guided
+    /// heuristic) uses at most this many threads, the calling one included,
+    /// and only the calling one under HiGHS's parallel tree search (#159).
+    void set_threads(int32_t threads) { threads_ = std::max<int32_t>(1, threads); }
 
     /// Max cuts to add per separator per round (0 = unlimited).
     /// Jepsen et al. recommend 1: add only the most-violated cut.
@@ -230,6 +237,7 @@ private:
 
     // Amortized separation: skip rounds to reduce overhead
     int32_t separation_interval_ = 1;  // 1 = every round (no skipping)
+    int32_t threads_ = 1;              // the solve's thread budget
     int32_t max_cuts_per_sep_ = 3;     // max cuts per separator per round (0 = unlimited)
     int32_t max_cuts_per_round_ = 0;   // global cut cap per round (0 = unlimited)
     std::unordered_map<std::string, int32_t> per_separator_max_cuts_;

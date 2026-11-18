@@ -35,9 +35,12 @@ struct SeparationContext {
     /// designated initializers that leave it out.
     std::span<const double> all_pairs = {};  // NOLINT(readability-redundant-member-init)
 
-    /// Run on the calling thread: set under HiGHS's parallel tree search,
-    /// whose workers already use the thread budget.
-    bool serial = false;
+    /// Threads the separator may use for its own loops, the calling thread
+    /// included; 1 runs on the calling thread. The bridge gives it what the
+    /// solve's `threads` budget leaves after the separators running beside
+    /// it, and 1 under HiGHS's parallel tree search, whose workers already
+    /// use the budget.
+    int32_t threads = 1;
 };
 
 }  // namespace cptp::sep

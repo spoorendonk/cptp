@@ -374,6 +374,15 @@ void HiGHSBridge::install_separators() {
         // Build Gomory-Hu tree: n-1 max-flows instead of 3*n
         gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
 
+        // Thread budget (#159): the solve's `threads`, or this thread alone
+        // under HiGHS's parallel tree search, whose workers already use it.
+        // The separators run on `sep_threads` of it, and each may use what
+        // the others leave for its own loops, so at most `budget` threads
+        // separate at once.
+        const int32_t budget = mipsolver.mipdata_->parallelLockActive() ? 1 : threads_;
+        const int32_t sep_threads =
+            std::clamp(static_cast<int32_t>(separators_.size()), int32_t{1}, budget);
+
         sep::SeparationContext ctx{
             .problem = prob_,
             .x_values = std::span(x_vals.data(), static_cast<size_t>(m)),
@@ -384,7 +393,7 @@ void HiGHSBridge::install_separators() {
             .flow_tree = &flow_tree,
             .upper_bound = mipsolver.mipdata_->upper_limit,
             .all_pairs = std::span<const double>(*all_pairs_),
-            .serial = mipsolver.mipdata_->parallelLockActive(),
+            .threads = budget - sep_threads + 1,
         };
 
         const bool is_submip = !orig_to_reduced.empty();
@@ -438,21 +447,21 @@ void HiGHSBridge::install_separators() {
                 }
             }
         } else {
-            // Main MIP: run all separators in parallel, timing each one. Under
-            // HiGHS's parallel tree search the workers already use the thread
-            // budget, so each worker runs its separators one after another.
+            // Main MIP: run the separators on `sep_threads` threads, timing
+            // each one. Under HiGHS's parallel tree search that is one, so
+            // each worker runs its separators one after another.
             using clock = std::chrono::steady_clock;
             std::vector<std::vector<sep::Cut>> results(separators_.size());
             std::vector<double> elapsed(separators_.size(), 0.0);
-            parallel::task_group tg(mipsolver.mipdata_->parallelLockActive());
-            for (size_t i = 0; i < separators_.size(); ++i) {
-                tg.run([&, i] {
+            parallel::parallel_for(
+                0, static_cast<int>(separators_.size()),
+                [&](int i) {
+                    const auto idx = static_cast<size_t>(i);
                     auto t0 = clock::now();
-                    results[i] = separators_[i]->separate(ctx);
-                    elapsed[i] = std::chrono::duration<double>(clock::now() - t0).count();
-                });
-            }
-            tg.wait();
+                    results[idx] = separators_[idx]->separate(ctx);
+                    elapsed[idx] = std::chrono::duration<double>(clock::now() - t0).count();
+                },
+                sep_threads);
 
             // Pool all cuts from all separators.
             struct PooledCut {
@@ -613,6 +622,7 @@ void HiGHSBridge::install_propagator() {
     auto prop_edge_lb = edge_lb_;
     // Hyperplane columns z_h = a_h . y (#137), whose reduced costs fold into y's.
     auto hyperplanes = hyperplanes_;
+    const int32_t threads_budget = threads_;
 
     HighsUserPropagator::setCallback([=, &prob = prob_](HighsDomain& domain,
                                                         const HighsMipSolver& mipsolver,
@@ -641,9 +651,9 @@ void HiGHSBridge::install_propagator() {
             }
             state = slot.get();
         }
-        // Under parallel tree search the workers share the thread budget, so
-        // the labeling below runs on this thread.
-        const bool serial = mipsolver.mipdata_->parallelLockActive();
+        // The labeling below uses the solve's thread budget, or this thread
+        // alone under parallel tree search, whose workers share it (#159).
+        const int32_t threads = mipsolver.mipdata_->parallelLockActive() ? 1 : threads_budget;
         CallbackStats* const stats = &state->stats;
         double* const last_ub = &state->last_ub;
         std::vector<bool>* const processed_edge = &state->processed_edge;
@@ -932,13 +942,9 @@ void HiGHSBridge::install_propagator() {
                                 prob, prob.target(), rc_edge_costs, rc_profits, labeling_limit,
                                 label_rows, -1, nullptr, labeling_deadline);
                         };
-                        if (serial) {
-                            label_fwd();
-                            label_bwd();
-                        } else {
-                            std::jthread t_fwd(label_fwd);
-                            label_bwd();
-                        }
+                        parallel::parallel_for(
+                            0, 2, [&](int side) { side == 0 ? label_fwd() : label_bwd(); },
+                            threads);
                     }
                     stats->rc_label_runs += prob.is_tour() ? 1 : 2;
 
@@ -1062,7 +1068,7 @@ void HiGHSBridge::install_propagator() {
                                             z_LR_minus[idx] = fwd_i[prob.target()];
                                         }
                                     },
-                                    serial ? 1 : 0);
+                                    threads);
 
                                 stats->rc_label_runs += static_cast<int64_t>(candidates.size());
 
@@ -1211,10 +1217,12 @@ void HiGHSBridge::install_heuristic_callback() {
 
             stats->heuristic_calls++;
             const auto heuristic_t0 = std::chrono::steady_clock::now();
+            // HiGHS queries user solutions on its main loop, between batches of
+            // tree-search work, so the whole thread budget is free (#159).
             heuristic::HeuristicResult result = heuristic::lp_guided_heuristic(
                 prob_, x_lp, y_lp, incumbent, 0.0, strategy, deterministic_restarts,
                 static_cast<uint32_t>(current_nodes), lpg_edge_threshold, lpg_node_threshold,
-                lpg_lp_threshold, lpg_seed_threshold);
+                lpg_lp_threshold, lpg_seed_threshold, threads_);
 
             if (!result.col_values.empty() &&
                 result.objective < data_out->mip_primal_bound - 1e-6) {

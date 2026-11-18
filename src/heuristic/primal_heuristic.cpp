@@ -1120,7 +1120,7 @@ HeuristicResult lp_guided_heuristic(const Problem& prob, std::span<const double>
                                     double time_budget_ms, int strategy, int max_restarts,
                                     uint32_t restart_seed, double lpg_edge_threshold,
                                     double lpg_node_threshold, double lpg_lp_threshold,
-                                    double lpg_seed_threshold) {
+                                    double lpg_seed_threshold, int32_t num_threads) {
     const int32_t n = prob.num_nodes();
     const int32_t source = prob.source();
     const int32_t target = prob.target();
@@ -1186,57 +1186,60 @@ HeuristicResult lp_guided_heuristic(const Problem& prob, std::span<const double>
     };
     std::vector<RestartResult> results(static_cast<size_t>(total_restarts));
 
-    parallel::parallel_for(0, total_restarts, [&](int r) {
-        const int strat = r % num_strategies;
-        const auto& customers = strategy_customers[strat];
-        const auto& ea = strategies[strat]->edge_active;
+    parallel::parallel_for(
+        0, total_restarts,
+        [&](int r) {
+            const int strat = r % num_strategies;
+            const auto& customers = strategy_customers[strat];
+            const auto& ea = strategies[strat]->edge_active;
 
-        std::vector<int32_t> order;
-        if (r < num_strategies) {
-            order = make_lp_order(customers);
-        } else {
-            order = customers;
-            std::mt19937 rng(restart_seed + static_cast<uint32_t>(r));
-            std::shuffle(order.begin(), order.end(), rng);
-        }
-
-        auto [tour, obj] = detail::single_restart(prob, customers, order, ea);
-        if (tour.empty() || !std::isfinite(obj)) {
-            results[static_cast<size_t>(r)] = {std::move(tour), obj};
-            return;
-        }
-
-        detail::TourCandidate best_local{.tour = std::move(tour), .objective = obj};
-
-        const auto ils_start = static_cast<int32_t>(restart_seed + static_cast<uint32_t>(r));
-        for (int32_t round = 0; round < detail::kIlsRounds; ++round) {
-            std::vector<int32_t> kicked = best_local.tour;
-            std::vector<bool> kicked_in_tour;
-            detail::Residual kicked_remaining_cap;
-            if (!detail::init_seed_state(prob, kicked, kicked_in_tour, kicked_remaining_cap)) {
-                break;
+            std::vector<int32_t> order;
+            if (r < num_strategies) {
+                order = make_lp_order(customers);
+            } else {
+                order = customers;
+                std::mt19937 rng(restart_seed + static_cast<uint32_t>(r));
+                std::shuffle(order.begin(), order.end(), rng);
             }
-            if (!detail::perturb_deterministic(prob, kicked, kicked_in_tour, kicked_remaining_cap,
-                                               ea, ils_start, round)) {
-                continue;
-            }
-            // Recompute state from perturbed route before local search.
-            if (!detail::init_seed_state(prob, kicked, kicked_in_tour, kicked_remaining_cap)) {
-                continue;
-            }
-            detail::local_search(prob, kicked, kicked_in_tour, kicked_remaining_cap, ea,
-                                 kDefaultLsMaxIterPerStart);
-            const double kicked_obj = detail::tour_objective(prob, kicked);
-            if (kicked_obj + detail::kLsEpsTie < best_local.objective ||
-                (std::abs(kicked_obj - best_local.objective) <= detail::kLsEpsTie &&
-                 kicked < best_local.tour)) {
-                best_local.tour = std::move(kicked);
-                best_local.objective = kicked_obj;
-            }
-        }
 
-        results[static_cast<size_t>(r)] = {std::move(best_local.tour), best_local.objective};
-    });
+            auto [tour, obj] = detail::single_restart(prob, customers, order, ea);
+            if (tour.empty() || !std::isfinite(obj)) {
+                results[static_cast<size_t>(r)] = {std::move(tour), obj};
+                return;
+            }
+
+            detail::TourCandidate best_local{.tour = std::move(tour), .objective = obj};
+
+            const auto ils_start = static_cast<int32_t>(restart_seed + static_cast<uint32_t>(r));
+            for (int32_t round = 0; round < detail::kIlsRounds; ++round) {
+                std::vector<int32_t> kicked = best_local.tour;
+                std::vector<bool> kicked_in_tour;
+                detail::Residual kicked_remaining_cap;
+                if (!detail::init_seed_state(prob, kicked, kicked_in_tour, kicked_remaining_cap)) {
+                    break;
+                }
+                if (!detail::perturb_deterministic(prob, kicked, kicked_in_tour,
+                                                   kicked_remaining_cap, ea, ils_start, round)) {
+                    continue;
+                }
+                // Recompute state from perturbed route before local search.
+                if (!detail::init_seed_state(prob, kicked, kicked_in_tour, kicked_remaining_cap)) {
+                    continue;
+                }
+                detail::local_search(prob, kicked, kicked_in_tour, kicked_remaining_cap, ea,
+                                     kDefaultLsMaxIterPerStart);
+                const double kicked_obj = detail::tour_objective(prob, kicked);
+                if (kicked_obj + detail::kLsEpsTie < best_local.objective ||
+                    (std::abs(kicked_obj - best_local.objective) <= detail::kLsEpsTie &&
+                     kicked < best_local.tour)) {
+                    best_local.tour = std::move(kicked);
+                    best_local.objective = kicked_obj;
+                }
+            }
+
+            results[static_cast<size_t>(r)] = {std::move(best_local.tour), best_local.objective};
+        },
+        num_threads);
 
     double best_obj = detail::kNoSolution;
     std::vector<int32_t> best_tour;

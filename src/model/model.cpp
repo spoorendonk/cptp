@@ -1116,6 +1116,7 @@ SolveResult Model::solve(const SolverOptions& options) {
     std::vector<int8_t> fixed_y(static_cast<size_t>(n), static_cast<int8_t>(-1));
     HiGHSBridge bridge(problem_, highs, logger_, separation_tol);
     bridge.set_separation_interval(separation_interval);
+    bridge.set_threads(preproc_thread_limit);
     bridge.set_max_cuts_per_round(max_cuts_per_round);
     bridge.set_submip_separation(heu_highs_submip_sec);
     bridge.set_upper_bound(warm_start_ub);
