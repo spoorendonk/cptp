@@ -15,9 +15,17 @@ Usage:
     # Custom PathWyse binary:
     python benchmarks/compare_pathwyse.py --pathwyse-bin /path/to/pathwyse <instance>
 
+    # PWBucket, with PathWyse's suggested settings for cyclic networks:
+    python benchmarks/compare_pathwyse.py --algo PWBucket <instance>
+
+    # Multiple capacities (CAPACITY : Q_1 .. Q_m) become m CAP resources:
+    python benchmarks/compare_pathwyse.py benchmarks/instances/multicap/roberti/m5/
+
 Environment:
     PATHWYSE_BIN  — override PathWyse binary location
 """
+
+from __future__ import annotations
 
 import argparse
 import csv
@@ -91,7 +99,9 @@ def parse_tsplib(filepath: Path) -> dict[str, Any]:  # noqa: C901 - one linear p
             sections[current_section].append(line)
 
     n = int(header.get("DIMENSION", 0))
-    capacity = float(header.get("CAPACITY", 0))
+    # One bound per capacity resource: "CAPACITY : Q" or "CAPACITY : Q_1 .. Q_m"
+    capacities = [float(x) for x in header.get("CAPACITY", "0").split()]
+    m = len(capacities)
     name = header.get("NAME", filepath.stem)
     comment = header.get("COMMENT", "")
 
@@ -139,15 +149,19 @@ def parse_tsplib(filepath: Path) -> dict[str, Any]:  # noqa: C901 - one linear p
             if 0 <= idx < n:
                 node_costs[idx] = -profit  # PathWyse: cost = -profit
 
-    # Demands (1-indexed in TSPLIB)
-    demands: list[float] = [0.0] * n
+    # Demands (1-indexed in TSPLIB): "node d_1 .. d_m", one column per capacity
+    demands: list[list[float]] = [[0.0] * m for _ in range(n)]
     if "DEMAND_SECTION" in sections:
         for line in sections["DEMAND_SECTION"]:
             parts = line.split()
-            if len(parts) >= 2:
-                idx = int(parts[0]) - 1
-                if 0 <= idx < n:
-                    demands[idx] = float(parts[1])
+            if len(parts) != m + 1:
+                raise ValueError(
+                    f"{filepath}: demand line {line!r} has {len(parts) - 1} values, "
+                    f"expected {m} (one per CAPACITY)"
+                )
+            idx = int(parts[0]) - 1
+            if 0 <= idx < n:
+                demands[idx] = [float(x) for x in parts[1:]]
 
     # Depot (0-indexed)
     depot = 0
@@ -159,13 +173,13 @@ def parse_tsplib(filepath: Path) -> dict[str, Any]:  # noqa: C901 - one linear p
                 break
 
     # Depot demand = 0
-    demands[depot] = 0.0
+    demands[depot] = [0.0] * m
 
     return {
         "name": name,
         "comment": comment,
         "dimension": n,
-        "capacity": capacity,
+        "capacities": capacities,
         "dist": dist,
         "node_costs": node_costs,
         "demands": demands,
@@ -196,7 +210,16 @@ def convert_to_pathwyse(data: dict[str, Any], output_path: Path) -> int:
     factor to get the real value.
     """
     n = data["dimension"]
+    capacities: list[float] = data["capacities"]
+    demands: list[list[float]] = data["demands"]
+    m = len(capacities)
     scale = _needs_scaling(data)
+
+    # Capacities and demands are resource values, which PathWyse reads as
+    # integers and which are not scaled: refuse a fractional one.
+    for v in [*capacities, *(d for row in demands for d in row)]:
+        if v != int(v):
+            raise ValueError(f"{data['name']}: fractional capacity or demand {v}")
 
     with open(output_path, "w") as f:
         depot = data.get("depot", 0)
@@ -207,14 +230,16 @@ def convert_to_pathwyse(data: dict[str, Any], output_path: Path) -> int:
         f.write("CYCLIC : 1\n")
         f.write(f"ORIGIN : {depot}\n")
         f.write(f"DESTINATION : {depot}\n")
-        f.write("RESOURCES : 1\n")
-        f.write("RES_NAMES : 0\n")
+        # One CAP resource per capacity row, each bounded by its own capacity
+        f.write(f"RESOURCES : {m}\n")
+        f.write(f"RES_NAMES : {' '.join(str(r) for r in range(m))}\n")
         f.write("RES_TYPE\n")
-        f.write("0 CAP\n")
+        for r in range(m):
+            f.write(f"{r} CAP\n")
         f.write("END\n")
         f.write("RES_BOUND\n")
-        # Capacity is a resource bound, not scaled
-        f.write(f"0 0 {int(data['capacity'])}\n")
+        for r in range(m):
+            f.write(f"{r} 0 {int(capacities[r])}\n")
         f.write("END\n")
 
         # Edge costs (scaled to int)
@@ -233,8 +258,9 @@ def convert_to_pathwyse(data: dict[str, Any], output_path: Path) -> int:
 
         # Node consumption (demands — resource values, not scaled)
         f.write("NODE_CONSUMPTION\n")
-        for i in range(n):
-            f.write(f"0 {i} {int(data['demands'][i])}\n")
+        for r in range(m):
+            for i in range(n):
+                f.write(f"{r} {i} {int(demands[i][r])}\n")
         f.write("END\n")
 
     return scale
@@ -263,34 +289,120 @@ def load_optimal_csv(instance_path: Path) -> float | None:
     return None
 
 
-def run_pathwyse(pw_bin: Path, instance_path: Path, time_limit: int) -> dict[str, Any]:
-    """Run PathWyse on an instance and parse the result."""
-    result: dict[str, Any] = {"status": "ERROR", "obj": None, "tour": [], "time": None}
+def pathwyse_revision(pw_bin: Path) -> str:
+    """Commit of the PathWyse checkout the binary was built in, or "" if unknown."""
     try:
         proc = subprocess.run(
-            [str(pw_bin), str(instance_path)],
+            ["git", "-C", str(pw_bin.parent.parent), "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return ""
+    return proc.stdout.strip()
+
+
+# Overrides of the checkout's own pathwyse.set, per algorithm. PWDefault runs
+# with pathwyse.set as shipped, as the paper's rows did; PWBucket with the
+# settings PathWyse 1.1.0 suggests for cyclic networks
+# (docs/documentation/SUGGESTED_SETTINGS.md).
+ALGO_SETTINGS: dict[str, dict[str, str]] = {
+    "PWDefault": {},
+    "PWBucket": {
+        "algo_names": "PWBucket",
+        "algo_active": "1",
+        "algo/default/autoconfig": "1",
+        "algo/default/search": "bidirectional",
+        "algo/default/parallel": "1",
+        "algo/default/compare_unreachables": "1",
+        "algo/default/ng": "standard",
+        "algo/default/ng/set_size": "8",
+        "algo/default/dssr": "restricted",
+        "algo/default/join/type": "bucket_node",
+        "algo/bucket/size_mode": "min_res_consumption",
+    },
+}
+
+
+def write_settings(pw_bin: Path, algo: str, output_path: Path) -> None:
+    """Write a PathWyse parameter file: the checkout's pathwyse.set with algo's overrides."""
+    base = pw_bin.parent.parent / "pathwyse.set"
+    with open(base) as f:
+        lines = f.read().splitlines()
+    overrides = dict(ALGO_SETTINGS[algo])
+    out: list[str] = []
+    for line in lines:
+        key = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("#") else ""
+        if key in overrides:
+            out.append(f"{key} = {overrides.pop(key)}")
+        else:
+            out.append(line)
+    out.extend(f"{key} = {value}" for key, value in overrides.items())
+    output_path.write_text("\n".join(out) + "\n")
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+_KEY_VALUE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_ ]*?)\s*:\s*(.*?)\s*$")
+
+
+def run_pathwyse(
+    pw_bin: Path,
+    instance_path: Path,
+    time_limit: int,
+    algo: str = "PWDefault",
+    settings_path: Path | None = None,
+) -> dict[str, Any]:
+    """Run PathWyse on an instance and parse the result.
+
+    Reads both output styles: "Obj: v" and "PWDefault global time: t" (before
+    1.0.0), and the aligned "Obj   : v" and "PWDefault Time   : t" (1.1.0).
+    """
+    result: dict[str, Any] = {"status": "ERROR", "obj": None, "tour": [], "time": None}
+    cmd = [str(pw_bin), str(instance_path)]
+    if settings_path is not None:
+        cmd += ["-param", str(settings_path)]
+    try:
+        proc = subprocess.run(
+            cmd,
             capture_output=True,
             text=True,
             timeout=time_limit + 10,
             cwd=str(pw_bin.parent.parent),
         )
-        output = proc.stdout + proc.stderr
+        output = _ANSI.sub("", proc.stdout + proc.stderr)
         for line in output.split("\n"):
-            line = line.strip()
-            if line.startswith("Obj:"):
-                result["obj"] = float(line.split(":")[1].strip())
-            if line.startswith("Tour:"):
-                result["tour"] = list(map(int, line.split(":")[1].strip().split()))
-            if line.startswith("Solution Status:"):
-                result["status"] = line.split(":")[1].strip()
-            m = re.match(r"PWDefault global time:\s*([\d.]+)", line)
-            if m:
-                result["time"] = float(m.group(1))
+            kv = _KEY_VALUE.match(line)
+            if kv is None:
+                continue
+            key, value = kv.group(1), kv.group(2)
+            if key == "Obj":
+                result["obj"] = float(value)
+            elif key == "Tour":
+                result["tour"] = list(map(int, value.split()))
+            elif key == "Solution Status":
+                result["status"] = value
+            elif key in (f"{algo} Time", f"{algo} global time"):
+                result["time"] = float(value)
     except subprocess.TimeoutExpired:
         result["status"] = "TIMEOUT"
     except Exception as e:
         result["status"] = f"ERROR: {e}"
     return result
+
+
+def instance_set(instance_path: Path) -> str:
+    """Instance set from the path below instances/: e.g. "spprclib" or "multicap/roberti/m5"."""
+    parts = instance_path.resolve().parent.parts
+    if "instances" in parts:
+        below = parts[len(parts) - parts[::-1].index("instances") :]
+        if below:
+            return "/".join(below)
+    text = str(instance_path)
+    for known in ("roberti", "spprclib"):
+        if known in text:
+            return known
+    return "unknown"
 
 
 def convert_instance(instance_path: Path, tmpdir: Path) -> tuple[Path, int]:
@@ -308,13 +420,22 @@ def convert_instance(instance_path: Path, tmpdir: Path) -> tuple[Path, int]:
 
 
 def run_single(
-    pw_bin: Path, instance_path: Path, expected: float | None, time_limit: int, verbose: bool
+    pw_bin: Path,
+    instance_path: Path,
+    expected: float | None,
+    time_limit: int,
+    verbose: bool,
+    algo: str = "PWDefault",
 ) -> dict[str, Any]:
     """Run PathWyse on one instance, return result dict."""
     tmpdir = Path(tempfile.mkdtemp(prefix="cptp_pw_"))
     try:
         pw_instance, scale = convert_instance(instance_path, tmpdir)
-        result = run_pathwyse(pw_bin, pw_instance, time_limit=time_limit)
+        settings_path = tmpdir / "pathwyse.set"
+        write_settings(pw_bin, algo, settings_path)
+        result = run_pathwyse(
+            pw_bin, pw_instance, time_limit=time_limit, algo=algo, settings_path=settings_path
+        )
     finally:
         import shutil
 
@@ -326,6 +447,7 @@ def run_single(
 
     name = instance_path.stem
     result["instance"] = name
+    result["set"] = instance_set(instance_path)
 
     if expected is None:
         expected = load_optimal_csv(instance_path)
@@ -355,6 +477,42 @@ def run_single(
     return result
 
 
+CSV_HEADER = [
+    "instance",
+    "set",
+    "algo",
+    "obj",
+    "time_s",
+    "status",
+    "timestamp",
+    "machine",
+    "pathwyse",
+]
+
+
+def csv_needs_header(csv_path: Path) -> bool:
+    """True if csv_path has no data lines yet; exits if its header is not CSV_HEADER.
+
+    benchmarks/pathwyse.csv (the paper's rows) has the older header without
+    the algo and pathwyse columns, so new rows go to a file of their own.
+    """
+    if not csv_path.exists():
+        return True
+    with open(csv_path) as check:
+        for line in check:
+            if line.strip() and not line.startswith("#"):
+                header = next(csv.reader([line]))
+                if header != CSV_HEADER:
+                    print(
+                        f"Error: {csv_path} has columns {header}, expected {CSV_HEADER}; "
+                        "write to another file",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                return False
+    return True
+
+
 def main() -> None:  # noqa: C901 - argument handling and the report loop
     parser = argparse.ArgumentParser(
         description="Run PathWyse on instance(s) and verify against known optimal values."
@@ -370,6 +528,12 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
         default=120,
         help="Time limit per instance in seconds (default: 120)",
     )
+    parser.add_argument(
+        "--algo",
+        choices=sorted(ALGO_SETTINGS),
+        default="PWDefault",
+        help="PathWyse algorithm (default: PWDefault, with the checkout's pathwyse.set)",
+    )
     parser.add_argument("--csv", help="Append results to CSV file")
     parser.add_argument("--machine", help="Machine description (e.g. 'AMD Ryzen 9 3950X 32T')")
     args = parser.parse_args()
@@ -379,6 +543,8 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
         print(f"Error: PathWyse binary not found at {pw_bin}", file=sys.stderr)
         print("Run ./benchmarks/setup_pathwyse.sh first", file=sys.stderr)
         sys.exit(1)
+
+    write_header = csv_needs_header(Path(args.csv)) if args.csv else False
 
     target = Path(args.instance)
     if target.is_dir():
@@ -395,7 +561,10 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
     # Table header for batch mode
     batch = len(instances) > 1
     if batch:
-        print(f"Running PathWyse on {len(instances)} instances (time limit: {args.time_limit}s)")
+        print(
+            f"Running PathWyse {args.algo} on {len(instances)} instances "
+            f"(time limit: {args.time_limit}s)"
+        )
         print(f"{'Instance':<30} {'PW Obj':>12} {'PW Time':>10} {'Expected':>12} {'Match':>7}")
         print("-" * 73)
 
@@ -407,7 +576,9 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
         if batch:
             expected = None  # always use optimal.csv in batch mode
 
-        r = run_single(pw_bin, inst_path, expected, args.time_limit, verbose=not batch)
+        r = run_single(
+            pw_bin, inst_path, expected, args.time_limit, verbose=not batch, algo=args.algo
+        )
         results.append(r)
 
         if batch:
@@ -442,41 +613,25 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
 
     # Write CSV if requested
     if args.csv:
-        csv_path = Path(args.csv)
-        # Write header if the file has no non-comment data lines yet
-        write_header = True
-        if csv_path.exists():
-            with open(csv_path) as check:
-                for line in check:
-                    if line.strip() and not line.startswith("#"):
-                        write_header = False
-                        break
         timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
         machine = args.machine or ""
-        with open(csv_path, "a", newline="") as f:
+        revision = pathwyse_revision(pw_bin)
+        with open(args.csv, "a", newline="") as f:
             writer = csv.writer(f)
             if write_header:
-                writer.writerow(
-                    ["instance", "set", "obj", "time_s", "status", "timestamp", "machine"]
-                )
+                writer.writerow(CSV_HEADER)
             for r in results:
-                # Infer set from path
-                inst_path = Path(args.instance)
-                if "roberti" in str(inst_path):
-                    inst_set = "roberti"
-                elif "spprclib" in str(inst_path):
-                    inst_set = "spprclib"
-                else:
-                    inst_set = "unknown"
                 writer.writerow(
                     [
                         r["instance"],
-                        inst_set,
-                        f"{r['obj']:.6g}" if r["obj"] is not None else "",
+                        r["set"],
+                        args.algo,
+                        f"{r['obj']:.12g}" if r["obj"] is not None else "",
                         f"{r['time']:.3f}" if r["time"] is not None else "",
                         r["status"],
                         timestamp,
                         machine,
+                        revision,
                     ]
                 )
 

@@ -6,17 +6,25 @@
 # by compare_pathwyse.py.
 #
 # Usage:
-#   ./benchmarks/run_pathwyse_reference.sh [--time-limit N] [instance_or_dir]
+#   ./benchmarks/run_pathwyse_reference.sh [--time-limit N] [--algo A] [--out F]
+#                                          [instance_or_dir ...]
 #
 # Arguments:
 #   --time-limit N       Per-instance time limit in seconds (default: 3600)
-#   instance_or_dir      Single instance file or directory of instances.
-#                        Default: both benchmarks/instances/spprclib and
+#   --algo A             PWDefault (default) or PWBucket (PathWyse's suggested
+#                        settings for cyclic networks)
+#   --out F              Output CSV (default: benchmarks/pathwyse-<algo>.csv)
+#   instance_or_dir      Instance files or directories of instances, e.g.
+#                        benchmarks/instances/multicap/spprclib/m2 for the
+#                        multi-capacity sets. Default: both
+#                        benchmarks/instances/spprclib and
 #                        benchmarks/instances/roberti.
 #
 # Output:
-#   benchmarks/pathwyse.csv — committed CSV with timestamp and machine columns.
+#   The --out CSV, with algo, timestamp, machine and PathWyse commit columns.
 #   Existing rows for re-run instances are replaced; other rows are preserved.
+#   benchmarks/pathwyse.csv holds the paper's rows (an unpinned PathWyse, see
+#   setup_pathwyse.sh) in the older column layout and is not written to.
 #
 # Prerequisites:
 #   PathWyse must be built: run ./benchmarks/setup_pathwyse.sh first.
@@ -26,6 +34,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 TIME_LIMIT=3600
+ALGO=PWDefault
+OUTFILE=""
 TARGETS=()
 
 usage() {
@@ -37,6 +47,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --time-limit)
             TIME_LIMIT="$2"; shift 2 ;;
+        --algo)
+            ALGO="$2"; shift 2 ;;
+        --out)
+            OUTFILE="$2"; shift 2 ;;
         --help|-h)
             usage 0 ;;
         -*)
@@ -54,10 +68,29 @@ if [[ ${#TARGETS[@]} -eq 0 ]]; then
     )
 fi
 
-OUTFILE="$SCRIPT_DIR/pathwyse.csv"
+if [[ -z "$OUTFILE" ]]; then
+    OUTFILE="$SCRIPT_DIR/pathwyse-$ALGO.csv"
+fi
+
+# Refuse a file in another column layout (e.g. pathwyse.csv) before the
+# row replacement below rewrites it; compare_pathwyse.py writes this header.
+EXPECTED_HEADER="instance,set,algo,obj,time_s,status,timestamp,machine,pathwyse"
+if [[ -f "$OUTFILE" ]]; then
+    have_header="$(grep -v '^#' "$OUTFILE" | grep -m1 . || true)"
+    have_header="${have_header%$'\r'}"  # Python's csv writer ends lines with \r\n
+    if [[ -n "$have_header" && "$have_header" != "$EXPECTED_HEADER" ]]; then
+        echo "Error: $OUTFILE has header '$have_header', expected '$EXPECTED_HEADER'" >&2
+        exit 1
+    fi
+fi
 
 # Detect machine info
-MACHINE="$(lscpu | grep 'Model name' | sed 's/.*: *//' | sed 's/  */ /g') $(nproc)T"
+if command -v lscpu >/dev/null; then
+    CPU="$(lscpu | grep 'Model name' | sed 's/.*: *//' | sed 's/  */ /g')"
+else
+    CPU="$(sysctl -n machdep.cpu.brand_string)"
+fi
+MACHINE="$CPU $(nproc)T"
 
 # Collect instance stems to be (re-)run for dedup
 collect_stems() {
@@ -98,7 +131,7 @@ if [[ -f "$OUTFILE" ]]; then
     rm -f "$TMPFILE"
 fi
 
-echo "PathWyse reference run — time limit: ${TIME_LIMIT}s"
+echo "PathWyse reference run — algorithm: $ALGO, time limit: ${TIME_LIMIT}s"
 echo "Output: $OUTFILE"
 echo
 
@@ -106,6 +139,7 @@ for target in "${TARGETS[@]}"; do
     echo "--- Running: $target ---"
     python3 "$SCRIPT_DIR/compare_pathwyse.py" "$target" \
         --time-limit "$TIME_LIMIT" \
+        --algo "$ALGO" \
         --csv "$OUTFILE" \
         --machine "$MACHINE"
     echo
