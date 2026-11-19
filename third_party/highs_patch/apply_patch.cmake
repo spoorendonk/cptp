@@ -127,7 +127,7 @@ cptp_replace(CONTENT 1
 file(WRITE "${MIP_DIR}/HighsSeparation.cpp" "${CONTENT}")
 message(STATUS "Applied HighsUserSeparator patch to HighsSeparation.cpp")
 
-# ── 3. Patch HighsMipSolverData.cpp: root separation + incumbent feasibility ──
+# ── 3. Patch HighsMipSolverData.cpp: root separation + incumbent feasibility + root tasks ──
 file(READ "${MIP_DIR}/HighsMipSolverData.cpp" CONTENT2)
 
 # Add include for HighsUserSeparator.h
@@ -185,6 +185,21 @@ cptp_replace(CONTENT2 1
 cptp_replace(CONTENT2 1
   "    if (feasible && solobj < upper_bound) {\n      double prev_upper_bound = upper_bound;"
   "    if (feasible && !mipsolver.submip) feasible = HighsUserSeparator::isFeasible(mipsolver, incumbent);\n    if (feasible && solobj < upper_bound) {\n      double prev_upper_bound = upper_bound;")
+
+# Root tasks (#163): evaluateRootNode spawns the analytic-centre IPM and
+# symmetry detection as tasks and joins them only later, so the root's
+# separation and user-solution queries run beside them. Each task reports
+# itself to the solve's root task observer while it runs on a thread other
+# than the spawning one (HighsUserSeparator::RootTaskScope), so the callbacks
+# can leave that thread to it. The spawning thread's id is captured by copy
+# (HiGHS builds as C++11, so no init-capture): the task outlives the start*()
+# function that spawns it.
+cptp_replace(CONTENT2 1
+  "  taskGroup.spawn([&]() {\n    // first check if the analytic centre computation should be cancelled"
+  "  const std::thread::id cptp_owner = std::this_thread::get_id();\n  taskGroup.spawn([&, cptp_owner]() {\n    const HighsUserSeparator::RootTaskScope cptp_root_task(mipsolver, cptp_owner);\n    // first check if the analytic centre computation should be cancelled")
+cptp_replace(CONTENT2 1
+  "    taskGroup.spawn([&]() {\n      double startTime = mipsolver.timer_.getWallTime();"
+  "    const std::thread::id cptp_owner = std::this_thread::get_id();\n    taskGroup.spawn([&, cptp_owner]() {\n      const HighsUserSeparator::RootTaskScope cptp_root_task(mipsolver, cptp_owner);\n      double startTime = mipsolver.timer_.getWallTime();")
 
 file(WRITE "${MIP_DIR}/HighsMipSolverData.cpp" "${CONTENT2}")
 message(STATUS "Applied lazy constraint + incumbent feasibility patch to HighsMipSolverData.cpp")

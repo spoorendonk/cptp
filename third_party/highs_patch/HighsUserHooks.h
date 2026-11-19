@@ -11,7 +11,7 @@ class HighsLpRelaxation;
 class HighsMipSolver;
 
 /// The user callbacks one MIP solve runs with: the separator, the lazy
-/// feasibility check and the domain propagator.
+/// feasibility check, the domain propagator and the root task observer.
 ///
 /// The static setters of HighsUserSeparator and HighsUserPropagator fill a
 /// thread_local pending set on the thread that calls Highs::run(), so
@@ -40,6 +40,14 @@ struct HighsUserHooks {
     static constexpr int kRootLimitUnlimited = 0;
     int root_sepa_rounds = kRootLimitHighs;
     int root_sepa_stall = kRootLimitHighs;
+
+    /// Told +1 when a root task HiGHS spawns beside its root node (symmetry
+    /// detection, the analytic centre), of the solve or one of its sub-MIPs,
+    /// starts on a thread other than the one that spawned it, and -1 when
+    /// that task ends: the threads those tasks keep busy while the callbacks
+    /// run. Called on the task's thread. Null leaves them uncounted.
+    using RootTaskObserver = std::function<void(int delta)>;
+    RootTaskObserver root_task_observer;
 
     /// The pending set of the calling thread (defined in HighsUserSeparator.cpp).
     static HighsUserHooks& pending();

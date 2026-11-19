@@ -127,6 +127,7 @@ if(CPTP_BUILD_TESTS)
         tests/test_path_cut_validity.cpp
         tests/test_propagator.cpp
         tests/test_root_separation.cpp
+        tests/test_root_tasks.cpp
         tests/test_spi.cpp
         tests/test_thread_local.cpp
         tests/test_ubs_cutoff.cpp

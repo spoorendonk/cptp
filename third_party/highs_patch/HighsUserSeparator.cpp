@@ -21,7 +21,7 @@ HighsUserHooks& HighsUserHooks::pending() {
 std::shared_ptr<const HighsUserHooks> HighsUserHooks::capture() {
     const HighsUserHooks& hooks = pending_hooks_;
     if (!hooks.separator && !hooks.feasibility_check && !hooks.propagator &&
-        hooks.root_sepa_rounds == HighsUserHooks::kRootLimitHighs &&
+        !hooks.root_task_observer && hooks.root_sepa_rounds == HighsUserHooks::kRootLimitHighs &&
         hooks.root_sepa_stall == HighsUserHooks::kRootLimitHighs)
         return nullptr;
     return std::make_shared<const HighsUserHooks>(hooks);
@@ -50,11 +50,30 @@ void HighsUserSeparator::setRootSeparationLimits(int max_rounds, int stall_limit
     pending_hooks_.root_sepa_stall = stall_limit;
 }
 
+void HighsUserSeparator::setRootTaskObserver(HighsUserHooks::RootTaskObserver observer) {
+    pending_hooks_.root_task_observer = std::move(observer);
+}
+
 void HighsUserSeparator::clearCallback() {
     pending_hooks_.separator = nullptr;
     pending_hooks_.feasibility_check = nullptr;
+    pending_hooks_.root_task_observer = nullptr;
     pending_hooks_.root_sepa_rounds = HighsUserHooks::kRootLimitHighs;
     pending_hooks_.root_sepa_stall = HighsUserHooks::kRootLimitHighs;
+}
+
+HighsUserSeparator::RootTaskScope::RootTaskScope(const HighsMipSolver& mipsolver,
+                                                 std::thread::id owner) {
+    if (std::this_thread::get_id() == owner || !mipsolver.user_hooks_ ||
+        !mipsolver.user_hooks_->root_task_observer)
+        return;
+    observer_ = &mipsolver.user_hooks_->root_task_observer;
+    (*observer_)(+1);
+}
+
+HighsUserSeparator::RootTaskScope::~RootTaskScope() {
+    if (observer_)
+        (*observer_)(-1);
 }
 
 namespace {

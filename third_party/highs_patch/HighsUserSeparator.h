@@ -7,6 +7,7 @@
 #include "mip/HighsSeparator.h"
 #include "mip/HighsUserHooks.h"
 
+#include <thread>
 #include <vector>
 
 /// User-defined separator injected into HiGHS's separation loop.
@@ -41,9 +42,29 @@ public:
     /// kRootLimitUnlimited or a positive value. Call before Highs::run().
     static void setRootSeparationLimits(int max_rounds, int stall_limit);
 
-    /// Clear this thread's pending separator callback and feasibility check,
-    /// and reset its root cut-loop limits to HiGHS's.
+    /// Set this thread's pending root task observer (HighsUserHooks). Call
+    /// before Highs::run().
+    static void setRootTaskObserver(HighsUserHooks::RootTaskObserver observer);
+
+    /// Clear this thread's pending separator callback, feasibility check and
+    /// root task observer, and reset its root cut-loop limits to HiGHS's.
     static void clearCallback();
+
+    /// Reports one root task (HighsUserHooks::root_task_observer) for its
+    /// lifetime, when it runs on a thread other than `owner`, the one that
+    /// spawned it: a task the owner runs itself at the sync keeps no other
+    /// thread busy. Lives in the task's body, since a task cancelled before
+    /// it starts never runs it.
+    class RootTaskScope {
+    public:
+        RootTaskScope(const HighsMipSolver& mipsolver, std::thread::id owner);
+        ~RootTaskScope();
+        RootTaskScope(const RootTaskScope&) = delete;
+        RootTaskScope& operator=(const RootTaskScope&) = delete;
+
+    private:
+        const HighsUserHooks::RootTaskObserver* observer_ = nullptr;
+    };
 
     /// The round cap of the MIP solve's root cut loop, given HiGHS's own:
     /// the solve's root limit (kHighsIInf when unlimited), or highs_rounds

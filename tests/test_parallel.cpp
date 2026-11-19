@@ -80,9 +80,11 @@ TEST_CASE("parallel_for: peak counts spawned threads running at once", "[paralle
 // A solve keeps its parallel_for threads within `threads` (#159): the
 // separators, RCI's candidate loop, reduced-cost fixing (fix-to-one too), the
 // LP-guided heuristic and the all-pairs labeling share the budget, the calling
-// thread among them, so at most threads - 1 spawned ones run at once.
-// parallel=off keeps HiGHS's parallel lock inactive, so every callback may use
-// the whole budget. Not counted: HiGHS's own threads and stage-1's
+// thread among them, with the HiGHS root tasks (symmetry detection, the
+// analytic centre) running beside the root's callbacks (#163), so at most
+// threads - 1 threads run beside the calling one at once. parallel=off keeps
+// HiGHS's parallel lock inactive, so every callback may use the whole budget
+// those tasks leave. Not counted: HiGHS's tree-search workers and stage-1's
 // forward/backward labeling thread.
 TEST_CASE("Model: a solve's parallel_for spawns at most threads - 1 threads",
           "[parallel][model][slow][procs4]") {
