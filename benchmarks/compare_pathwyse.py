@@ -269,11 +269,11 @@ def convert_to_pathwyse(data: dict[str, Any], output_path: Path) -> int:
 def find_pathwyse_bin(override: str | None) -> Path:
     """Resolve PathWyse binary location."""
     if override:
-        return Path(override)
+        return Path(override).resolve()
     env = os.environ.get("PATHWYSE_BIN")
     if env:
-        return Path(env)
-    return DEFAULT_PATHWYSE_BIN
+        return Path(env).resolve()
+    return DEFAULT_PATHWYSE_BIN.resolve()
 
 
 def load_optimal_csv(instance_path: Path) -> float | None:
@@ -305,7 +305,10 @@ def pathwyse_revision(pw_bin: Path) -> str:
         )
     except (OSError, subprocess.CalledProcessError):
         return ""
-    toplevel, commit = proc.stdout.split()
+    lines = proc.stdout.splitlines()
+    if len(lines) != 2:
+        return ""
+    toplevel, commit = lines
     return commit if Path(toplevel).resolve() == root else ""
 
 
@@ -345,7 +348,7 @@ def needs_unit_buckets(algo: str, data: dict[str, Any] | None) -> bool:
     return any(d[0] == 0 for i, d in enumerate(data["demands"]) if i != depot)
 
 
-def write_settings(pw_bin: Path, algo: str, output_path: Path, unit_buckets: bool = False) -> None:
+def write_settings(pw_bin: Path, algo: str, output_path: Path, unit_buckets: bool = False) -> bool:
     """Write a PathWyse parameter file: the checkout's pathwyse.set with algo's overrides.
 
     Without a pathwyse.set beside the binary's checkout (a binary installed
@@ -353,7 +356,8 @@ def write_settings(pw_bin: Path, algo: str, output_path: Path, unit_buckets: boo
     defaults stand for the rest, as when it finds no parameter file.
     """
     base = pw_bin.parent.parent / "pathwyse.set"
-    lines = base.read_text().splitlines() if base.is_file() else []
+    found = base.is_file()
+    lines = base.read_text().splitlines() if found else []
     overrides = dict(ALGO_SETTINGS[algo])
     if unit_buckets:
         overrides["algo/bucket/size_mode"] = "unit_size"
@@ -366,6 +370,7 @@ def write_settings(pw_bin: Path, algo: str, output_path: Path, unit_buckets: boo
             out.append(line)
     out.extend(f"{key} = {value}" for key, value in overrides.items())
     output_path.write_text("\n".join(out) + "\n")
+    return found
 
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
@@ -489,14 +494,15 @@ def run_single(
     try:
         pw_instance, scale, data = convert_instance(instance_path, tmpdir)
         unit_buckets = needs_unit_buckets(algo, data)
-        if unit_buckets:
-            note = "unit_size buckets"
+        notes = ["unit_size buckets"] if unit_buckets else []
         settings_path = tmpdir / "pathwyse.set"
-        write_settings(pw_bin, algo, settings_path, unit_buckets=unit_buckets)
+        if not write_settings(pw_bin, algo, settings_path, unit_buckets=unit_buckets):
+            notes.append("no pathwyse.set: PathWyse defaults")
+        note = "; ".join(notes)
         result = run_pathwyse(
             pw_bin, pw_instance, time_limit=time_limit, algo=algo, settings_path=settings_path
         )
-    except (OSError, ValueError, AssertionError, IndexError) as e:
+    except (OSError, ValueError, AssertionError, IndexError, KeyError, OverflowError) as e:
         result = {"status": f"ERROR: {e}", "obj": None, "tour": [], "time": None}
     finally:
         import shutil
@@ -591,6 +597,7 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
         sys.exit(1)
 
     write_header = csv_needs_header(Path(args.csv)) if args.csv else False
+    revision = pathwyse_revision(pw_bin)
 
     target = Path(args.instance)
     if target.is_dir():
@@ -664,7 +671,6 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
     if args.csv:
         timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
         machine = args.machine or ""
-        revision = pathwyse_revision(pw_bin)
         with open(args.csv, "a", newline="") as f:
             writer = csv.writer(f)
             if write_header:

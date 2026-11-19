@@ -74,8 +74,16 @@ def read_csv(path):
     with open(path) as f:
         lines = [l for l in f if not l.startswith('#')]
     reader = csv.DictReader(lines)
+    algos = set()
     for row in reader:
         rows[row['instance']] = row
+        if row.get('algo'):
+            algos.add(row['algo'])
+    # Rows are keyed by instance: a file holding several PathWyse algorithms
+    # (run_pathwyse_reference.sh --out shared by two --algo runs) would mix them.
+    if len(algos) > 1:
+        sys.exit(f"Error: {path} holds rows of several algorithms {sorted(algos)}; "
+                 "compare one algorithm's file at a time")
     return rows
 
 pw = read_csv(pw_file)

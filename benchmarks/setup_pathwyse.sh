@@ -46,6 +46,11 @@ fi
 echo "Building PathWyse..."
 cd "$PW_DIR"
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j"$(nproc)"
+if command -v nproc >/dev/null; then
+    NCPU="$(nproc)"
+else
+    NCPU="$(sysctl -n hw.logicalcpu)"
+fi
+cmake --build build -j"$NCPU"
 
 echo "PathWyse $PATHWYSE_TAG built successfully at $PW_DIR/bin/pathwyse"
