@@ -8,7 +8,9 @@
 #   ./benchmarks/compare_pathwyse.sh [--pathwyse <file>] [--cptp <file>]
 #
 # Arguments:
-#   --pathwyse <file>    PathWyse results CSV (default: benchmarks/pathwyse.csv)
+#   --pathwyse <file>    PathWyse results CSV (default: benchmarks/pathwyse.csv,
+#                        the paper's rows; run_pathwyse_reference.sh writes
+#                        benchmarks/pathwyse-<algo>.csv)
 #   --cptp <file>        cptp results CSV (default: benchmarks/cptp.csv)
 #
 # Output:
@@ -41,7 +43,8 @@ if [[ -z "$PW_FILE" ]]; then
     PW_FILE="$SCRIPT_DIR/pathwyse.csv"
     if [[ ! -f "$PW_FILE" ]]; then
         echo "Error: $PW_FILE not found" >&2
-        echo "Run ./benchmarks/run_pathwyse_reference.sh first." >&2
+        echo "It holds the paper's rows; pass --pathwyse benchmarks/pathwyse-<algo>.csv" >&2
+        echo "for a run_pathwyse_reference.sh run." >&2
         exit 1
     fi
 fi

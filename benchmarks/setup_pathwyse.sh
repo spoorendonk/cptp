@@ -25,10 +25,13 @@ if [ -d "$PW_DIR" ]; then
         echo "Delete it and run this script again." >&2
         exit 1
     fi
-    if [ -x "$PW_DIR/bin/pathwyse" ]; then
-        echo "PathWyse $PATHWYSE_TAG already set up at $PW_DIR"
-        exit 0
+    if [ -n "$(git -C "$PW_DIR" status --porcelain --untracked-files=no)" ]; then
+        echo "Error: $PW_DIR has local changes; delete it and run this script again." >&2
+        exit 1
     fi
+    # Build anyway: incremental, so a no-op for a binary built at this
+    # commit, and it rebuilds one left from a checkout moved to the tag.
+    echo "PathWyse $PATHWYSE_TAG already cloned at $PW_DIR"
 else
     echo "Cloning PathWyse $PATHWYSE_TAG..."
     git -c advice.detachedHead=false clone --depth 1 --branch "$PATHWYSE_TAG" \

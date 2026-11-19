@@ -74,7 +74,7 @@ fi
 
 # Refuse a file in another column layout (e.g. pathwyse.csv) before the
 # row replacement below rewrites it; compare_pathwyse.py writes this header.
-EXPECTED_HEADER="instance,set,algo,obj,time_s,status,timestamp,machine,pathwyse"
+EXPECTED_HEADER="instance,set,algo,obj,time_s,status,timestamp,machine,pathwyse,note"
 if [[ -f "$OUTFILE" ]]; then
     have_header="$(grep -v '^#' "$OUTFILE" | grep -m1 . || true)"
     have_header="${have_header%$'\r'}"  # Python's csv writer ends lines with \r\n
@@ -90,7 +90,12 @@ if command -v lscpu >/dev/null; then
 else
     CPU="$(sysctl -n machdep.cpu.brand_string)"
 fi
-MACHINE="$CPU $(nproc)T"
+if command -v nproc >/dev/null; then
+    NCPU="$(nproc)"
+else
+    NCPU="$(sysctl -n hw.logicalcpu)"
+fi
+MACHINE="$CPU ${NCPU}T"
 
 # Collect instance stems to be (re-)run for dedup
 collect_stems() {
@@ -115,10 +120,11 @@ if [[ -f "$OUTFILE" ]]; then
     trap 'rm -f "$TMPFILE"' EXIT
     head -1 "$OUTFILE" > "$TMPFILE"
     tail -n +2 "$OUTFILE" | while IFS= read -r line; do
-        row_instance="${line%%,*}"
+        # Replace only this algorithm's rows: a file may hold several
+        IFS=, read -r row_instance _ row_algo _ <<< "$line"
         skip=false
         for stem in "${INSTANCE_STEMS[@]}"; do
-            if [[ "$row_instance" == "$stem" ]]; then
+            if [[ "$row_instance" == "$stem" && "$row_algo" == "$ALGO" ]]; then
                 skip=true
                 break
             fi
@@ -135,14 +141,18 @@ echo "PathWyse reference run — algorithm: $ALGO, time limit: ${TIME_LIMIT}s"
 echo "Output: $OUTFILE"
 echo
 
+# A target with a mismatch exits 1 after writing its rows; run the rest
+# anyway (their old rows are already gone) and fail at the end.
+STATUS=0
 for target in "${TARGETS[@]}"; do
     echo "--- Running: $target ---"
     python3 "$SCRIPT_DIR/compare_pathwyse.py" "$target" \
         --time-limit "$TIME_LIMIT" \
         --algo "$ALGO" \
         --csv "$OUTFILE" \
-        --machine "$MACHINE"
+        --machine "$MACHINE" || STATUS=1
     echo
 done
 
 echo "Done. Results written to $OUTFILE"
+exit "$STATUS"

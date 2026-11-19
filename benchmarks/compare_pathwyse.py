@@ -290,17 +290,23 @@ def load_optimal_csv(instance_path: Path) -> float | None:
 
 
 def pathwyse_revision(pw_bin: Path) -> str:
-    """Commit of the PathWyse checkout the binary was built in, or "" if unknown."""
+    """Commit of the PathWyse checkout the binary was built in, or "" if unknown.
+
+    "" also when the binary's directory is not the top of a git checkout, so a
+    binary inside another repository does not get that repository's commit.
+    """
+    root = pw_bin.resolve().parent.parent
     try:
         proc = subprocess.run(
-            ["git", "-C", str(pw_bin.parent.parent), "rev-parse", "--short", "HEAD"],
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel", "--short", "HEAD"],
             capture_output=True,
             text=True,
             check=True,
         )
     except (OSError, subprocess.CalledProcessError):
         return ""
-    return proc.stdout.strip()
+    toplevel, commit = proc.stdout.split()
+    return commit if Path(toplevel).resolve() == root else ""
 
 
 # Overrides of the checkout's own pathwyse.set, per algorithm. PWDefault runs
@@ -325,12 +331,32 @@ ALGO_SETTINGS: dict[str, dict[str, str]] = {
 }
 
 
-def write_settings(pw_bin: Path, algo: str, output_path: Path) -> None:
-    """Write a PathWyse parameter file: the checkout's pathwyse.set with algo's overrides."""
+def needs_unit_buckets(algo: str, data: dict[str, Any] | None) -> bool:
+    """True if PWBucket's min_res_consumption bucket size would be 0.
+
+    PWBucket buckets on resource 0 (the first capacity row) with the smallest
+    demand of a customer as bucket size, and divides by it: a customer with
+    zero row-0 demand (G-n262-k25-316 has 12) makes it fail. Such instances
+    run with unit_size buckets instead, and their rows say so.
+    """
+    if algo != "PWBucket" or data is None:
+        return False
+    depot = data.get("depot", 0)
+    return any(d[0] == 0 for i, d in enumerate(data["demands"]) if i != depot)
+
+
+def write_settings(pw_bin: Path, algo: str, output_path: Path, unit_buckets: bool = False) -> None:
+    """Write a PathWyse parameter file: the checkout's pathwyse.set with algo's overrides.
+
+    Without a pathwyse.set beside the binary's checkout (a binary installed
+    elsewhere), only the overrides are written and PathWyse's built-in
+    defaults stand for the rest, as when it finds no parameter file.
+    """
     base = pw_bin.parent.parent / "pathwyse.set"
-    with open(base) as f:
-        lines = f.read().splitlines()
+    lines = base.read_text().splitlines() if base.is_file() else []
     overrides = dict(ALGO_SETTINGS[algo])
+    if unit_buckets:
+        overrides["algo/bucket/size_mode"] = "unit_size"
     out: list[str] = []
     for line in lines:
         key = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("#") else ""
@@ -405,18 +431,43 @@ def instance_set(instance_path: Path) -> str:
     return "unknown"
 
 
-def convert_instance(instance_path: Path, tmpdir: Path) -> tuple[Path, int]:
+def convert_instance(instance_path: Path, tmpdir: Path) -> tuple[Path, int, dict[str, Any] | None]:
     """Convert TSPLIB instance to PathWyse format if needed.
 
-    Returns (path_to_use, scale_factor).
+    Returns (path_to_use, scale_factor, parsed data or None for a native file).
     """
     suffix = instance_path.suffix.lower()
     if suffix in (".sppcc", ".vrp"):
         data = parse_tsplib(instance_path)
         pw_path = tmpdir / (instance_path.stem + ".pw")
         scale = convert_to_pathwyse(data, pw_path)
-        return pw_path, scale
-    return instance_path, 1
+        return pw_path, scale, data
+    return instance_path, 1, None
+
+
+def print_result(result: dict[str, Any], expected: float | None) -> None:
+    """Print one instance's result, as single-instance mode reports it."""
+    print(f"\nInstance: {result['instance']}")
+    obj_str = f"{result['obj']:.6g}" if result["obj"] is not None else "N/A"
+    time_str = f"{result['time']:.2f}s" if result["time"] else "N/A"
+    print(f"  PathWyse obj:    {obj_str}")
+    print(f"  PathWyse time:   {time_str}")
+    print(f"  PathWyse status: {result['status']}")
+    if result["note"]:
+        print(f"  Note:            {result['note']}")
+    if result["tour"]:
+        tour_str = " -> ".join(str(n) for n in result["tour"][:10])
+        if len(result["tour"]) > 10:
+            tour_str += " -> ..."
+        print(f"  Tour ({len(result['tour'])} nodes): {tour_str}")
+    if expected is not None:
+        print(f"  Expected:        {expected:.6g}")
+        if result["obj"] is not None:
+            diff = abs(result["obj"] - expected)
+            if diff < 0.01:
+                print(f"  MATCH (diff={diff:.6f})")
+            else:
+                print(f"  MISMATCH (diff={diff:.4f})")
 
 
 def run_single(
@@ -427,15 +478,26 @@ def run_single(
     verbose: bool,
     algo: str = "PWDefault",
 ) -> dict[str, Any]:
-    """Run PathWyse on one instance, return result dict."""
+    """Run PathWyse on one instance, return result dict.
+
+    An instance that cannot be converted gives an ERROR row, not an exception,
+    so one bad file does not lose the rest of a batch.
+    """
     tmpdir = Path(tempfile.mkdtemp(prefix="cptp_pw_"))
+    note = ""
+    scale = 1
     try:
-        pw_instance, scale = convert_instance(instance_path, tmpdir)
+        pw_instance, scale, data = convert_instance(instance_path, tmpdir)
+        unit_buckets = needs_unit_buckets(algo, data)
+        if unit_buckets:
+            note = "unit_size buckets"
         settings_path = tmpdir / "pathwyse.set"
-        write_settings(pw_bin, algo, settings_path)
+        write_settings(pw_bin, algo, settings_path, unit_buckets=unit_buckets)
         result = run_pathwyse(
             pw_bin, pw_instance, time_limit=time_limit, algo=algo, settings_path=settings_path
         )
+    except (OSError, ValueError, AssertionError, IndexError) as e:
+        result = {"status": f"ERROR: {e}", "obj": None, "tour": [], "time": None}
     finally:
         import shutil
 
@@ -448,30 +510,13 @@ def run_single(
     name = instance_path.stem
     result["instance"] = name
     result["set"] = instance_set(instance_path)
+    result["note"] = note
 
     if expected is None:
         expected = load_optimal_csv(instance_path)
 
     if verbose:
-        print(f"\nInstance: {name}")
-        obj_str = f"{result['obj']:.6g}" if result["obj"] is not None else "N/A"
-        time_str = f"{result['time']:.2f}s" if result["time"] else "N/A"
-        print(f"  PathWyse obj:    {obj_str}")
-        print(f"  PathWyse time:   {time_str}")
-        print(f"  PathWyse status: {result['status']}")
-        if result["tour"]:
-            tour_str = " -> ".join(str(n) for n in result["tour"][:10])
-            if len(result["tour"]) > 10:
-                tour_str += " -> ..."
-            print(f"  Tour ({len(result['tour'])} nodes): {tour_str}")
-        if expected is not None:
-            print(f"  Expected:        {expected:.6g}")
-            if result["obj"] is not None:
-                diff = abs(result["obj"] - expected)
-                if diff < 0.01:
-                    print(f"  MATCH (diff={diff:.6f})")
-                else:
-                    print(f"  MISMATCH (diff={diff:.4f})")
+        print_result(result, expected)
 
     result["expected"] = expected
     return result
@@ -487,6 +532,7 @@ CSV_HEADER = [
     "timestamp",
     "machine",
     "pathwyse",
+    "note",
 ]
 
 
@@ -569,7 +615,7 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
         print("-" * 73)
 
     results = []
-    matches = mismatches = errors = 0
+    matches = mismatches = errors = unchecked = 0
 
     for inst_path in instances:
         expected = args.expected  # only meaningful for single instance
@@ -595,6 +641,9 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
                 else:
                     match_str = "FAIL"
                     mismatches += 1
+            elif r["obj"] is not None:
+                match_str = "-"  # solved, no known optimum (e.g. multicap)
+                unchecked += 1
             elif r["status"] == "TIMEOUT":
                 match_str = "TLIM"
                 errors += 1
@@ -607,8 +656,8 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
     if batch:
         print("-" * 73)
         print(
-            f"{matches} match, {mismatches} mismatch, {errors} timeout/error "
-            f"out of {len(instances)}"
+            f"{matches} match, {mismatches} mismatch, {unchecked} solved without a known "
+            f"optimum, {errors} timeout/error out of {len(instances)}"
         )
 
     # Write CSV if requested
@@ -632,6 +681,7 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
                         timestamp,
                         machine,
                         revision,
+                        r["note"],
                     ]
                 )
 
