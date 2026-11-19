@@ -297,259 +297,246 @@ void HiGHSBridge::install_separators() {
         std::ranges::any_of(separators_, [](const auto& s) { return s && s->name() == "SEC"; });
     // Capture what the callback needs by pointer/reference.
     // The bridge must outlive the highs.run() call.
-    HighsUserSeparator::setCallback([this, sec_enabled_for_callbacks](
-                                        const HighsLpRelaxation& lpRelaxation,
-                                        HighsCutPool& cutpool, const HighsMipSolver& mipsolver) {
-        // Sub-MIPs have a different (presolved) column space.
-        // When enabled, expand LP solution via undoPrimal and translate
-        // cuts back to reduced space. Only run at the sub-MIP root node
-        // to tighten the LP without per-node overhead.
-        if (mipsolver.submip) {
-            if (!submip_separation_) {
-                return;
-            }
-            if (mipsolver.mipdata_->num_nodes > 0) {
-                return;  // root only
-            }
-        }
-
-        // Amortized separation: skip rounds to reduce overhead
-        // (not applied for sub-MIPs — they are short-lived)
-        if (!mipsolver.submip) {
-            int64_t call = separation_calls_++;
-            if (separation_interval_ > 1 && (call % separation_interval_) != 0) {
-                return;
-            }
-        }
-
-        // Separation-phase wall-clock starts here: covers support-graph and
-        // Gomory-Hu construction plus the parallel separators and pooling. Only
-        // accumulated for the main MIP, at the end of the round.
-        const auto sep_t0 = std::chrono::steady_clock::now();
-
-        const auto& sol = lpRelaxation.getSolution();
-        const int32_t m = num_edges_;
-        const int32_t n = num_nodes_;
-
-        std::vector<double> x_vals(m);
-        std::vector<double> y_vals(n);
-        std::vector<int> orig_to_reduced;  // empty for main MIP
-
-        if (mipsolver.submip) {
-            // Sub-MIP: LP solution is in reduced (presolved) column space.
-            // Expand to original space, through every sub-MIP level, so
-            // separators see the full model.
-            const std::vector<double> expanded =
-                HighsUserSeparator::toOriginalSpace(mipsolver, sol.col_value);
-
-            if (static_cast<int32_t>(expanded.size()) < m + n) {
-                return;
-            }
-
-            std::copy_n(expanded.begin(), m, x_vals.begin());
-            std::copy_n(expanded.begin() + m, n, y_vals.begin());
-
-            // Build inverse column mapping (original → reduced) for cut translation
-            const int reduced_ncol = static_cast<int>(sol.col_value.size());
-            const std::vector<HighsInt> orig_cols =
-                HighsUserSeparator::originalColumns(mipsolver, reduced_ncol);
-            orig_to_reduced.assign(expanded.size(), -1);
-            for (int r = 0; r < reduced_ncol; r++) {
-                orig_to_reduced[orig_cols[r]] = r;
-            }
-        } else {
-            std::copy_n(sol.col_value.begin(), m, x_vals.begin());
-            std::copy_n(sol.col_value.begin() + m, n, y_vals.begin());
-
-            // Cache LP values for heuristic callback
-            {
-                std::scoped_lock lock(*lp_cache_mutex_);
-                *cached_x_lp_ = x_vals;
-                *cached_y_lp_ = y_vals;
-            }
-        }
-
-        // Build support graph once for all separators
-        const auto& graph = prob_.graph();
-        const double graph_tol = 1e-6;  // for edge inclusion in support graph
-        digraph_builder builder(n);
-        for (auto e : graph.edges()) {
-            double xval = x_vals[e];
-            if (xval > graph_tol) {
-                int32_t u = graph.edge_source(e);
-                int32_t v = graph.edge_target(e);
-                builder.add_arc(u, v, xval);
-                builder.add_arc(v, u, xval);
-            }
-        }
-        auto [support_graph, capacity] = builder.build();
-
-        // Build Gomory-Hu tree: n-1 max-flows instead of 3*n
-        gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
-
-        // Thread budget (#159): the separators run on `sep_threads` of it,
-        // and the rest, plus the thread it runs on, goes to RCI's candidate
-        // loop, the one separator loop that reads ctx.threads. So at most
-        // `budget` threads separate at once.
-        const int32_t budget = callback_threads(mipsolver, threads_);
-        const int32_t sep_threads =
-            std::clamp(static_cast<int32_t>(separators_.size()), int32_t{1}, budget);
-
-        sep::SeparationContext ctx{
-            .problem = prob_,
-            .x_values = std::span(x_vals.data(), static_cast<size_t>(m)),
-            .y_values = std::span(y_vals.data(), static_cast<size_t>(n)),
-            .x_offset = x_offset(),
-            .y_offset = y_offset(),
-            .tol = frac_tol_,
-            .flow_tree = &flow_tree,
-            .support_graph = &support_graph,
-            .support_capacity = &capacity,
-            .upper_bound = mipsolver.mipdata_->upper_limit,
-            .all_pairs = std::span<const double>(*all_pairs_),
-            .threads = budget - sep_threads + 1,
-        };
-
-        const bool is_submip = !orig_to_reduced.empty();
-        if (is_submip) {
-            if (!sec_enabled_for_callbacks) {
-                return;
-            }
-            // Sub-MIP: only run SEC (lazy constraint) to keep overhead low.
-            // Other separators (RCI, Multistar, etc.) add tightening cuts
-            // but aren't needed for feasibility in short-lived sub-MIPs.
-            sep::SECSeparator sec;
-            auto cuts = sec.separate(ctx);
-            const auto it_cap = per_separator_max_cuts_.find(sec.name());
-            const int32_t max_cuts =
-                (it_cap != per_separator_max_cuts_.end()) ? it_cap->second : max_cuts_per_sep_;
-
-            std::ranges::stable_sort(cuts, [](const sep::Cut& a, const sep::Cut& b) {
-                return a.violation > b.violation;
-            });
-            int32_t added = 0;
-            if (max_cuts == 0) {
-                return;
-            }
-            for (auto& cut : cuts) {
-                if (max_cuts >= 0 && added >= max_cuts) {
-                    break;
+    HighsUserSeparator::setCallback(
+        [this, sec_enabled_for_callbacks](const HighsLpRelaxation& lpRelaxation,
+                                          HighsCutPool& cutpool, const HighsMipSolver& mipsolver) {
+            // Sub-MIPs have a different (presolved) column space.
+            // When enabled, expand LP solution via undoPrimal and translate
+            // cuts back to reduced space. Only run at the sub-MIP root node
+            // to tighten the LP without per-node overhead.
+            if (mipsolver.submip) {
+                if (!submip_separation_) {
+                    return;
                 }
-                // Translate cut indices from original to reduced space
-                std::vector<HighsInt> red_idx;
-                std::vector<double> red_val;
-                double rhs = cut.rhs;
-
-                for (size_t k = 0; k < cut.indices.size(); k++) {
-                    int orig_col = cut.indices[k];
-                    int red_col = orig_to_reduced[orig_col];
-                    if (red_col >= 0) {
-                        red_idx.push_back(red_col);
-                        red_val.push_back(cut.values[k]);
-                    } else {
-                        // Column eliminated by presolve — adjust RHS
-                        double fixed_val = (orig_col < m) ? x_vals[orig_col] : y_vals[orig_col - m];
-                        rhs -= cut.values[k] * fixed_val;
-                    }
-                }
-
-                if (!red_idx.empty()) {
-                    cutpool.addCut(mipsolver, red_idx.data(), red_val.data(),
-                                   static_cast<HighsInt>(red_idx.size()), rhs);
-                    total_cuts_++;
-                    added++;
+                if (mipsolver.mipdata_->num_nodes > 0) {
+                    return;  // root only
                 }
             }
-        } else {
-            // Main MIP: run the separators on `sep_threads` threads, timing
-            // each one. Under HiGHS's parallel tree search that is one, so
-            // each worker runs its separators one after another.
-            using clock = std::chrono::steady_clock;
-            std::vector<std::vector<sep::Cut>> results(separators_.size());
-            std::vector<double> elapsed(separators_.size(), 0.0);
-            parallel::parallel_for(
-                0, static_cast<int>(separators_.size()),
-                [&](int i) {
-                    const auto idx = static_cast<size_t>(i);
-                    auto t0 = clock::now();
-                    results[idx] = separators_[idx]->separate(ctx);
-                    elapsed[idx] = std::chrono::duration<double>(clock::now() - t0).count();
-                },
-                sep_threads);
 
-            // Pool all cuts from all separators.
-            struct PooledCut {
-                size_t sep_idx;
-                size_t cut_idx;
-                double violation;
+            // Amortized separation: skip rounds to reduce overhead
+            // (not applied for sub-MIPs — they are short-lived)
+            if (!mipsolver.submip) {
+                int64_t call = separation_calls_++;
+                if (separation_interval_ > 1 && (call % separation_interval_) != 0) {
+                    return;
+                }
+            }
+
+            // Separation-phase wall-clock starts here: covers support-graph and
+            // Gomory-Hu construction plus the parallel separators and pooling. Only
+            // accumulated for the main MIP, at the end of the round.
+            const auto sep_t0 = std::chrono::steady_clock::now();
+
+            const auto& sol = lpRelaxation.getSolution();
+            const int32_t m = num_edges_;
+            const int32_t n = num_nodes_;
+
+            std::vector<double> x_vals(m);
+            std::vector<double> y_vals(n);
+            // Each top-level column's image in a sub-MIP's columns, for cut
+            // translation; empty for the main MIP.
+            std::vector<HighsUserSeparator::ColumnImage> column_images;
+
+            if (mipsolver.submip) {
+                // Sub-MIP: LP solution is in reduced (presolved) column space.
+                // Expand to original space, through every sub-MIP level, so
+                // separators see the full model.
+                const std::vector<double> expanded =
+                    HighsUserSeparator::toOriginalSpace(mipsolver, sol.col_value);
+
+                if (static_cast<int32_t>(expanded.size()) < m + n) {
+                    return;
+                }
+
+                std::copy_n(expanded.begin(), m, x_vals.begin());
+                std::copy_n(expanded.begin() + m, n, y_vals.begin());
+
+                column_images = HighsUserSeparator::columnImages(mipsolver);
+            } else {
+                std::copy_n(sol.col_value.begin(), m, x_vals.begin());
+                std::copy_n(sol.col_value.begin() + m, n, y_vals.begin());
+
+                // Cache LP values for heuristic callback
+                {
+                    std::scoped_lock lock(*lp_cache_mutex_);
+                    *cached_x_lp_ = x_vals;
+                    *cached_y_lp_ = y_vals;
+                }
+            }
+
+            // Build support graph once for all separators
+            const auto& graph = prob_.graph();
+            const double graph_tol = 1e-6;  // for edge inclusion in support graph
+            digraph_builder builder(n);
+            for (auto e : graph.edges()) {
+                double xval = x_vals[e];
+                if (xval > graph_tol) {
+                    int32_t u = graph.edge_source(e);
+                    int32_t v = graph.edge_target(e);
+                    builder.add_arc(u, v, xval);
+                    builder.add_arc(v, u, xval);
+                }
+            }
+            auto [support_graph, capacity] = builder.build();
+
+            // Build Gomory-Hu tree: n-1 max-flows instead of 3*n
+            gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
+
+            // Thread budget (#159): the separators run on `sep_threads` of it,
+            // and the rest, plus the thread it runs on, goes to RCI's candidate
+            // loop, the one separator loop that reads ctx.threads. So at most
+            // `budget` threads separate at once.
+            const int32_t budget = callback_threads(mipsolver, threads_);
+            const int32_t sep_threads =
+                std::clamp(static_cast<int32_t>(separators_.size()), int32_t{1}, budget);
+
+            sep::SeparationContext ctx{
+                .problem = prob_,
+                .x_values = std::span(x_vals.data(), static_cast<size_t>(m)),
+                .y_values = std::span(y_vals.data(), static_cast<size_t>(n)),
+                .x_offset = x_offset(),
+                .y_offset = y_offset(),
+                .tol = frac_tol_,
+                .flow_tree = &flow_tree,
+                .support_graph = &support_graph,
+                .support_capacity = &capacity,
+                .upper_bound = mipsolver.mipdata_->upper_limit,
+                .all_pairs = std::span<const double>(*all_pairs_),
+                .threads = budget - sep_threads + 1,
             };
-            std::vector<PooledCut> pool;
-            // This round's stats, merged into separator_stats_ at its end.
-            std::vector<SeparatorStats> round_stats(separators_.size());
-            for (size_t i = 0; i < separators_.size(); ++i) {
-                const std::string sep_name = separators_[i]->name();
-                auto& stats = round_stats[i];
-                stats.time_seconds += elapsed[i];
-                if (!results[i].empty()) {
-                    stats.rounds_called++;
-                }
-                // Per-separator cap (optional pre-filter)
-                const auto it_cap = per_separator_max_cuts_.find(sep_name);
-                const int32_t sep_cap = (it_cap != per_separator_max_cuts_.end())
-                                            ? it_cap->second
-                                            : 0;  // 0 = unlimited per separator
 
-                auto& cuts = results[i];
+            if (mipsolver.submip) {
+                if (!sec_enabled_for_callbacks) {
+                    return;
+                }
+                // Sub-MIP: only run SEC (lazy constraint) to keep overhead low.
+                // Other separators (RCI, Multistar, etc.) add tightening cuts
+                // but aren't needed for feasibility in short-lived sub-MIPs.
+                sep::SECSeparator sec;
+                auto cuts = sec.separate(ctx);
+                const auto it_cap = per_separator_max_cuts_.find(sec.name());
+                const int32_t max_cuts =
+                    (it_cap != per_separator_max_cuts_.end()) ? it_cap->second : max_cuts_per_sep_;
+
                 std::ranges::stable_sort(cuts, [](const sep::Cut& a, const sep::Cut& b) {
                     return a.violation > b.violation;
                 });
-                int32_t sep_added = 0;
-                for (size_t j = 0; j < cuts.size(); ++j) {
-                    if (sep_cap > 0 && sep_added >= sep_cap) {
+                int32_t added = 0;
+                if (max_cuts == 0) {
+                    return;
+                }
+                for (auto& cut : cuts) {
+                    if (max_cuts >= 0 && added >= max_cuts) {
                         break;
                     }
-                    pool.push_back({i, j, cuts[j].violation});
-                    sep_added++;
-                }
-            }
+                    // Translate the cut to the sub-MIP's columns (#162): a
+                    // column presolve fixed moves to the rhs, and a cut over one
+                    // it substituted is dropped, since its value there depends
+                    // on other columns.
+                    std::vector<HighsInt> red_idx(cut.indices.begin(), cut.indices.end());
+                    std::vector<double> red_val(cut.values.begin(), cut.values.end());
+                    double rhs = cut.rhs;
+                    if (!HighsUserSeparator::toSolveSpace(column_images, red_idx, red_val, rhs)) {
+                        continue;
+                    }
 
-            // Sort entire pool by violation descending, add top max_cuts_per_round_
-            std::ranges::stable_sort(pool, [](const PooledCut& a, const PooledCut& b) {
-                return a.violation > b.violation;
-            });
-            int32_t round_added = 0;
-            for (const auto& pc : pool) {
-                if (max_cuts_per_round_ > 0 && round_added >= max_cuts_per_round_) {
-                    break;
+                    if (!red_idx.empty()) {
+                        cutpool.addCut(mipsolver, red_idx.data(), red_val.data(),
+                                       static_cast<HighsInt>(red_idx.size()), rhs);
+                        total_cuts_++;
+                        added++;
+                    }
                 }
-                auto& cut = results[pc.sep_idx][pc.cut_idx];
-                auto& stats = round_stats[pc.sep_idx];
-                std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
-                // Disable domain propagation for user cuts: fractional
-                // coefficients (e.g. RCI's 2*q_i/Q_r) can cause HiGHS
-                // propagation to over-tighten bounds and prune the
-                // optimal solution.
-                cutpool.addCut(mipsolver, hi.data(), cut.values.data(),
-                               static_cast<HighsInt>(hi.size()), cut.rhs,
-                               /*integral=*/false,
-                               /*propagate=*/false);
-                stats.cuts_added++;
-                total_cuts_++;
-                round_added++;
+            } else {
+                // Main MIP: run the separators on `sep_threads` threads, timing
+                // each one. Under HiGHS's parallel tree search that is one, so
+                // each worker runs its separators one after another.
+                using clock = std::chrono::steady_clock;
+                std::vector<std::vector<sep::Cut>> results(separators_.size());
+                std::vector<double> elapsed(separators_.size(), 0.0);
+                parallel::parallel_for(
+                    0, static_cast<int>(separators_.size()),
+                    [&](int i) {
+                        const auto idx = static_cast<size_t>(i);
+                        auto t0 = clock::now();
+                        results[idx] = separators_[idx]->separate(ctx);
+                        elapsed[idx] = std::chrono::duration<double>(clock::now() - t0).count();
+                    },
+                    sep_threads);
+
+                // Pool all cuts from all separators.
+                struct PooledCut {
+                    size_t sep_idx;
+                    size_t cut_idx;
+                    double violation;
+                };
+                std::vector<PooledCut> pool;
+                // This round's stats, merged into separator_stats_ at its end.
+                std::vector<SeparatorStats> round_stats(separators_.size());
+                for (size_t i = 0; i < separators_.size(); ++i) {
+                    const std::string sep_name = separators_[i]->name();
+                    auto& stats = round_stats[i];
+                    stats.time_seconds += elapsed[i];
+                    if (!results[i].empty()) {
+                        stats.rounds_called++;
+                    }
+                    // Per-separator cap (optional pre-filter)
+                    const auto it_cap = per_separator_max_cuts_.find(sep_name);
+                    const int32_t sep_cap = (it_cap != per_separator_max_cuts_.end())
+                                                ? it_cap->second
+                                                : 0;  // 0 = unlimited per separator
+
+                    auto& cuts = results[i];
+                    std::ranges::stable_sort(cuts, [](const sep::Cut& a, const sep::Cut& b) {
+                        return a.violation > b.violation;
+                    });
+                    int32_t sep_added = 0;
+                    for (size_t j = 0; j < cuts.size(); ++j) {
+                        if (sep_cap > 0 && sep_added >= sep_cap) {
+                            break;
+                        }
+                        pool.push_back({i, j, cuts[j].violation});
+                        sep_added++;
+                    }
+                }
+
+                // Sort entire pool by violation descending, add top max_cuts_per_round_
+                std::ranges::stable_sort(pool, [](const PooledCut& a, const PooledCut& b) {
+                    return a.violation > b.violation;
+                });
+                int32_t round_added = 0;
+                for (const auto& pc : pool) {
+                    if (max_cuts_per_round_ > 0 && round_added >= max_cuts_per_round_) {
+                        break;
+                    }
+                    auto& cut = results[pc.sep_idx][pc.cut_idx];
+                    auto& stats = round_stats[pc.sep_idx];
+                    std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
+                    // Disable domain propagation for user cuts: fractional
+                    // coefficients (e.g. RCI's 2*q_i/Q_r) can cause HiGHS
+                    // propagation to over-tighten bounds and prune the
+                    // optimal solution.
+                    cutpool.addCut(mipsolver, hi.data(), cut.values.data(),
+                                   static_cast<HighsInt>(hi.size()), cut.rhs,
+                                   /*integral=*/false,
+                                   /*propagate=*/false);
+                    stats.cuts_added++;
+                    total_cuts_++;
+                    round_added++;
+                }
+                const double round_seconds =
+                    std::chrono::duration<double>(clock::now() - sep_t0).count();
+                std::scoped_lock lock(cut_stats_mutex_);
+                for (size_t i = 0; i < separators_.size(); ++i) {
+                    auto& stats = separator_stats_[separators_[i]->name()];
+                    stats.time_seconds += round_stats[i].time_seconds;
+                    stats.rounds_called += round_stats[i].rounds_called;
+                    stats.cuts_added += round_stats[i].cuts_added;
+                }
+                separation_time_seconds_ += round_seconds;
             }
-            const double round_seconds =
-                std::chrono::duration<double>(clock::now() - sep_t0).count();
-            std::scoped_lock lock(cut_stats_mutex_);
-            for (size_t i = 0; i < separators_.size(); ++i) {
-                auto& stats = separator_stats_[separators_[i]->name()];
-                stats.time_seconds += round_stats[i].time_seconds;
-                stats.rounds_called += round_stats[i].rounds_called;
-                stats.cuts_added += round_stats[i].cuts_added;
-            }
-            separation_time_seconds_ += round_seconds;
-        }
-        separation_rounds_++;
-    });
+            separation_rounds_++;
+        });
 
     // Register feasibility check for incumbent solutions.
     // HiGHS heuristics (feasibility pump, rounding, sub-MIPs) may produce

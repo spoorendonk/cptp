@@ -133,6 +133,69 @@ std::vector<HighsInt> HighsUserSeparator::originalColumns(const HighsMipSolver& 
     return cols;
 }
 
+std::vector<HighsUserSeparator::ColumnImage> HighsUserSeparator::columnImages(
+    const HighsMipSolver& mipsolver) {
+    using Stack = presolve::HighsPostsolveStack;
+    std::vector<const HighsMipSolver*> levels;
+    for (const HighsMipSolver* level = &mipsolver; level->submip; level = level->parent_mip_)
+        levels.push_back(level);
+
+    // Start with the identity on the top-level model's columns: the input of
+    // the outermost sub-MIP level, or the solve's own at the top level.
+    const HighsInt num_top_col = levels.empty()
+                                     ? mipsolver.model_->num_col_
+                                     : levels.back()->mipdata_->postSolveStack.getOrigNumCol();
+    std::vector<ColumnImage> images(static_cast<size_t>(num_top_col));
+    for (HighsInt col = 0; col < num_top_col; ++col)
+        images[static_cast<size_t>(col)] = {col, 1.0, 0.0};
+
+    // Outermost level first: each maps its input columns, the columns the
+    // images so far land on, into its presolved ones.
+    for (auto it = levels.rbegin(); it != levels.rend(); ++it) {
+        const std::vector<Stack::CptpColumnImage> level_images =
+            (*it)->mipdata_->postSolveStack.cptpColumnImages();
+        for (ColumnImage& image : images) {
+            if (image.col < 0)
+                continue;
+            const Stack::CptpColumnImage& inner = level_images[static_cast<size_t>(image.col)];
+            if (inner.col == Stack::kCptpImageNone) {
+                image = {kImageNone, 0.0, 0.0};
+            } else if (inner.col == Stack::kCptpImageConstant) {
+                image = {kImageConstant, 0.0, image.constant + image.scale * inner.constant};
+            } else {
+                image = {inner.col, image.scale * inner.scale,
+                         image.constant + image.scale * inner.constant};
+            }
+        }
+    }
+    return images;
+}
+
+bool HighsUserSeparator::toSolveSpace(const std::vector<ColumnImage>& images,
+                                      std::vector<HighsInt>& idx, std::vector<double>& val,
+                                      double& rhs) {
+    // Images of distinct top-level columns land on distinct columns, so the
+    // rewritten cut has no repeated index.
+    size_t kept = 0;
+    for (size_t k = 0; k < idx.size(); ++k) {
+        const HighsInt col = idx[k];
+        if (col < 0 || static_cast<size_t>(col) >= images.size())
+            return false;
+        const ColumnImage& image = images[static_cast<size_t>(col)];
+        if (image.col == kImageNone)
+            return false;
+        rhs -= val[k] * image.constant;
+        if (image.col == kImageConstant)
+            continue;
+        idx[kept] = image.col;
+        val[kept] = val[k] * image.scale;
+        ++kept;
+    }
+    idx.resize(kept);
+    val.resize(kept);
+    return true;
+}
+
 void HighsUserSeparator::markIncumbentRejected() {
     incumbent_rejected_ = true;
 }

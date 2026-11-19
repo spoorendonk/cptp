@@ -290,4 +290,74 @@ cptp_replace(CONTENT7 1
 file(WRITE "${MIP_DIR}/HighsCutPool.cpp" "${CONTENT7}")
 message(STATUS "Applied cut propagate-flag sync patch to HighsCutPool.cpp")
 
+# ── 8. Patch HighsPostsolveStack.h: each original column's image (#162) ──
+# A sub-MIP's cut translation (HighsUserSeparator::columnImages) needs to know
+# how undoPrimal sets each original column from the presolved columns: as an
+# affine function of one presolved column, as a constant, or otherwise. Only
+# three reductions decide it. A column a reduction removes keeps no image
+# unless FixedCol removed it (a constant); a LinearTransform maps a column
+# affinely; a DuplicateColumn splits the merged column's value between two
+# columns, so neither has one. Every other undo writes only the column its
+# reduction removed. The scan reads the reductions' data at their recorded
+# end positions, as undo pops it, and moves the stack's read position, as
+# undoPrimal does.
+set(_cptp_image_method [=[
+  // cptp patch: the image of each original column's undoPrimal value in the
+  // presolved columns: scale * x[col] + constant when col >= 0, the constant
+  // when col == kCptpImageConstant, none when col == kCptpImageNone.
+  static constexpr HighsInt kCptpImageConstant = -1;
+  static constexpr HighsInt kCptpImageNone = -2;
+  struct CptpColumnImage {
+    HighsInt col;
+    double scale;
+    double constant;
+  };
+  std::vector<CptpColumnImage> cptpColumnImages() {
+    std::vector<CptpColumnImage> image(nextColIndex,
+                                       {kCptpImageNone, 0.0, 0.0});
+    for (size_t i = 0; i < origColIndex.size(); ++i)
+      image[origColIndex[i]] = {static_cast<HighsInt>(i), 1.0, 0.0};
+    for (size_t i = reductions.size(); i > 0; --i) {
+      reductionValues.setPosition(reductions[i - 1].second);
+      switch (reductions[i - 1].first) {
+        case ReductionType::kLinearTransform: {
+          LinearTransform reduction;
+          reductionValues.pop(reduction);
+          CptpColumnImage& c = image[reduction.col];
+          if (c.col == kCptpImageNone) break;
+          c.scale *= reduction.scale;
+          c.constant = c.constant * reduction.scale + reduction.constant;
+          break;
+        }
+        case ReductionType::kFixedCol: {
+          std::vector<Nonzero> fixedColValues;
+          FixedCol reduction;
+          reductionValues.pop(fixedColValues);
+          reductionValues.pop(reduction);
+          image[reduction.col] = {kCptpImageConstant, 0.0, reduction.fixValue};
+          break;
+        }
+        case ReductionType::kDuplicateColumn: {
+          DuplicateColumn reduction;
+          reductionValues.pop(reduction);
+          image[reduction.col] = {kCptpImageNone, 0.0, 0.0};
+          image[reduction.duplicateCol] = {kCptpImageNone, 0.0, 0.0};
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    reductionValues.resetPosition();
+    image.resize(origNumCol);
+    return image;
+  }
+]=])
+file(READ "${SOURCE_DIR}/highs/presolve/HighsPostsolveStack.h" CONTENT8)
+cptp_replace(CONTENT8 1
+  "  size_t numReductions() const { return reductions.size(); }\n"
+  "  size_t numReductions() const { return reductions.size(); }\n${_cptp_image_method}")
+file(WRITE "${SOURCE_DIR}/highs/presolve/HighsPostsolveStack.h" "${CONTENT8}")
+message(STATUS "Applied column image patch to HighsPostsolveStack.h")
+
 file(WRITE "${_stamp}" "${PATCH_HASH}")

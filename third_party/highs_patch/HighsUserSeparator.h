@@ -79,6 +79,32 @@ public:
     /// columns, through every sub-MIP level.
     static std::vector<HighsInt> originalColumns(const HighsMipSolver& mipsolver, HighsInt num_col);
 
+    /// How the expanded value of a top-level column (toOriginalSpace) follows
+    /// from the solve's own columns: scale * x[col] + constant when col >= 0,
+    /// the constant when col == kImageConstant (presolve fixed it), and no
+    /// such map when col == kImageNone (presolve substituted it, or split it
+    /// with a duplicate column).
+    static constexpr HighsInt kImageConstant = -1;
+    static constexpr HighsInt kImageNone = -2;
+    struct ColumnImage {
+        HighsInt col;
+        double scale;
+        double constant;
+    };
+
+    /// The image of every top-level column in the solve's columns, through
+    /// every sub-MIP level; identity at the top level. Reads the postsolve
+    /// stacks as toOriginalSpace does.
+    static std::vector<ColumnImage> columnImages(const HighsMipSolver& mipsolver);
+
+    /// Rewrite the cut idx . val <= rhs over top-level columns as one over
+    /// the solve's columns, given the images columnImages returns: a fixed
+    /// column moves to the rhs, and an affine one maps onto its column.
+    /// Returns false, leaving the cut unspecified, when a cut column has no
+    /// image: the cut cannot be stated exactly in the solve's columns.
+    static bool toSolveSpace(const std::vector<ColumnImage>& images, std::vector<HighsInt>& idx,
+                             std::vector<double>& val, double& rhs);
+
     /// Record that addIncumbent() rejected a solution because it violates the
     /// user lazy constraints. thread_local: the mark and its take happen in one
     /// synchronous call on one thread (HighsSearch::evaluateNode), on the main
