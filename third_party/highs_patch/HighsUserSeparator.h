@@ -82,8 +82,9 @@ public:
     /// How the expanded value of a top-level column (toOriginalSpace) follows
     /// from the solve's own columns: scale * x[col] + constant when col >= 0,
     /// the constant when col == kImageConstant (presolve fixed it), and no
-    /// such map when col == kImageNone (presolve substituted it, or split it
-    /// with a duplicate column).
+    /// such map when col == kImageNone (presolve substituted it through rows
+    /// or bounds other than a doubleton equation, or split it with a
+    /// duplicate column). Two top-level columns may share an image's column.
     static constexpr HighsInt kImageConstant = -1;
     static constexpr HighsInt kImageNone = -2;
     struct ColumnImage {
@@ -97,9 +98,19 @@ public:
     /// stacks as toOriginalSpace does.
     static std::vector<ColumnImage> columnImages(const HighsMipSolver& mipsolver);
 
+    /// Guard against a reduction columnImages does not know (a HiGHS bump):
+    /// clear the image of every top-level column whose image, evaluated at
+    /// the solve's solution sol, differs from its expanded value
+    /// (toOriginalSpace(sol)) by more than tol * (1 + |expanded value|).
+    /// Returns the number of images cleared.
+    static HighsInt clearMismatchedImages(std::vector<ColumnImage>& images,
+                                          const std::vector<double>& sol,
+                                          const std::vector<double>& expanded, double tol);
+
     /// Rewrite the cut idx . val <= rhs over top-level columns as one over
     /// the solve's columns, given the images columnImages returns: a fixed
-    /// column moves to the rhs, and an affine one maps onto its column.
+    /// column moves to the rhs, and an affine one maps onto its column, with
+    /// the coefficients of columns that map onto one column summed.
     /// Returns false, leaving the cut unspecified, when a cut column has no
     /// image: the cut cannot be stated exactly in the solve's columns.
     static bool toSolveSpace(const std::vector<ColumnImage>& images, std::vector<HighsInt>& idx,

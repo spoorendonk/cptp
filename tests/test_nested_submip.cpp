@@ -98,7 +98,80 @@ HighsLp complement_model(int32_t num_col, int32_t num_row, uint32_t seed) {
 
 }  // namespace
 
-TEST_CASE("Sub-MIP cut translation: fixed columns fold, substituted ones drop the cut",
+TEST_CASE("Sub-MIP cut translation: a cut column without an image drops the cut",
+          "[highs_patch][submip]") {
+    using Image = HighsUserSeparator::ColumnImage;
+    const std::vector<Image> images{
+        {0, 1.0, 0.0},
+        {HighsUserSeparator::kImageNone, 0.0, 0.0},
+        {HighsUserSeparator::kImageConstant, 0.0, 1.0},
+    };
+    std::vector<HighsInt> idx{0, 1};
+    std::vector<double> val{1.0, 1.0};
+    double rhs = 1.0;
+    CHECK_FALSE(HighsUserSeparator::toSolveSpace(images, idx, val, rhs));
+
+    // An index outside the images is refused too.
+    std::vector<HighsInt> far_idx{3};
+    std::vector<double> far_val{1.0};
+    double far_rhs = 1.0;
+    CHECK_FALSE(HighsUserSeparator::toSolveSpace(images, far_idx, far_val, far_rhs));
+}
+
+TEST_CASE("Sub-MIP cut translation: fixed columns fold, shared columns merge",
+          "[highs_patch][submip]") {
+    using Image = HighsUserSeparator::ColumnImage;
+    // x0 = y0; x1 = 1 - y0 (a doubleton equation's partner); x2 fixed at 1;
+    // x3 = 2 * y1 + 0.5; x4 = -0.5 * y2 + 1.
+    const std::vector<Image> images{
+        {0, 1.0, 0.0}, {0, -1.0, 1.0}, {HighsUserSeparator::kImageConstant, 0.0, 1.0},
+        {1, 2.0, 0.5}, {2, -0.5, 1.0},
+    };
+
+    SECTION("coefficients on one column sum, and a cancelled one is dropped") {
+        // x0 + x1 + 3 x2 + x3 <= 6  ->  2 y1 <= 6 - 1 - 3 - 0.5
+        std::vector<HighsInt> idx{0, 1, 2, 3};
+        std::vector<double> val{1.0, 1.0, 3.0, 1.0};
+        double rhs = 6.0;
+        REQUIRE(HighsUserSeparator::toSolveSpace(images, idx, val, rhs));
+        CHECK(idx == std::vector<HighsInt>{1});
+        CHECK(val == std::vector<double>{2.0});
+        CHECK(rhs == 1.5);
+    }
+    SECTION("distinct columns map in order, with scale and constant") {
+        // 2 x4 + x0 - x1 <= 1  ->  -y2 + 2 y0 <= 1 - 2 + 1
+        std::vector<HighsInt> idx{4, 0, 1};
+        std::vector<double> val{2.0, 1.0, -1.0};
+        double rhs = 1.0;
+        REQUIRE(HighsUserSeparator::toSolveSpace(images, idx, val, rhs));
+        CHECK(idx == std::vector<HighsInt>{0, 2});
+        CHECK(val == std::vector<double>{2.0, -1.0});
+        CHECK(rhs == 0.0);
+    }
+}
+
+TEST_CASE("Sub-MIP cut translation: an image undoPrimal disagrees with is cleared",
+          "[highs_patch][submip]") {
+    using Image = HighsUserSeparator::ColumnImage;
+    std::vector<Image> images{
+        {0, 1.0, 0.0},
+        {0, -1.0, 1.0},
+        {HighsUserSeparator::kImageConstant, 0.0, 1.0},
+        {1, 1.0, 0.0},
+        {HighsUserSeparator::kImageNone, 0.0, 0.0},
+    };
+    const std::vector<double> sol{0.25, 0.5};
+    // x1 should be 0.75 and x2 1.0; the expansion says otherwise for both.
+    const std::vector<double> expanded{0.25, 0.5, 0.0, 0.5, 0.3};
+    CHECK(HighsUserSeparator::clearMismatchedImages(images, sol, expanded, 1e-9) == 2);
+    CHECK(images[0].col == 0);
+    CHECK(images[1].col == HighsUserSeparator::kImageNone);
+    CHECK(images[2].col == HighsUserSeparator::kImageNone);
+    CHECK(images[3].col == 1);
+    CHECK(images[4].col == HighsUserSeparator::kImageNone);
+}
+
+TEST_CASE("Sub-MIP cut translation: images of fixed and substituted columns match undoPrimal",
           "[highs_patch][submip]") {
     const HighsLp lp = complement_model(60, 20, 11);
     const auto num_top = static_cast<size_t>(lp.num_col_);
@@ -107,7 +180,6 @@ TEST_CASE("Sub-MIP cut translation: fixed columns fold, substituted ones drop th
     std::atomic<int64_t> substituted{0};
     std::atomic<int64_t> fixed{0};
     std::atomic<int64_t> bad_images{0};
-    std::atomic<int64_t> kept_substituted{0};
     std::atomic<int64_t> bad_translations{0};
 
     HighsUserSeparator::setCallback([&](const HighsLpRelaxation& relaxation, HighsCutPool&,
@@ -118,42 +190,28 @@ TEST_CASE("Sub-MIP cut translation: fixed columns fold, substituted ones drop th
         rounds++;
         const auto& reduced = relaxation.getSolution().col_value;
         const auto expanded = HighsUserSeparator::toOriginalSpace(mipsolver, reduced);
-        const auto images = HighsUserSeparator::columnImages(mipsolver);
+        auto images = HighsUserSeparator::columnImages(mipsolver);
         if (expanded.size() != num_top || images.size() != num_top) {
             bad_images++;
             return;
         }
+        // Every image gives the column's expanded value.
+        bad_images += HighsUserSeparator::clearMismatchedImages(images, reduced, expanded, 1e-9);
 
-        // Every column with an image takes the value its image gives.
+        // A cut over every column with an image, coefficient j + 1.
         std::vector<HighsInt> idx;
         std::vector<double> val;
         double activity = 0.0;
         for (size_t j = 0; j < num_top; ++j) {
             const auto& image = images[j];
             if (image.col == HighsUserSeparator::kImageNone) {
-                substituted++;
-                // A cut over a substituted column is dropped.
-                std::vector<HighsInt> one_idx{static_cast<HighsInt>(j)};
-                std::vector<double> one_val{1.0};
-                double one_rhs = 1.0;
-                if (HighsUserSeparator::toSolveSpace(images, one_idx, one_val, one_rhs)) {
-                    kept_substituted++;
-                }
                 continue;
             }
-            double value = image.constant;
             if (image.col == HighsUserSeparator::kImageConstant) {
                 fixed++;
-            } else if (std::cmp_less(image.col, reduced.size())) {
-                value += image.scale * reduced[static_cast<size_t>(image.col)];
-            } else {
-                bad_images++;
-                continue;
+            } else if (image.scale != 1.0 || image.constant != 0.0) {
+                substituted++;  // a doubleton equation's substituted column
             }
-            if (std::abs(value - expanded[j]) > kFeasTol) {
-                bad_images++;
-            }
-            // A cut over every column with an image, coefficient j + 1.
             idx.push_back(static_cast<HighsInt>(j));
             val.push_back(static_cast<double>(j + 1));
             activity += static_cast<double>(j + 1) * expanded[j];
@@ -190,12 +248,11 @@ TEST_CASE("Sub-MIP cut translation: fixed columns fold, substituted ones drop th
     REQUIRE(run_status != HighsStatus::kError);
 
     // The test proves nothing unless sub-MIPs ran, with presolve both fixing
-    // and substituting columns.
+    // columns and substituting them through the complement rows.
     REQUIRE(rounds.load() > 0);
     REQUIRE(substituted.load() > 0);
     REQUIRE(fixed.load() > 0);
     CHECK(bad_images.load() == 0);
-    CHECK(kept_substituted.load() == 0);
     CHECK(bad_translations.load() == 0);
 }
 

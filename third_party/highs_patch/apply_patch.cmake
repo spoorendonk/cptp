@@ -293,14 +293,17 @@ message(STATUS "Applied cut propagate-flag sync patch to HighsCutPool.cpp")
 # ── 8. Patch HighsPostsolveStack.h: each original column's image (#162) ──
 # A sub-MIP's cut translation (HighsUserSeparator::columnImages) needs to know
 # how undoPrimal sets each original column from the presolved columns: as an
-# affine function of one presolved column, as a constant, or otherwise. Only
-# three reductions decide it. A column a reduction removes keeps no image
-# unless FixedCol removed it (a constant); a LinearTransform maps a column
-# affinely; a DuplicateColumn splits the merged column's value between two
-# columns, so neither has one. Every other undo writes only the column its
-# reduction removed. The scan reads the reductions' data at their recorded
-# end positions, as undo pops it, and moves the stack's read position, as
-# undoPrimal does.
+# affine function of one presolved column, as a constant, or otherwise. The
+# scan replays undo's order on images instead of values. A column a reduction
+# removes keeps no image unless FixedCol removed it (a constant) or a
+# DoubletonEquation substituted it (colSubst = (rhs - coef * col) / coefSubst,
+# affine in col's image at that point of undo); a LinearTransform maps a
+# column affinely; a DuplicateColumn splits the merged column's value between
+# two columns, so neither has one. Every other undo writes only the column its
+# reduction removed, through rows or bounds, so that column has none. Two
+# columns may share an image's column (a doubleton's pair). The scan reads the
+# reductions' data at their recorded end positions, as undo pops it, and
+# moves the stack's read position, as undoPrimal does.
 set(_cptp_image_method [=[
   // cptp patch: the image of each original column's undoPrimal value in the
   // presolved columns: scale * x[col] + constant when col >= 0, the constant
@@ -335,6 +338,22 @@ set(_cptp_image_method [=[
           reductionValues.pop(fixedColValues);
           reductionValues.pop(reduction);
           image[reduction.col] = {kCptpImageConstant, 0.0, reduction.fixValue};
+          break;
+        }
+        case ReductionType::kDoubletonEquation: {
+          std::vector<Nonzero> substColValues;
+          DoubletonEquation reduction;
+          reductionValues.pop(substColValues);
+          reductionValues.pop(reduction);
+          const CptpColumnImage c = image[reduction.col];
+          if (c.col == kCptpImageNone) {
+            image[reduction.colSubst] = {kCptpImageNone, 0.0, 0.0};
+            break;
+          }
+          image[reduction.colSubst] = {
+              c.col, -reduction.coef * c.scale / reduction.coefSubst,
+              (reduction.rhs - reduction.coef * c.constant) /
+                  reduction.coefSubst};
           break;
         }
         case ReductionType::kDuplicateColumn: {

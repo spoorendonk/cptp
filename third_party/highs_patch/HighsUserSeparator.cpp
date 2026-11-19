@@ -2,6 +2,8 @@
 
 #include "mip/HighsMipSolverData.h"
 
+#include <algorithm>
+#include <cmath>
 #include <numeric>
 #include <utility>
 
@@ -171,12 +173,38 @@ std::vector<HighsUserSeparator::ColumnImage> HighsUserSeparator::columnImages(
     return images;
 }
 
+HighsInt HighsUserSeparator::clearMismatchedImages(std::vector<ColumnImage>& images,
+                                                   const std::vector<double>& sol,
+                                                   const std::vector<double>& expanded,
+                                                   double tol) {
+    HighsInt cleared = 0;
+    for (size_t j = 0; j < images.size(); ++j) {
+        ColumnImage& image = images[j];
+        if (image.col == kImageNone)
+            continue;
+        bool match = j < expanded.size();
+        if (match) {
+            double value = image.constant;
+            if (image.col != kImageConstant) {
+                match = static_cast<size_t>(image.col) < sol.size();
+                if (match)
+                    value += image.scale * sol[static_cast<size_t>(image.col)];
+            }
+            match = match && std::abs(value - expanded[j]) <= tol * (1.0 + std::abs(expanded[j]));
+        }
+        if (!match) {
+            image = {kImageNone, 0.0, 0.0};
+            ++cleared;
+        }
+    }
+    return cleared;
+}
+
 bool HighsUserSeparator::toSolveSpace(const std::vector<ColumnImage>& images,
                                       std::vector<HighsInt>& idx, std::vector<double>& val,
                                       double& rhs) {
-    // Images of distinct top-level columns land on distinct columns, so the
-    // rewritten cut has no repeated index.
-    size_t kept = 0;
+    std::vector<std::pair<HighsInt, double>> terms;
+    terms.reserve(idx.size());
     for (size_t k = 0; k < idx.size(); ++k) {
         const HighsInt col = idx[k];
         if (col < 0 || static_cast<size_t>(col) >= images.size())
@@ -185,10 +213,31 @@ bool HighsUserSeparator::toSolveSpace(const std::vector<ColumnImage>& images,
         if (image.col == kImageNone)
             return false;
         rhs -= val[k] * image.constant;
-        if (image.col == kImageConstant)
+        if (image.col != kImageConstant)
+            terms.emplace_back(image.col, val[k] * image.scale);
+    }
+    // Two top-level columns may land on one column (a doubleton equation's
+    // pair): sum their coefficients, and drop a term that cancels.
+    // HiGHS builds as C++11: no ranges or structured bindings here.
+    std::stable_sort(terms.begin(), terms.end(),
+                     [](const std::pair<HighsInt, double>& a,
+                        const std::pair<HighsInt, double>& b) { return a.first < b.first; });
+    idx.clear();
+    val.clear();
+    for (const std::pair<HighsInt, double>& term : terms) {
+        if (!idx.empty() && idx.back() == term.first) {
+            val.back() += term.second;
+        } else {
+            idx.push_back(term.first);
+            val.push_back(term.second);
+        }
+    }
+    size_t kept = 0;
+    for (size_t k = 0; k < idx.size(); ++k) {
+        if (val[k] == 0.0)
             continue;
-        idx[kept] = image.col;
-        val[kept] = val[k] * image.scale;
+        idx[kept] = idx[k];
+        val[kept] = val[k];
         ++kept;
     }
     idx.resize(kept);
