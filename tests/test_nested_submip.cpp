@@ -209,8 +209,10 @@ TEST_CASE("Sub-MIP cut translation: images of fixed and substituted columns matc
             }
             if (image.col == HighsUserSeparator::kImageConstant) {
                 fixed++;
-            } else if (image.scale != 1.0 || image.constant != 0.0) {
-                substituted++;  // a doubleton equation's substituted column
+            } else if (image.scale < 0.0) {
+                // A complement column substituted by its doubleton equation
+                // x_j + z_j = 1: z_j = 1 - x_j (or the other way round).
+                substituted++;
             }
             idx.push_back(static_cast<HighsInt>(j));
             val.push_back(static_cast<double>(j + 1));

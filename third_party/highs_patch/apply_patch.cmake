@@ -299,8 +299,10 @@ message(STATUS "Applied cut propagate-flag sync patch to HighsCutPool.cpp")
 # DoubletonEquation substituted it (colSubst = (rhs - coef * col) / coefSubst,
 # affine in col's image at that point of undo); a LinearTransform maps a
 # column affinely; a DuplicateColumn splits the merged column's value between
-# two columns, so neither has one. Every other undo writes only the column its
-# reduction removed, through rows or bounds, so that column has none. Two
+# two columns, so neither has one. Every other known undo writes only the
+# column its reduction removed, through rows or bounds, so that column has
+# none; a reduction type the scan does not list (a HiGHS bump) leaves every
+# column without one, so translation fails closed. Two
 # columns may share an image's column (a doubleton's pair). The scan reads the
 # reductions' data at their recorded end positions, as undo pops it, and
 # moves the stack's read position, as undoPrimal does.
@@ -363,7 +365,25 @@ set(_cptp_image_method [=[
           image[reduction.duplicateCol] = {kCptpImageNone, 0.0, 0.0};
           break;
         }
+        // Undo writes only the column these removed, or no primal value.
+        case ReductionType::kFreeColSubstitution:
+        case ReductionType::kEqualityRowAddition:
+        case ReductionType::kEqualityRowAdditions:
+        case ReductionType::kSingletonRow:
+        case ReductionType::kRedundantRow:
+        case ReductionType::kImpliedEquation:
+        case ReductionType::kForcingRow:
+        case ReductionType::kForcingColumn:
+        case ReductionType::kForcingColumnRemovedRow:
+        case ReductionType::kDuplicateRow:
+        case ReductionType::kZeroObjSingletonContinuousCol:
+        case ReductionType::kFourierMotzkinBlock:
+        case ReductionType::kFourierMotzkinObjCol:
+          break;
         default:
+          // A reduction this scan does not know (a HiGHS bump): no image.
+          image.assign(image.size(), {kCptpImageNone, 0.0, 0.0});
+          i = 1;
           break;
       }
     }

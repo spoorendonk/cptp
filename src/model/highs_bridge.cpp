@@ -433,9 +433,10 @@ void HiGHSBridge::install_separators() {
                     break;
                 }
                 // Translate the cut to the sub-MIP's columns (#162): a
-                // column presolve fixed moves to the rhs, and a cut over one
-                // it substituted is dropped, since its value there depends
-                // on other columns.
+                // column presolve fixed moves to the rhs, one a doubleton
+                // equation substituted maps onto its partner, and a cut over
+                // one with no such image (substituted through several
+                // columns, or split) is dropped.
                 std::vector<HighsInt> red_idx(cut.indices.begin(), cut.indices.end());
                 std::vector<double> red_val(cut.values.begin(), cut.values.end());
                 double rhs = cut.rhs;
