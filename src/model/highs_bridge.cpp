@@ -53,20 +53,20 @@ bool should_run_rc_fixing(const RCFixingSettings& settings, bool ub_improved,
 
 /// Threads a callback outside HiGHS's parallel tree search may use, its own
 /// included: the solve's `threads` less the HiGHS root tasks (symmetry
-/// detection, the analytic centre) running beside it now (#163), and at
-/// least its own.
-int32_t threads_beside_root_tasks(int32_t threads, const std::atomic<int32_t>& busy_root_tasks) {
-    return std::max<int32_t>(1, threads - busy_root_tasks.load(std::memory_order_relaxed));
+/// detection, the analytic centre) pending beside it now, running or about to
+/// (#163), and at least its own.
+int32_t threads_beside_root_tasks(int32_t threads, const std::atomic<int32_t>& pending_root_tasks) {
+    return std::max<int32_t>(1, threads - pending_root_tasks.load(std::memory_order_relaxed));
 }
 
 /// Threads a separation or propagation callback may use, its own included
 /// (#159): threads_beside_root_tasks, or its own thread alone under HiGHS's
 /// parallel tree search, whose workers already use the budget.
 int32_t callback_threads(const HighsMipSolver& mipsolver, int32_t threads,
-                         const std::atomic<int32_t>& busy_root_tasks) {
+                         const std::atomic<int32_t>& pending_root_tasks) {
     return mipsolver.mipdata_->parallelLockActive()
                ? 1
-               : threads_beside_root_tasks(threads, busy_root_tasks);
+               : threads_beside_root_tasks(threads, pending_root_tasks);
 }
 
 }  // namespace
@@ -302,12 +302,16 @@ void HiGHSBridge::install_separators() {
     static_assert(HighsUserHooks::kRootLimitHighs == -1);
     static_assert(HighsUserHooks::kRootLimitUnlimited == 0);
     HighsUserSeparator::setRootSeparationLimits(root_sepa_rounds_, root_sepa_stall_);
-    // HiGHS's root tasks report the threads they keep busy, which the
-    // callbacks leave to them (#163) and the test's peak count includes.
-    HighsUserSeparator::setRootTaskObserver([busy = busy_root_tasks_](int delta) {
-        busy->fetch_add(delta, std::memory_order_relaxed);
-        parallel::count_busy_threads(delta);
-    });
+    // HiGHS's root tasks report themselves pending, whose threads the
+    // callbacks leave to them (#163), and running on another thread, which
+    // the test's peak count includes.
+    HighsUserSeparator::setRootTaskObserver(
+        [pending = pending_root_tasks_](int pending_delta, int running_delta) {
+            pending->fetch_add(pending_delta, std::memory_order_relaxed);
+            if (running_delta != 0) {
+                parallel::count_busy_threads(running_delta);
+            }
+        });
 
     const bool sec_enabled_for_callbacks =
         std::ranges::any_of(separators_, [](const auto& s) { return s && s->name() == "SEC"; });
@@ -405,7 +409,7 @@ void HiGHSBridge::install_separators() {
         // and the rest, plus the thread it runs on, goes to RCI's candidate
         // loop, the one separator loop that reads ctx.threads. So at most
         // `budget` threads separate at once.
-        const int32_t budget = callback_threads(mipsolver, threads_, *busy_root_tasks_);
+        const int32_t budget = callback_threads(mipsolver, threads_, *pending_root_tasks_);
         const int32_t sep_threads =
             std::clamp(static_cast<int32_t>(separators_.size()), int32_t{1}, budget);
 
@@ -649,7 +653,7 @@ void HiGHSBridge::install_propagator() {
     // Hyperplane columns z_h = a_h . y (#137), whose reduced costs fold into y's.
     auto hyperplanes = hyperplanes_;
     const int32_t threads_budget = threads_;
-    auto busy_root_tasks = busy_root_tasks_;
+    auto pending_root_tasks = pending_root_tasks_;
 
     HighsUserPropagator::setCallback([=, &prob = prob_](HighsDomain& domain,
                                                         const HighsMipSolver& mipsolver,
@@ -679,7 +683,7 @@ void HiGHSBridge::install_propagator() {
             state = slot.get();
         }
         // The labeling below keeps to the thread budget (#159).
-        const int32_t threads = callback_threads(mipsolver, threads_budget, *busy_root_tasks);
+        const int32_t threads = callback_threads(mipsolver, threads_budget, *pending_root_tasks);
         CallbackStats* const stats = &state->stats;
         double* const last_ub = &state->last_ub;
         std::vector<bool>* const processed_edge = &state->processed_edge;
@@ -1245,13 +1249,13 @@ void HiGHSBridge::install_heuristic_callback() {
             const auto heuristic_t0 = std::chrono::steady_clock::now();
             // HiGHS queries user solutions on its main thread, never inside a
             // batch of tree-search work, so the heuristic takes the thread
-            // budget (#159), less HiGHS's root tasks still running beside a
+            // budget (#159), less HiGHS's root tasks pending beside a
             // root query (#163).
             heuristic::HeuristicResult result = heuristic::lp_guided_heuristic(
                 prob_, x_lp, y_lp, incumbent, 0.0, strategy, deterministic_restarts,
                 static_cast<uint32_t>(current_nodes), lpg_edge_threshold, lpg_node_threshold,
                 lpg_lp_threshold, lpg_seed_threshold,
-                threads_beside_root_tasks(threads_, *busy_root_tasks_));
+                threads_beside_root_tasks(threads_, *pending_root_tasks_));
 
             if (!result.col_values.empty() &&
                 result.objective < data_out->mip_primal_bound - 1e-6) {

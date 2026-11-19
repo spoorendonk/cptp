@@ -41,12 +41,19 @@ struct HighsUserHooks {
     int root_sepa_rounds = kRootLimitHighs;
     int root_sepa_stall = kRootLimitHighs;
 
-    /// Told +1 when a root task HiGHS spawns beside its root node (symmetry
+    /// Told of the root tasks HiGHS spawns beside its root node (symmetry
     /// detection, the analytic centre), of the solve or one of its sub-MIPs,
-    /// starts on a thread other than the one that spawned it, and -1 when
-    /// that task ends: the threads those tasks keep busy while the callbacks
-    /// run. Called on the task's thread. Null leaves them uncounted.
-    using RootTaskObserver = std::function<void(int delta)>;
+    /// as two changes of count:
+    /// - pending: +1 when one is spawned, -1 when it ends or, cancelled
+    ///   before it started, when HiGHS joins it. A pending task may start on
+    ///   another thread at any moment, so the callbacks leave it its thread.
+    /// - running: +1 when one starts on a thread other than the one that
+    ///   spawned it, -1 when it ends: the threads they keep busy now. A task
+    ///   the spawning thread runs itself when it joins it keeps no other
+    ///   thread busy.
+    /// Called on the spawning or the task's thread. Null leaves them
+    /// uncounted.
+    using RootTaskObserver = std::function<void(int pending_delta, int running_delta)>;
     RootTaskObserver root_task_observer;
 
     /// The pending set of the calling thread (defined in HighsUserSeparator.cpp).

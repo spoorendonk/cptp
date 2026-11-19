@@ -62,18 +62,49 @@ void HighsUserSeparator::clearCallback() {
     pending_hooks_.root_sepa_stall = HighsUserHooks::kRootLimitHighs;
 }
 
-HighsUserSeparator::RootTaskScope::RootTaskScope(const HighsMipSolver& mipsolver,
-                                                 std::thread::id owner) {
-    if (std::this_thread::get_id() == owner || !mipsolver.user_hooks_ ||
-        !mipsolver.user_hooks_->root_task_observer)
+namespace {
+// The solve's root task observer, or null.
+const HighsUserHooks::RootTaskObserver* rootTaskObserver(const HighsMipSolver& mipsolver) {
+    if (!mipsolver.user_hooks_ || !mipsolver.user_hooks_->root_task_observer)
+        return nullptr;
+    return &mipsolver.user_hooks_->root_task_observer;
+}
+}  // namespace
+
+void HighsUserSeparator::rootTaskSpawned(const HighsMipSolver& mipsolver) {
+    const auto* observer = rootTaskObserver(mipsolver);
+    if (!observer)
         return;
-    observer_ = &mipsolver.user_hooks_->root_task_observer;
-    (*observer_)(+1);
+    mipsolver.root_tasks_pending_.fetch_add(1, std::memory_order_relaxed);
+    (*observer)(+1, 0);
+}
+
+void HighsUserSeparator::rootTasksJoined(const HighsMipSolver& mipsolver) {
+    const auto* observer = rootTaskObserver(mipsolver);
+    if (!observer)
+        return;
+    // Joined: every task that ran has ended and released itself.
+    const int unrun = mipsolver.root_tasks_pending_.exchange(0, std::memory_order_relaxed);
+    if (unrun != 0)
+        (*observer)(-unrun, 0);
+}
+
+HighsUserSeparator::RootTaskScope::RootTaskScope(const HighsMipSolver& mipsolver,
+                                                 std::thread::id owner)
+    : mipsolver_(mipsolver) {
+    const auto* observer = rootTaskObserver(mipsolver_);
+    if (!observer || std::this_thread::get_id() == owner)
+        return;
+    running_ = true;
+    (*observer)(0, +1);
 }
 
 HighsUserSeparator::RootTaskScope::~RootTaskScope() {
-    if (observer_)
-        (*observer_)(-1);
+    const auto* observer = rootTaskObserver(mipsolver_);
+    if (!observer)
+        return;
+    mipsolver_.root_tasks_pending_.fetch_sub(1, std::memory_order_relaxed);
+    (*observer)(-1, running_ ? -1 : 0);
 }
 
 namespace {

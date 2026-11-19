@@ -50,11 +50,19 @@ public:
     /// root task observer, and reset its root cut-loop limits to HiGHS's.
     static void clearCallback();
 
-    /// Reports one root task (HighsUserHooks::root_task_observer) for its
-    /// lifetime, when it runs on a thread other than `owner`, the one that
-    /// spawned it: a task the owner runs itself at the sync keeps no other
-    /// thread busy. Lives in the task's body, since a task cancelled before
-    /// it starts never runs it.
+    /// Report a root task of the MIP solve pending
+    /// (HighsUserHooks::root_task_observer). Call on the spawning thread just
+    /// before it spawns the task.
+    static void rootTaskSpawned(const HighsMipSolver& mipsolver);
+
+    /// Release the solve's root tasks still pending after HiGHS joined its
+    /// task group: those cancelled before they started, whose body never ran.
+    /// Call on the spawning thread once the group is joined.
+    static void rootTasksJoined(const HighsMipSolver& mipsolver);
+
+    /// Reports one root task running for its lifetime, when on a thread
+    /// other than `owner`, the one that spawned it, and ends it pending.
+    /// Lives in the task's body.
     class RootTaskScope {
     public:
         RootTaskScope(const HighsMipSolver& mipsolver, std::thread::id owner);
@@ -63,7 +71,21 @@ public:
         RootTaskScope& operator=(const RootTaskScope&) = delete;
 
     private:
-        const HighsUserHooks::RootTaskObserver* observer_ = nullptr;
+        const HighsMipSolver& mipsolver_;
+        bool running_ = false;
+    };
+
+    /// Calls rootTasksJoined when it goes out of scope: declared before the
+    /// root's task group, it runs after the group's destructor joined it.
+    class RootTasksJoin {
+    public:
+        explicit RootTasksJoin(const HighsMipSolver& mipsolver) : mipsolver_(mipsolver) {}
+        ~RootTasksJoin() { rootTasksJoined(mipsolver_); }
+        RootTasksJoin(const RootTasksJoin&) = delete;
+        RootTasksJoin& operator=(const RootTasksJoin&) = delete;
+
+    private:
+        const HighsMipSolver& mipsolver_;
     };
 
     /// The round cap of the MIP solve's root cut loop, given HiGHS's own:

@@ -119,7 +119,7 @@ public:
     /// in the callbacks (separation, reduced-cost fixing, the LP-guided
     /// heuristic) uses at most this many threads, the calling one included,
     /// and only the calling one under HiGHS's parallel tree search (#159).
-    /// HiGHS's root tasks running beside a callback take theirs out of it,
+    /// HiGHS's root tasks pending beside a callback take theirs out of it,
     /// down to the calling thread alone (#163).
     void set_threads(int32_t threads) { threads_ = std::max<int32_t>(1, threads); }
 
@@ -324,11 +324,11 @@ private:
     // The propagator's state per tree worker, merged into stats_ at the end.
     std::shared_ptr<PropagatorStates> propagator_states_;
 
-    // HiGHS root tasks (symmetry detection, the analytic centre) running now
-    // on threads other than the one that spawned them, which the callbacks
-    // leave to them (#163). Shared with HiGHS's root task observer and the
-    // propagator.
-    std::shared_ptr<std::atomic<int32_t>> busy_root_tasks_ =
+    // HiGHS root tasks (symmetry detection, the analytic centre) spawned and
+    // not yet ended or joined, each running or about to on another thread,
+    // whose threads the callbacks leave to them (#163). Shared with HiGHS's
+    // root task observer and the propagator.
+    std::shared_ptr<std::atomic<int32_t>> pending_root_tasks_ =
         std::make_shared<std::atomic<int32_t>>(0);
 };
 

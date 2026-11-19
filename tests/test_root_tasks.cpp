@@ -15,9 +15,11 @@
 namespace {
 
 struct RootTasksRun {
-    int reports = 0;          // tasks reported starting
+    int reports = 0;          // tasks reported running on another thread
     int max_running = 0;      // most reported running at once
-    int running_at_sep = -1;  // reported running at the first root cut-loop call
+    int pending_at_sep = -1;  // reported pending at the first root cut-loop call
+    int running_at_sep = -1;  // reported running then
+    int pending_after = -1;   // reported pending after the solve
     int running_after = -1;   // reported running after the solve
     bool separated = false;   // the separator ran in the root cut loop
     HighsStatus status = HighsStatus::kError;
@@ -38,9 +40,10 @@ bool wait_until(const std::function<bool()>& done, std::chrono::milliseconds lim
 // max x + y over x, y in [0, 2] with an integer z that nothing constrains.
 // The lazy check rejects every solution until the separator has run in the
 // main MIP's root cut loop, so the root LP does not close the solve before it.
-// With hold, a reported task waits (bounded) in the observer until that call,
-// and the call waits (bounded) for a report: the call then runs beside a task
-// HiGHS has not joined yet, as root separation does beside a slow one.
+// With hold, a task reported running waits (bounded) in the observer until
+// that call, and the call waits (bounded) for such a report: the call then runs
+// beside a task HiGHS has not joined yet, as root separation does beside a
+// slow one.
 // HiGHS records rootlpsol right after the loop, so an empty one marks a call in
 // it.
 RootTasksRun run_root(int threads, bool hold) {
@@ -60,12 +63,14 @@ RootTasksRun run_root(int threads, bool hold) {
 
     RootTasksRun run;
     std::atomic<int> reports{0};
+    std::atomic<int> pending{0};
     std::atomic<int> running{0};
     std::atomic<int> max_running{0};
     std::atomic<bool> separated{false};
-    HighsUserSeparator::setRootTaskObserver([&, hold](int delta) {
-        const int now = running.fetch_add(delta) + delta;
-        if (delta > 0) {
+    HighsUserSeparator::setRootTaskObserver([&, hold](int pending_delta, int running_delta) {
+        pending += pending_delta;
+        const int now = running.fetch_add(running_delta) + running_delta;
+        if (running_delta > 0) {
             ++reports;
             int seen = max_running.load();
             while (now > seen && !max_running.compare_exchange_weak(seen, now)) {
@@ -83,6 +88,7 @@ RootTasksRun run_root(int threads, bool hold) {
             if (hold) {
                 wait_until([&] { return running.load() > 0; }, std::chrono::seconds(2));
             }
+            run.pending_at_sep = pending.load();
             run.running_at_sep = running.load();
             separated = true;
         });
@@ -105,6 +111,7 @@ RootTasksRun run_root(int threads, bool hold) {
     HighsUserSeparator::clearCallback();
     run.reports = reports.load();
     run.max_running = max_running.load();
+    run.pending_after = pending.load();
     run.running_after = running.load();
     run.separated = separated.load();
     return run;
@@ -118,7 +125,7 @@ TEST_CASE("Root tasks: the observer is pending until clearCallback resets it",
     REQUIRE(HighsUserHooks::capture() == nullptr);
 
     // An observer alone makes a solve capture the hooks.
-    HighsUserSeparator::setRootTaskObserver([](int) {});
+    HighsUserSeparator::setRootTaskObserver([](int, int) {});
     const auto hooks = HighsUserHooks::capture();
     // Before any REQUIRE, so a failure leaves no observer pending.
     HighsUserSeparator::clearCallback();
@@ -133,9 +140,11 @@ TEST_CASE("Root tasks: the observer is pending until clearCallback resets it",
 // always takes a spawned root task at once: root separation then sees it
 // running. HiGHS's scheduler does not promise it (in about 2 runs in 100 the
 // worker misses the task, and the solving thread runs it itself at the join,
-// rightly unreported), so the test tries a few solves for one where it does.
+// rightly not reported running), so the test tries a few solves for one where
+// it does. [procs4] reserves processors under ctest -j, so a loaded machine
+// does not keep HiGHS's worker from the task.
 TEST_CASE("Root tasks: a task on another thread is reported while root separation runs",
-          "[highs_patch][root_tasks]") {
+          "[highs_patch][root_tasks][procs4]") {
     RootTasksRun run;
     for (int attempt = 0; attempt < 5 && run.running_at_sep < 1; ++attempt) {
         run = run_root(2, /*hold=*/true);
@@ -143,19 +152,25 @@ TEST_CASE("Root tasks: a task on another thread is reported while root separatio
     REQUIRE(run.status == HighsStatus::kOk);
     REQUIRE(run.separated);
     CHECK(run.reports >= 1);
+    CHECK(run.pending_at_sep >= run.running_at_sep);
     CHECK(run.running_at_sep >= 1);
     CHECK(run.max_running <= 1);  // HiGHS's one worker
+    CHECK(run.pending_after == 0);
     CHECK(run.running_after == 0);
 }
 
 // threads = 1: HiGHS has no worker, so the solving thread runs each root task
-// itself when it joins it, and no other thread is kept busy.
-TEST_CASE("Root tasks: a task the solving thread runs itself is not reported",
+// itself when it joins it, after the root cut loop, and no other thread is kept
+// busy. The task is still pending at the cut loop: spawned, not yet started, as
+// one a worker has yet to wake for is, so the callbacks leave it its thread.
+TEST_CASE("Root tasks: a task not yet started is pending, one the solving thread runs not running",
           "[highs_patch][root_tasks]") {
     const auto run = run_root(1, /*hold=*/false);
     REQUIRE(run.status == HighsStatus::kOk);
     REQUIRE(run.separated);
     CHECK(run.reports == 0);
+    CHECK(run.pending_at_sep >= 1);
     CHECK(run.running_at_sep == 0);
+    CHECK(run.pending_after == 0);
     CHECK(run.running_after == 0);
 }

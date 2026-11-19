@@ -188,18 +188,27 @@ cptp_replace(CONTENT2 1
 
 # Root tasks (#163): evaluateRootNode spawns the analytic-centre IPM and
 # symmetry detection as tasks and joins them only later, so the root's
-# separation and user-solution queries run beside them. Each task reports
-# itself to the solve's root task observer while it runs on a thread other
-# than the spawning one (HighsUserSeparator::RootTaskScope), so the callbacks
-# can leave that thread to it. The spawning thread's id is captured by copy
-# (HiGHS builds as C++11, so no init-capture): the task outlives the start*()
-# function that spawns it.
+# separation and user-solution queries run beside them. Each task is reported
+# to the solve's root task observer pending from its spawn, since a worker may
+# start it at any moment, so the callbacks leave it its thread; and running
+# while it runs on a thread other than the spawning one. Its body ends it
+# (HighsUserSeparator::RootTaskScope); a task cancelled before it started
+# never runs its body, so the joins after the two cancels and the task
+# group's destructor (through a RootTasksJoin declared before it) release
+# those. The spawning thread's id is captured by copy (HiGHS builds as C++11,
+# so no init-capture): the task outlives the start*() function that spawns it.
 cptp_replace(CONTENT2 1
   "  taskGroup.spawn([&]() {\n    // first check if the analytic centre computation should be cancelled"
-  "  const std::thread::id cptp_owner = std::this_thread::get_id();\n  taskGroup.spawn([&, cptp_owner]() {\n    const HighsUserSeparator::RootTaskScope cptp_root_task(mipsolver, cptp_owner);\n    // first check if the analytic centre computation should be cancelled")
+  "  const std::thread::id cptp_owner = std::this_thread::get_id();\n  HighsUserSeparator::rootTaskSpawned(mipsolver);\n  taskGroup.spawn([&, cptp_owner]() {\n    const HighsUserSeparator::RootTaskScope cptp_root_task(mipsolver, cptp_owner);\n    // first check if the analytic centre computation should be cancelled")
 cptp_replace(CONTENT2 1
   "    taskGroup.spawn([&]() {\n      double startTime = mipsolver.timer_.getWallTime();"
-  "    const std::thread::id cptp_owner = std::this_thread::get_id();\n    taskGroup.spawn([&, cptp_owner]() {\n      const HighsUserSeparator::RootTaskScope cptp_root_task(mipsolver, cptp_owner);\n      double startTime = mipsolver.timer_.getWallTime();")
+  "    const std::thread::id cptp_owner = std::this_thread::get_id();\n    HighsUserSeparator::rootTaskSpawned(mipsolver);\n    taskGroup.spawn([&, cptp_owner]() {\n      const HighsUserSeparator::RootTaskScope cptp_root_task(mipsolver, cptp_owner);\n      double startTime = mipsolver.timer_.getWallTime();")
+cptp_replace(CONTENT2 1
+  "  highs::parallel::TaskGroup tg;\n  HighsProfiling* profiling = mipsolver.profiling_;"
+  "  const HighsUserSeparator::RootTasksJoin cptp_root_tasks_join(mipsolver);\n  highs::parallel::TaskGroup tg;\n  HighsProfiling* profiling = mipsolver.profiling_;")
+cptp_replace(CONTENT2 2
+  "tg.taskWait();"
+  "tg.taskWait();\n      HighsUserSeparator::rootTasksJoined(mipsolver);")
 
 file(WRITE "${MIP_DIR}/HighsMipSolverData.cpp" "${CONTENT2}")
 message(STATUS "Applied lazy constraint + incumbent feasibility patch to HighsMipSolverData.cpp")
@@ -251,10 +260,10 @@ message(STATUS "Applied lazy-rejection node patch to HighsSearch.cpp")
 file(READ "${MIP_DIR}/HighsMipSolver.h" CONTENT5H)
 cptp_replace(CONTENT5H 1
   "struct HighsMipSolverData;"
-  "struct HighsMipSolverData;\nstruct HighsUserHooks;")
+  "#include <atomic>\n\nstruct HighsMipSolverData;\nstruct HighsUserHooks;")
 cptp_replace(CONTENT5H 1
   "  void setParallelLock(bool lock) const;"
-  "  void setParallelLock(bool lock) const;\n\n  // cptp patch: the user callbacks this solve runs (mip/HighsUserHooks.h)\n  std::shared_ptr<const HighsUserHooks> user_hooks_;\n  // cptp patch: the solve that started this sub-MIP, null at the top level\n  const HighsMipSolver* parent_mip_ = nullptr;")
+  "  void setParallelLock(bool lock) const;\n\n  // cptp patch: the user callbacks this solve runs (mip/HighsUserHooks.h)\n  std::shared_ptr<const HighsUserHooks> user_hooks_;\n  // cptp patch: the solve that started this sub-MIP, null at the top level\n  const HighsMipSolver* parent_mip_ = nullptr;\n  // cptp patch: this solve's root tasks reported pending and not yet\n  // released (HighsUserSeparator::rootTaskSpawned, #163)\n  mutable std::atomic<int> root_tasks_pending_{0};")
 file(WRITE "${MIP_DIR}/HighsMipSolver.h" "${CONTENT5H}")
 
 file(READ "${MIP_DIR}/HighsMipSolver.cpp" CONTENT5)
