@@ -424,6 +424,131 @@ TEST_CASE("Multicap: with one row RCI is the same for every row option", "[multi
     }
 }
 
+namespace {
+
+// The #169 reproducer: complete graph on 0..4, depot 0, every edge costs 1,
+// profits 10 on 1 and 2. The tight row is d = (0, 19, 31, 20, 0), Q = 50,
+// alone or after an all-zero row with Q = 100. The optimum is 0-1-2-0
+// (20 - 3 = -17), which loads the tight row to exactly 50.
+cptp::Problem make_issue169_problem(bool zero_first_row) {
+    std::vector<cptp::Edge> edges;
+    for (int32_t u = 0; u < 5; ++u) {
+        for (int32_t v = u + 1; v < 5; ++v) {
+            edges.push_back({u, v});
+        }
+    }
+    const std::vector<double> costs(edges.size(), 1.0);
+    const std::vector<double> profits = {0.0, 10.0, 10.0, 0.0, 0.0};
+    const std::vector<double> tight = {0.0, 19.0, 31.0, 20.0, 0.0};
+    std::vector<std::vector<double>> rows;
+    std::vector<double> caps;
+    if (zero_first_row) {
+        rows.emplace_back(5, 0.0);
+        caps.push_back(100.0);
+    }
+    rows.push_back(tight);
+    caps.push_back(50.0);
+    cptp::Problem prob;
+    prob.build(5, edges, costs, profits, rows, caps, 0, 0);
+    return prob;
+}
+
+// RCI's cuts at the #169 point (x04 = 2, x12 = x13 = x23 = 0.7,
+// y = (1, .7, .7, .7, 1)) under the default tolerance and rows.
+std::vector<cptp::sep::Cut> issue169_cuts(const cptp::Problem& prob) {
+    const auto& g = prob.graph();
+    std::vector<double> x(static_cast<size_t>(prob.num_edges()), 0.0);
+    const std::vector<double> y = {1.0, 0.7, 0.7, 0.7, 1.0};
+    cptp::digraph_builder builder(prob.num_nodes());
+    for (auto e : g.edges()) {
+        const int32_t u = std::min(g.edge_source(e), g.edge_target(e));
+        const int32_t v = std::max(g.edge_source(e), g.edge_target(e));
+        double xe = 0.0;
+        if (u == 0 && v == 4) {
+            xe = 2.0;
+        } else if (u >= 1 && v <= 3) {
+            xe = 0.7;
+        }
+        if (xe > 0.0) {
+            x[static_cast<size_t>(e)] = xe;
+            builder.add_arc(u, v, xe);
+            builder.add_arc(v, u, xe);
+        }
+    }
+    auto [sg, cap] = builder.build();
+    const cptp::gomory_hu_tree tree(sg, cap, prob.source());
+    const cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x,
+        .y_values = y,
+        .x_offset = 0,
+        .y_offset = prob.num_edges(),
+        .tol = cptp::sep::kDefaultFracTol,
+        .flow_tree = &tree,
+    };
+    cptp::sep::RCISeparator rci;
+    return rci.separate(ctx);
+}
+
+// Every cut holds at the tour 0-1-2-0 (x01 = x02 = x12 = 1, y0 = y1 = y2 = 1),
+// and the cut on S = {1, 2, 3} keeps y1's coefficient 19/20 - 1 = -0.05.
+void require_issue169_cuts_valid(const cptp::Problem& prob) {
+    const auto cuts = issue169_cuts(prob);
+    REQUIRE_FALSE(cuts.empty());
+    const auto& g = prob.graph();
+    std::vector<double> point(static_cast<size_t>(prob.num_edges() + prob.num_nodes()), 0.0);
+    for (auto e : g.edges()) {
+        const int32_t u = std::min(g.edge_source(e), g.edge_target(e));
+        const int32_t v = std::max(g.edge_source(e), g.edge_target(e));
+        if ((u == 0 && v == 1) || (u == 0 && v == 2) || (u == 1 && v == 2)) {
+            point[static_cast<size_t>(e)] = 1.0;
+        }
+    }
+    for (int32_t i : {0, 1, 2}) {
+        const int32_t y_i = prob.num_edges() + i;
+        point[static_cast<size_t>(y_i)] = 1.0;
+    }
+    const int32_t y1 = prob.num_edges() + 1;
+    bool keeps_y1 = false;
+    for (const auto& cut : cuts) {
+        double lhs = 0.0;
+        for (size_t j = 0; j < cut.indices.size(); ++j) {
+            lhs += cut.values[j] * point[static_cast<size_t>(cut.indices[j])];
+            if (cut.indices[j] == y1 && std::abs(cut.values[j] + 0.05) < 1e-9) {
+                keeps_y1 = true;
+            }
+        }
+        INFO("rhs " << cut.rhs << ", lhs at 0-1-2-0 " << lhs);
+        REQUIRE(lhs <= cut.rhs + 1e-9);
+    }
+    REQUIRE(keeps_y1);
+}
+
+}  // namespace
+
+TEST_CASE("Multicap: RCI keeps small negative coefficients on a later row (#169)",
+          "[multicap][rci]") {
+    const auto prob = make_issue169_problem(true);
+    require_issue169_cuts_valid(prob);
+
+    cptp::Model model;
+    model.set_problem(prob);
+    const auto result = model.solve(kQuiet);
+    REQUIRE(result.is_optimal());
+    REQUIRE_THAT(result.objective, WithinAbs(-17.0, 1e-6));
+}
+
+TEST_CASE("RCI keeps small negative coefficients on a single row (#169)", "[rci]") {
+    const auto prob = make_issue169_problem(false);
+    require_issue169_cuts_valid(prob);
+
+    cptp::Model model;
+    model.set_problem(prob);
+    const auto result = model.solve(kQuiet);
+    REQUIRE(result.is_optimal());
+    REQUIRE_THAT(result.objective, WithinAbs(-17.0, 1e-6));
+}
+
 TEST_CASE("Multicap: capacity_cut_rows takes all, most_violated or first", "[multicap][rci]") {
     for (const char* value : {"all", "most_violated", "first"}) {
         cptp::Model model;

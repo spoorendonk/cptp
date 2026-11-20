@@ -263,9 +263,11 @@ Cut build_cut(const RCICandidate& c, const Problem& prob, std::span<const double
             if (!c.in_S[i]) {
                 continue;
             }
+            // Keep every nonzero coefficient: dropping a negative one
+            // (q_i < Q_r) would tighten the cut past validity (#169).
             double q_i = d[i];
             double coeff = -(1.0 - q_i / Q_r);
-            if (std::abs(coeff) > tol) {
+            if (coeff != 0.0) {
                 cut.indices.push_back(ctx.y_offset + i);
                 cut.values.push_back(coeff);
             }
