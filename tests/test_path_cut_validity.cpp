@@ -890,6 +890,96 @@ TEST_CASE("Equivalent tour and s-t path emit matching SPI customer cuts", "[spi]
     }
 }
 
+namespace {
+
+double path_objective(const cptp::Problem& prob, const IntegerPathSolution& sol) {
+    double obj = 0.0;
+    for (int32_t e = 0; e < prob.num_edges(); ++e) {
+        obj += prob.edge_cost(e) * sol.x_values[e];
+    }
+    for (int32_t v = 0; v < prob.num_nodes(); ++v) {
+        obj -= prob.profit(v) * sol.y_values[v];
+    }
+    return obj;
+}
+
+// Every SPI row at (x, y) holds on every enumerated path whose objective is
+// at or below `ub`, and the rows themselves are violated at (x, y).
+size_t check_spi_against_routes(const cptp::Problem& prob, std::span<const double> all_pairs,
+                                double ub, const std::vector<double>& x_values,
+                                const std::vector<double>& y_values,
+                                const std::vector<IntegerPathSolution>& routes) {
+    auto support = build_support(prob, x_values);
+    const cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = prob.num_edges(),
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = ub,
+        .all_pairs = all_pairs,
+    };
+    cptp::sep::SPISeparator spi;
+    const auto cuts = spi.separate(ctx);
+    for (const auto& cut : cuts) {
+        REQUIRE(evaluate_cut_lhs(cut, x_values, y_values) > cut.rhs + 1e-6);
+        for (const auto& route : routes) {
+            if (path_objective(prob, route) > ub + 1e-6) {
+                continue;
+            }
+            REQUIRE(evaluate_cut_lhs(cut, route.x_values, route.y_values) <= cut.rhs + 1e-6);
+        }
+    }
+    return cuts.size();
+}
+
+}  // namespace
+
+TEST_CASE("SPI lifting checks candidates against previously lifted customers (#171)",
+          "[spi][path][validity]") {
+    // Open path 0 -> 5, zero profits, unit demands, capacity 6.  Customers 1
+    // and 2 each conflict with 3 and 4 under UB 12, but 3 and 4 do not
+    // conflict with each other: 0-3-4-5 costs 10.
+    cptp::Problem prob;
+    const std::vector<cptp::Edge> edges = {{0, 1}, {1, 5}, {0, 2}, {2, 5},
+                                           {0, 3}, {3, 4}, {4, 5}, {1, 2}};
+    const std::vector<double> costs = {6, 6, 6, 6, 3, 4, 3, 100};
+    const std::vector<double> profits(6, 0.0);
+    const std::vector<double> demands = {0, 1, 1, 1, 1, 0};
+    prob.build(6, edges, costs, profits, demands, 6.0, 0, 5);
+    REQUIRE_FALSE(prob.is_tour());
+
+    constexpr double kUb = 12.0;
+    const auto all_pairs = compute_all_pairs(prob);
+    const auto routes = enumerate_feasible_paths(prob);
+    REQUIRE(std::ranges::any_of(routes, [&](const IntegerPathSolution& r) {
+        return std::abs(path_objective(prob, r) - 10.0) <= 1e-9;
+    }));
+
+    const std::vector<double> x_values = {.2, .2, .2, .2, .6, .6, .6, .8};
+    const std::vector<double> y_values = {1, .6, .6, .6, .6, 1};
+    REQUIRE(check_spi_against_routes(prob, all_pairs, kUb, x_values, y_values, routes) > 0);
+}
+
+TEST_CASE("SPI emits only rows valid on routes within the incumbent bound",
+          "[spi][path][validity]") {
+    auto prob = make_validation_path_problem();
+    const auto all_pairs = compute_all_pairs(prob);
+    const auto routes = enumerate_feasible_paths(prob);
+    const auto samples = build_fractional_samples(prob);
+    size_t produced = 0;
+    // Route objectives run from 15 (0-5 direct) upwards; each UB leaves some
+    // routes inside the bound and cuts the rest off.
+    for (const double ub : {15.0, 17.0, 19.0, 21.0}) {
+        for (const auto& [x_values, y_values] : samples) {
+            produced += check_spi_against_routes(prob, all_pairs, ub, x_values, y_values, routes);
+        }
+    }
+    REQUIRE(produced > 0);
+}
+
 TEST_CASE("Comb path emits valid cuts on crafted sample", "[comb][path][validity]") {
     const auto inst = make_comb_equivalent_instances();
     const auto sample = make_comb_equivalent_sample(inst);

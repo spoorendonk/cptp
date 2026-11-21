@@ -190,11 +190,52 @@ void greedy_shrink(const Problem& prob, std::span<const double> all_pairs, doubl
     }
 }
 
+/// True when T ∪ {j} is infeasible (lb > ub) for every subset T of `support`
+/// with `r` members.
+bool every_r_subset_conflicts(const Problem& prob, std::span<const double> all_pairs, double ub,
+                              const std::vector<int32_t>& support, size_t r, int32_t j) {
+    const size_t m = support.size();
+    if (r > m) {
+        return true;
+    }
+    // Enumerate the r-subsets of `support` in lexicographic index order.
+    std::vector<size_t> pick(r);
+    for (size_t k = 0; k < r; ++k) {
+        pick[k] = k;
+    }
+    std::vector<int32_t> trial(r + 1);
+    while (true) {
+        for (size_t k = 0; k < r; ++k) {
+            trial[k] = support[pick[k]];
+        }
+        trial[r] = j;
+        if (compute_set_lb(prob, all_pairs, trial) <= ub + 1e-6) {
+            return false;
+        }
+        // Advance to the next combination.
+        size_t k = r;
+        while (k > 0 && pick[k - 1] == m - r + (k - 1)) {
+            --k;
+        }
+        if (k == 0) {
+            return true;
+        }
+        ++pick[k - 1];
+        for (size_t l = k; l < r; ++l) {
+            pick[l] = pick[l - 1] + 1;
+        }
+    }
+}
+
 /// Lift a minimal infeasible set S by scanning nodes j ∉ S.
-/// Node j gets coefficient 1 if replacing every i ∈ S with j still yields
-/// an infeasible set (lb > ub).  This is the "extended cover" lifting:
-/// any node that is at least as "expensive" as every member of the minimal
-/// cover can be added with coefficient 1.
+///
+/// The cut Σ_{v∈C} y_v ≤ |S|-1 over the support C is valid exactly when
+/// every |S| members of C form an infeasible set: a route visiting |S| of
+/// them visits such a set, and lb of a subset bounds the route from below.
+/// Lifting is therefore sequential: j joins C with coefficient 1 only if
+/// T ∪ {j} is infeasible for every (|S|-1)-subset T of the C accumulated so
+/// far, previously lifted nodes included (#171).  For a pair cover this is
+/// "j conflicts with every node already in C".
 ///
 /// Returns lifted indices and values (coefficients).  RHS stays |S|-1.
 void lift_cut(const Problem& prob, std::span<const double> all_pairs, double ub,
@@ -202,12 +243,13 @@ void lift_cut(const Problem& prob, std::span<const double> all_pairs, double ub,
               int32_t target, bool is_tour, double tol, std::vector<int32_t>& out_nodes,
               std::vector<double>& out_coeffs) {
     const int32_t n = prob.num_nodes();
+    const size_t r = set.size() - 1;
 
     // Start with the core set (coefficient 1)
     out_nodes = set;
     out_coeffs.assign(set.size(), 1.0);
 
-    // For each candidate j ∉ S, check all |S| replacements
+    // For each candidate j ∉ S, check it against the accumulated support
     for (int32_t j = 0; j < n; ++j) {
         if (j == source) {
             continue;
@@ -231,22 +273,7 @@ void lift_cut(const Problem& prob, std::span<const double> all_pairs, double ub,
             continue;
         }
 
-        // Check: for every i ∈ S, is (S \ {i}) ∪ {j} infeasible?
-        bool can_lift = true;
-        for (size_t idx = 0; idx < set.size(); ++idx) {
-            std::vector<int32_t> swapped;
-            swapped.reserve(set.size());
-            for (size_t k = 0; k < set.size(); ++k) {
-                swapped.push_back(k == idx ? j : set[k]);
-            }
-            double lb = compute_set_lb(prob, all_pairs, swapped);
-            if (lb <= ub + 1e-6) {
-                can_lift = false;
-                break;
-            }
-        }
-
-        if (can_lift) {
+        if (every_r_subset_conflicts(prob, all_pairs, ub, out_nodes, r, j)) {
             out_nodes.push_back(j);
             out_coeffs.push_back(1.0);
         }
