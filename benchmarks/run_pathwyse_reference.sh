@@ -24,7 +24,9 @@
 #   The --out CSV, with algo, timestamp, machine and PathWyse commit columns.
 #   Existing rows for re-run instances are replaced; other rows are preserved.
 #   Each target's rows replace the old ones only once that target has run to
-#   the end, so a target that fails or is interrupted keeps its old rows.
+#   the end, so a target interrupted, or failing before it writes, keeps its
+#   old rows. A target that runs to the end replaces them, whatever its runs
+#   ended in: a PathWyse run that failed becomes an ERROR row.
 #   benchmarks/pathwyse.csv holds the paper's rows (an unpinned PathWyse, see
 #   setup_pathwyse.sh) in the older column layout and is not written to.
 #

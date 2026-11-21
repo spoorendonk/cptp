@@ -748,9 +748,14 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
         check_csv_header(Path(args.csv))
     revision = pathwyse_revision(pw_bin)
     if args.require_pathwyse and revision != args.require_pathwyse:
+        why = (
+            "no provenance stamp proves which commit it was built at"
+            if revision == UNKNOWN_REVISION
+            else f"its provenance stamp proves it was built at {revision}"
+        )
         print(
-            f"Error: {pw_bin} is PathWyse {revision}, not the pinned {args.require_pathwyse}: "
-            "no provenance stamp proves it. Run ./benchmarks/setup_pathwyse.sh",
+            f"Error: {pw_bin} is not the pinned PathWyse {args.require_pathwyse}: {why}. "
+            "Run ./benchmarks/setup_pathwyse.sh",
             file=sys.stderr,
         )
         sys.exit(2)

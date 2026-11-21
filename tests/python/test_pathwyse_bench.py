@@ -188,6 +188,7 @@ def test_require_pathwyse_refuses_another_build(
     proc = compare(instances, env, "--csv", str(out), "--require-pathwyse", pinned_commit())
     assert proc.returncode == 2
     assert "not the pinned" in proc.stderr
+    assert f"proves it was built at {OTHER_COMMIT}" in proc.stderr
     assert not out.exists()
 
 
