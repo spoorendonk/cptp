@@ -27,6 +27,16 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
         return {};
     }
 
+    // Each row's capacity left after the terminals' demand, which the cuts
+    // weight 0 (#170, residual_capacity); a row with none left gives no cut.
+    std::vector<double> residuals(rows.size(), 0.0);
+    for (size_t r = 0; r < rows.size(); ++r) {
+        residuals[r] = residual_capacity(prob, rows[r]);
+    }
+    auto weight = [&](std::span<const double> d, int32_t i) {
+        return is_terminal(prob, i) ? 0.0 : d[i];
+    };
+
     // Precompute each row's total demand (constant across all targets).
     std::vector<double> d_totals(rows.size(), 0.0);
     for (size_t r = 0; r < rows.size(); ++r) {
@@ -53,7 +63,10 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
 
         for (size_t row_idx = 0; row_idx < rows.size(); ++row_idx) {
             const std::span<const double> d = rows[row_idx].demand;
-            const double Q = rows[row_idx].capacity;
+            const double Q = residuals[row_idx];
+            if (Q <= 0.0) {
+                continue;
+            }
             const double d_total = d_totals[row_idx];
 
             // S = {u : !reachable[u]} (target side, not containing depot)
@@ -91,7 +104,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
                 }
 
                 int32_t outside = u_in_S ? v : u;
-                double d_out = d[outside];
+                double d_out = weight(d, outside);
 
                 cut_flow += ctx.x_values[e];
                 star_sum += d_out * ctx.x_values[e];
@@ -129,7 +142,7 @@ std::vector<Cut> RGLMSeparator::separate(const SeparationContext& ctx) {
                 }
 
                 int32_t outside = u_in_S ? v : u;
-                double d_out = d[outside];
+                double d_out = weight(d, outside);
 
                 double coeff = 2.0 * d_out / r - 1.0;
                 cut.indices.push_back(ctx.x_offset + e);

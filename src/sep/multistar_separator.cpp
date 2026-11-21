@@ -3,6 +3,7 @@
 #include "core/dinitz.h"
 #include "core/gomory_hu.h"
 #include "core/problem.h"
+#include "sep/capacity_rows.h"
 
 #include <cmath>
 #include <set>
@@ -20,13 +21,21 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
     const int32_t path_target = prob.target();
 
     // Rows that can give a cut: 0 < Q_k < kInfiniteCapacity, as row 0 alone
-    // was before.
-    std::vector<int32_t> rows;
+    // was before, with capacity left after the terminals' demand (#170).
+    struct Row {
+        int32_t index;
+        double residual;
+    };
+    std::vector<Row> rows;
     const int32_t num_rows = rows_ == CapacityRows::kFirst ? 1 : prob.num_capacities();
     for (int32_t k = 0; k < num_rows; ++k) {
         const double Q = prob.capacity(k);
-        if (Q > 0 && Q < kInfiniteCapacity) {
-            rows.push_back(k);
+        if (Q <= 0 || Q >= kInfiniteCapacity) {
+            continue;
+        }
+        const double residual = residual_capacity(prob, {prob.demands(k), Q});
+        if (residual > 0.0) {
+            rows.push_back({k, residual});
         }
     }
     if (rows.empty()) {
@@ -36,7 +45,8 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
     std::vector<Cut> all_cuts;
 
     // The GLMs on S = {u : target_side[u]} (the side without the depot; the
-    // path's target is never in S), per row k (d = d^k, Q = Q_k):
+    // path's target is never in S), per row k (d = d^k, Q = Q_k less the
+    // terminals' demand, which is weighted 0: see residual_capacity):
     //   sum_{e in delta(S)} (1 - 2*q_{t(e)}/Q)*x_e
     //     - (2/Q)*sum_{i in S} q_i*y_i >= 0
     // In <= form:
@@ -47,8 +57,7 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
         Cut best;
         bool have_best = false;
 
-        for (const int32_t row : rows) {
-            const double Q = prob.capacity(row);
+        for (const auto [row, Q] : rows) {
             double lhs = 0.0;
             Cut cut;
 
@@ -62,7 +71,7 @@ std::vector<Cut> MultistarSeparator::separate(const SeparationContext& ctx) {
                 }
 
                 int32_t outside = u_in_S ? v : u;
-                double q_outside = prob.demand(row, outside);
+                double q_outside = is_terminal(prob, outside) ? 0.0 : prob.demand(row, outside);
 
                 double coeff = 1.0 - 2.0 * q_outside / Q;
                 lhs -= coeff * ctx.x_values[e];

@@ -704,6 +704,161 @@ TEST_CASE("Multicap: multistar_largest_side keeps every row's optimum", "[multic
     }
 }
 
+namespace {
+
+struct EdgeValue {
+    int32_t u;
+    int32_t v;
+    double x;
+};
+
+// The cuts `separator` gives at the point (x on the edges listed, 0 on the
+// rest; y per node), with the support graph multistar's largest side needs.
+std::vector<cptp::sep::Cut> cuts_at(const cptp::Problem& prob, cptp::sep::Separator& separator,
+                                    const std::vector<EdgeValue>& edge_values,
+                                    const std::vector<double>& y) {
+    const auto& g = prob.graph();
+    std::vector<double> x(static_cast<size_t>(prob.num_edges()), 0.0);
+    cptp::digraph_builder builder(prob.num_nodes());
+    for (auto e : g.edges()) {
+        const int32_t u = std::min(g.edge_source(e), g.edge_target(e));
+        const int32_t v = std::max(g.edge_source(e), g.edge_target(e));
+        for (const auto& ev : edge_values) {
+            if (ev.u == u && ev.v == v && ev.x > 0.0) {
+                x[static_cast<size_t>(e)] = ev.x;
+                builder.add_arc(u, v, ev.x);
+                builder.add_arc(v, u, ev.x);
+            }
+        }
+    }
+    auto [sg, cap] = builder.build();
+    const cptp::gomory_hu_tree tree(sg, cap, prob.source());
+    const cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x,
+        .y_values = y,
+        .x_offset = 0,
+        .y_offset = prob.num_edges(),
+        .tol = 1e-6,
+        .flow_tree = &tree,
+        .support_graph = &sg,
+        .support_capacity = &cap,
+    };
+    return separator.separate(ctx);
+}
+
+// The #170 reproducer: depot 0 with edges {0, 1} and {0, 2} only, each
+// costing 1, profits 10 and 5. Row 0 is all zero (Q = 100), row 1 is
+// d = (5, 5, 3) with Q = 10. 0-1-0 uses edge {0, 1} twice and loads row 1
+// to 10: optimal at 2 - 10 = -8. 0-2-0 gives -3; both customers do not fit.
+cptp::Problem make_issue170_problem() {
+    cptp::Problem prob;
+    prob.build(3, std::vector<cptp::Edge>{{0, 1}, {0, 2}}, std::vector<double>{1.0, 1.0},
+               std::vector<double>{0.0, 10.0, 5.0},
+               std::vector<std::vector<double>>{{0.0, 0.0, 0.0}, {5.0, 5.0, 3.0}},
+               std::vector<double>{100.0, 10.0}, 0, 0);
+    return prob;
+}
+
+// The triangle on depot 0 and customers 1, 2 (every edge costs 1, profits
+// 10), d = (2, 4, 4) against `capacity`.
+cptp::Problem make_issue170_triangle(double capacity) {
+    cptp::Problem prob;
+    prob.build(3, std::vector<cptp::Edge>{{0, 1}, {0, 2}, {1, 2}},
+               std::vector<double>{1.0, 1.0, 1.0}, std::vector<double>{0.0, 10.0, 10.0},
+               std::vector<double>{2.0, 4.0, 4.0}, capacity, 0, 0);
+    return prob;
+}
+
+}  // namespace
+
+TEST_CASE("Multicap: GLM-type cuts keep a tour using a depot edge twice (#170)",
+          "[multicap][glm]") {
+    using cptp::sep::CapacityRows;
+    const auto prob = make_issue170_problem();
+    // 0-1-0 fits every row, so no valid cut is violated there.
+    const std::vector<EdgeValue> tour = {{0, 1, 2.0}};
+    const std::vector<double> y = {1.0, 1.0, 0.0};
+    for (const auto rows :
+         {CapacityRows::kAll, CapacityRows::kMostViolated, CapacityRows::kFirst}) {
+        for (const bool largest : {false, true}) {
+            INFO("rows " << static_cast<int>(rows) << ", largest side " << largest);
+            cptp::sep::MultistarSeparator multistar(rows, largest);
+            REQUIRE(cuts_at(prob, multistar, tour, y).empty());
+        }
+        for (const bool surrogate : {false, true}) {
+            INFO("rows " << static_cast<int>(rows) << ", surrogate " << surrogate);
+            cptp::sep::RGLMSeparator rglm(rows, surrogate);
+            REQUIRE(cuts_at(prob, rglm, tour, y).empty());
+        }
+    }
+
+    for (const auto& extra : std::vector<std::pair<std::string, std::string>>{
+             {"multistar_largest_side", "false"},
+             {"multistar_largest_side", "true"},
+             {"enable_rglm", "true"},
+             {"capacity_cut_surrogate", "true"},
+         }) {
+        INFO(extra.first << " = " << extra.second);
+        cptp::Model model;
+        model.set_problem(prob);
+        auto options = kQuiet;
+        options.push_back(extra);
+        if (extra.first == "capacity_cut_surrogate") {
+            options.emplace_back("enable_rglm", "true");
+        }
+        const auto result = model.solve(options);
+        REQUIRE(result.is_optimal());
+        REQUIRE_THAT(result.objective, WithinAbs(-8.0, 1e-6));
+        require_tour_fits(model.problem(), result.tour);
+    }
+}
+
+TEST_CASE("GLM-type cuts discount the depot's demand on a full triangle (#170)", "[glm]") {
+    using cptp::sep::CapacityRows;
+    const std::vector<EdgeValue> triangle = {{0, 1, 1.0}, {0, 2, 1.0}, {1, 2, 1.0}};
+    const std::vector<double> y = {1.0, 1.0, 1.0};
+
+    // Q = 10: the triangle loads exactly 10, so no cut on S = {1, 2} (the
+    // largest side) or any other set is violated there.
+    const auto fits = make_issue170_triangle(10.0);
+    for (const bool largest : {false, true}) {
+        INFO("largest side " << largest);
+        cptp::sep::MultistarSeparator multistar(CapacityRows::kAll, largest);
+        REQUIRE(cuts_at(fits, multistar, triangle, y).empty());
+    }
+    cptp::sep::RGLMSeparator rglm;
+    REQUIRE(cuts_at(fits, rglm, triangle, y).empty());
+
+    // Q = 9: the triangle does not fit, and multistar still cuts it, from
+    // the capacity 7 the depot leaves.
+    const auto over = make_issue170_triangle(9.0);
+    for (const bool largest : {false, true}) {
+        INFO("largest side " << largest);
+        cptp::sep::MultistarSeparator multistar(CapacityRows::kAll, largest);
+        REQUIRE_FALSE(cuts_at(over, multistar, triangle, y).empty());
+    }
+
+    // Q = 2: the depot fills the row. Neither separator builds a cut from it
+    // (its weights would divide by zero).
+    const auto full = make_issue170_triangle(2.0);
+    const std::vector<EdgeValue> half = {{0, 1, 0.5}, {0, 2, 0.5}, {1, 2, 0.5}};
+    const std::vector<double> y_half = {1.0, 0.5, 0.5};
+    for (const bool largest : {false, true}) {
+        cptp::sep::MultistarSeparator multistar(CapacityRows::kAll, largest);
+        REQUIRE(cuts_at(full, multistar, half, y_half).empty());
+    }
+    REQUIRE(cuts_at(full, rglm, half, y_half).empty());
+
+    cptp::Model model;
+    model.set_problem(fits);
+    auto options = kQuiet;
+    options.emplace_back("multistar_largest_side", "true");
+    const auto result = model.solve(options);
+    REQUIRE(result.is_optimal());
+    REQUIRE_THAT(result.objective, WithinAbs(-17.0, 1e-6));
+}
+
 TEST_CASE("Multicap: enable_xcover keeps every row's optimum", "[multicap][xcover]") {
     struct Case {
         int32_t rows;

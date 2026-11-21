@@ -123,7 +123,9 @@ int32_t edge_index(const cptp::Problem& prob, int32_t a, int32_t b) {
     return -1;
 }
 
-cptp::Problem make_validation_path_problem() {
+// With `terminal_demand` > 0 the source and target carry that demand and the
+// capacity grows by both, so the same paths fit (#170).
+cptp::Problem make_validation_path_problem(double terminal_demand = 0.0) {
     cptp::Problem prob;
     std::vector<cptp::Edge> edges;
     std::vector<double> costs;
@@ -143,9 +145,9 @@ cptp::Problem make_validation_path_problem() {
     }
 
     std::vector<double> profits = {0, 2, 2, 2, 2, 0};
-    std::vector<double> demands = {0, 2, 2, 2, 2, 0};
-    constexpr double kCapacity = 6.0;
-    prob.build(6, edges, costs, profits, demands, kCapacity, 0, 5);
+    std::vector<double> demands = {terminal_demand, 2, 2, 2, 2, terminal_demand};
+    const double capacity = 6.0 + 2.0 * terminal_demand;
+    prob.build(6, edges, costs, profits, demands, capacity, 0, 5);
     return prob;
 }
 
@@ -628,6 +630,8 @@ void validate_separator_on_path(
             .y_offset = m,
             .tol = 1e-6,
             .flow_tree = support.tree.get(),
+            .support_graph = &support.graph,
+            .support_capacity = &support.capacity,
         };
 
         const auto cuts = separator.separate(ctx);
@@ -669,6 +673,67 @@ TEST_CASE("Path cut families generate only valid cuts on all feasible s-t paths"
     }
     SECTION("RGLM") {
         validate_separator_on_path(prob, feasible_paths, samples, cptp::sep::RGLMSeparator{});
+    }
+}
+
+namespace {
+
+// The cuts `separator` gives at every sample, with the support graph
+// multistar's largest side needs.
+template <typename SeparatorT>
+std::vector<std::vector<CutSignature>> cuts_per_sample(
+    const cptp::Problem& prob,
+    const std::vector<std::pair<std::vector<double>, std::vector<double>>>& samples,
+    SeparatorT separator) {
+    std::vector<std::vector<CutSignature>> out;
+    for (const auto& [x_values, y_values] : samples) {
+        auto support = build_support(prob, x_values);
+        const cptp::sep::SeparationContext ctx{
+            .problem = prob,
+            .x_values = x_values,
+            .y_values = y_values,
+            .x_offset = 0,
+            .y_offset = prob.num_edges(),
+            .tol = 1e-6,
+            .flow_tree = support.tree.get(),
+            .support_graph = &support.graph,
+            .support_capacity = &support.capacity,
+        };
+        out.push_back(normalize_cut_signatures(separator.separate(ctx)));
+    }
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("GLM-type cuts on an s-t path discount positive terminal demand (#170)",
+          "[separators][path][validity]") {
+    // Source and target carry demand 1 and the capacity is 8: the same paths
+    // fit as with zero terminal demand and capacity 6, so the cuts must be
+    // the same, and valid on every feasible path.
+    const auto loaded = make_validation_path_problem(1.0);
+    const auto reference = make_validation_path_problem();
+    REQUIRE_FALSE(loaded.is_tour());
+    const auto feasible_paths = enumerate_feasible_paths(loaded);
+    REQUIRE(feasible_paths.size() == enumerate_feasible_paths(reference).size());
+    const auto samples = build_fractional_samples(loaded);
+
+    SECTION("Multistar") {
+        validate_separator_on_path(loaded, feasible_paths, samples,
+                                   cptp::sep::MultistarSeparator{});
+        REQUIRE(cuts_per_sample(loaded, samples, cptp::sep::MultistarSeparator{}) ==
+                cuts_per_sample(reference, samples, cptp::sep::MultistarSeparator{}));
+    }
+    SECTION("Multistar, largest side") {
+        const cptp::sep::MultistarSeparator largest(cptp::sep::CapacityRows::kAll, true);
+        validate_separator_on_path(loaded, feasible_paths, samples, largest);
+        REQUIRE(cuts_per_sample(loaded, samples, largest) ==
+                cuts_per_sample(reference, samples, largest));
+    }
+    SECTION("RGLM") {
+        validate_separator_on_path(loaded, feasible_paths, samples, cptp::sep::RGLMSeparator{});
+        REQUIRE(cuts_per_sample(loaded, samples, cptp::sep::RGLMSeparator{}) ==
+                cuts_per_sample(reference, samples, cptp::sep::RGLMSeparator{}));
     }
 }
 

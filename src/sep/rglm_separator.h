@@ -7,7 +7,8 @@ namespace cptp::sep {
 /// Rounded GLM (RGLM) inequality separator (eq 24, Jepsen et al. 2014).
 /// Strengthens GLM/multistar cuts using ceiling-based rounding.
 /// With m capacity rows, cuts come from each bounded row's d^k and Q_k as
-/// `rows` selects.
+/// `rows` selects, Q_k less the terminals' demand and the terminals weighted
+/// 0 (residual_capacity, #170).
 /// With `surrogate`, one more row next to them: the surrogate row of all
 /// bounded rows (surrogate_row, #112). Under kMostViolated it competes with
 /// the others; under kAll and kFirst its cuts are added to theirs.

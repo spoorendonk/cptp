@@ -7,7 +7,8 @@ namespace cptp::sep {
 /// Multistar inequality separator.
 /// Strengthens capacity cuts using knapsack-like reasoning.
 /// With m capacity rows, cuts come from each bounded row's d^k and Q_k as
-/// `rows` selects.
+/// `rows` selects, Q_k less the terminals' demand and the terminals weighted
+/// 0 (residual_capacity, #170).
 ///
 /// Each target node's set S is the smallest depot-target min-cut side the
 /// Gomory-Hu tree gives. With `largest_side` it also tries the largest one

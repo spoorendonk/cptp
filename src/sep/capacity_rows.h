@@ -77,4 +77,37 @@ inline std::vector<CapacityRowView> capacity_row_views(const Problem& prob, Capa
 std::vector<CapacityRowView> capacity_row_views(const Problem& prob, CapacityRows rows,
                                                 const SurrogateRow&& surrogate) = delete;
 
+/// Whether `v` is a terminal: the depot of a tour, or the source or target of
+/// an s-t path. Every solution visits it.
+inline bool is_terminal(const Problem& prob, int32_t v) {
+    return v == prob.source() || v == prob.target();
+}
+
+/// The load every solution carries in a row: the depot's demand, or the
+/// source's plus the target's on an s-t path.
+inline double terminal_demand(const Problem& prob, std::span<const double> demand) {
+    double load = demand[static_cast<size_t>(prob.source())];
+    if (!prob.is_tour()) {
+        load += demand[static_cast<size_t>(prob.target())];
+    }
+    return load;
+}
+
+/// A GLM-type cut (multistar, RGLM) weights the node outside S at each
+/// crossing edge. A tour may use a depot edge twice (x_e = 2) while visiting
+/// the depot once, so weighting the depot there counts its demand twice and
+/// can cut off a tour that fits (#170). These cuts are built instead on the
+/// equivalent row with terminal demand 0 and capacity Q - terminal_demand:
+/// every solution carries the terminals' load, so the same solutions fit it.
+/// The residual is 0 when it is not above kResidualCapacityTol * Q (terminals
+/// filling the row, an infeasible row, or rounding in the subtraction); a
+/// separator gives no cut from such a row rather than one with weights
+/// 2 d_i / Q' that blow up.
+inline constexpr double kResidualCapacityTol = 1e-9;
+
+inline double residual_capacity(const Problem& prob, const CapacityRowView& row) {
+    const double residual = row.capacity - terminal_demand(prob, row.demand);
+    return residual > kResidualCapacityTol * row.capacity ? residual : 0.0;
+}
+
 }  // namespace cptp::sep
