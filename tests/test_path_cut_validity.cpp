@@ -925,6 +925,10 @@ size_t check_spi_against_routes(const cptp::Problem& prob, std::span<const doubl
     const auto cuts = spi.separate(ctx);
     for (const auto& cut : cuts) {
         REQUIRE(evaluate_cut_lhs(cut, x_values, y_values) > cut.rhs + 1e-6);
+        // Only pair covers (RHS 1) are lifted; larger covers stay unlifted.
+        if (cut.rhs > 1.0 + 1e-9) {
+            REQUIRE(static_cast<double>(cut.size()) == cut.rhs + 1.0);
+        }
         for (const auto& route : routes) {
             if (path_objective(prob, route) > ub + 1e-6) {
                 continue;

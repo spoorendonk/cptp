@@ -190,90 +190,34 @@ void greedy_shrink(const Problem& prob, std::span<const double> all_pairs, doubl
     }
 }
 
-/// True when T ∪ {j} is infeasible (lb > ub) for every subset T of `support`
-/// with `r` members.
-bool every_r_subset_conflicts(const Problem& prob, std::span<const double> all_pairs, double ub,
-                              const std::vector<int32_t>& support, size_t r, int32_t j) {
-    const size_t m = support.size();
-    if (r > m) {
-        return true;
-    }
-    // Enumerate the r-subsets of `support` in lexicographic index order.
-    std::vector<size_t> pick(r);
-    for (size_t k = 0; k < r; ++k) {
-        pick[k] = k;
-    }
-    std::vector<int32_t> trial(r + 1);
-    while (true) {
-        for (size_t k = 0; k < r; ++k) {
-            trial[k] = support[pick[k]];
-        }
-        trial[r] = j;
-        if (compute_set_lb(prob, all_pairs, trial) <= ub + 1e-6) {
-            return false;
-        }
-        // Advance to the next combination.
-        size_t k = r;
-        while (k > 0 && pick[k - 1] == m - r + (k - 1)) {
-            --k;
-        }
-        if (k == 0) {
-            return true;
-        }
-        ++pick[k - 1];
-        for (size_t l = k; l < r; ++l) {
-            pick[l] = pick[l - 1] + 1;
-        }
-    }
-}
-
-/// Lift a minimal infeasible set S by scanning nodes j ∉ S.
+/// Lift an infeasible pair S = {a, b} into a clique of pairwise conflicts.
 ///
-/// The cut Σ_{v∈C} y_v ≤ |S|-1 over the support C is valid exactly when
-/// every |S| members of C form an infeasible set: a route visiting |S| of
-/// them visits such a set, and lb of a subset bounds the route from below.
-/// Lifting is therefore sequential: j joins C with coefficient 1 only if
-/// T ∪ {j} is infeasible for every (|S|-1)-subset T of the C accumulated so
-/// far, previously lifted nodes included (#171).  For a pair cover this is
-/// "j conflicts with every node already in C".
+/// The cut Σ_{v∈C} y_v ≤ 1 over the support C is valid exactly when every
+/// two members of C form an infeasible set: a route visiting two of them
+/// visits such a pair, and lb of a subset bounds the route from below.
+/// Lifting is therefore sequential: j joins C only if it conflicts with every
+/// node already in C, previously lifted nodes included (#171).  Candidates
+/// come in `order` (y descending), so a high-y node is not blocked by a
+/// low-y one lifted before it.
 ///
-/// Returns lifted indices and values (coefficients).  RHS stays |S|-1.
-void lift_cut(const Problem& prob, std::span<const double> all_pairs, double ub,
-              const std::vector<int32_t>& set, std::span<const double> y_values, int32_t source,
-              int32_t target, bool is_tour, double tol, std::vector<int32_t>& out_nodes,
-              std::vector<double>& out_coeffs) {
-    const int32_t n = prob.num_nodes();
-    const size_t r = set.size() - 1;
+/// Covers of three or more nodes are emitted unlifted: the same rule there
+/// checks every (|S|-1)-subset of C, whose count grows exponentially.
+///
+/// Returns lifted indices and values (coefficients).  RHS stays 1.
+void lift_pair_cut(const Problem& prob, std::span<const double> all_pairs, double ub,
+                   const std::vector<int32_t>& pair, const std::vector<int32_t>& order,
+                   std::vector<int32_t>& out_nodes, std::vector<double>& out_coeffs) {
+    out_nodes = pair;
+    out_coeffs.assign(pair.size(), 1.0);
 
-    // Start with the core set (coefficient 1)
-    out_nodes = set;
-    out_coeffs.assign(set.size(), 1.0);
-
-    // For each candidate j ∉ S, check it against the accumulated support
-    for (int32_t j = 0; j < n; ++j) {
-        if (j == source) {
+    for (int32_t j : order) {
+        if (std::ranges::find(pair, j) != pair.end()) {
             continue;
         }
-        if (!is_tour && j == target) {
-            continue;
-        }
-        if (y_values[j] <= tol) {
-            continue;
-        }
-
-        // Skip if j ∈ S
-        bool in_set = false;
-        for (int32_t v : set) {
-            if (v == j) {
-                in_set = true;
-                break;
-            }
-        }
-        if (in_set) {
-            continue;
-        }
-
-        if (every_r_subset_conflicts(prob, all_pairs, ub, out_nodes, r, j)) {
+        const bool conflicts_with_all = std::ranges::all_of(out_nodes, [&](int32_t v) {
+            return compute_set_lb(prob, all_pairs, {v, j}) > ub + 1e-6;
+        });
+        if (conflicts_with_all) {
             out_nodes.push_back(j);
             out_coeffs.push_back(1.0);
         }
@@ -331,6 +275,13 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
         cand_nodes.push_back(cands[i].node);
     }
 
+    // Every candidate node (y-descending) for pair lifting
+    std::vector<int32_t> lift_order;
+    lift_order.reserve(cands.size());
+    for (const auto& c : cands) {
+        lift_order.push_back(c.node);
+    }
+
     // ── Phase 1: Find all violated infeasible pairs ──
     std::vector<Cut> cuts;
     std::vector<std::vector<int32_t>> emitted;  // dedup
@@ -357,12 +308,11 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
 
             double lb = compute_set_lb(prob, ctx.all_pairs, {i, j}, max_dp_size_);
             if (lb > ub + 1e-6) {
-                // Lift: scan for nodes that can replace either member
-                std::vector<int32_t> base_set = {i, j};
+                // Lift: add nodes that conflict with every node in the cut
                 std::vector<int32_t> lifted_nodes;
                 std::vector<double> lifted_coeffs;
-                lift_cut(prob, ctx.all_pairs, ub, base_set, ctx.y_values, source, target, is_tour,
-                         tol, lifted_nodes, lifted_coeffs);
+                lift_pair_cut(prob, ctx.all_pairs, ub, {i, j}, lift_order, lifted_nodes,
+                              lifted_coeffs);
 
                 double sum_y = 0.0;
                 Cut cut;
@@ -435,25 +385,14 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
         }
         emitted.push_back(sorted_set);
 
-        // Lift: scan for nodes that can replace any member of the minimal set
-        std::vector<int32_t> lifted_nodes;
-        std::vector<double> lifted_coeffs;
-        lift_cut(prob, ctx.all_pairs, ub, set, ctx.y_values, source, target, is_tour, tol,
-                 lifted_nodes, lifted_coeffs);
-
-        // Emit cut: Σ α_j y_j ≤ |S| - 1
-        double lifted_sum_y = 0.0;
+        // Emit the unlifted cut Σ_{v∈S} y_v ≤ |S| - 1 (see lift_pair_cut)
         Cut cut;
         cut.rhs = static_cast<double>(set.size()) - 1.0;
-        for (size_t li = 0; li < lifted_nodes.size(); ++li) {
-            cut.indices.push_back(ctx.y_offset + lifted_nodes[li]);
-            cut.values.push_back(lifted_coeffs[li]);
-            lifted_sum_y += lifted_coeffs[li] * ctx.y_values[lifted_nodes[li]];
+        for (int32_t v : set) {
+            cut.indices.push_back(ctx.y_offset + v);
+            cut.values.push_back(1.0);
         }
-        cut.violation = lifted_sum_y - cut.rhs;
-        if (cut.violation <= tol) {
-            continue;
-        }
+        cut.violation = violation;
         cuts.push_back(std::move(cut));
     }
 

@@ -1339,9 +1339,9 @@ TEST_CASE("SPI separator: finds pair cuts on tour with tight UB", "[spi]") {
         }
     }
 
-    // With lifting, pair cuts for {3,4} should include nodes 1,2 (symmetric
-    // expensive edges), so at least one cut should have more variables than
-    // just the pair.
+    // With lifting, the pair cut for {3,4} takes in a node that conflicts with
+    // both (1 or 2; not both, since 0-1-2-0 fits under UB), so at least one
+    // cut should have more variables than just the pair.
     bool found_lifted = false;
     for (const auto& cut : cuts) {
         if (cut.rhs < 1.0 + 1e-9 && cut.size() > 2) {
