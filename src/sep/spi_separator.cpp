@@ -313,6 +313,16 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
                 std::vector<double> lifted_coeffs;
                 lift_pair_cut(prob, ctx.all_pairs, ub, {i, j}, lift_order, lifted_nodes,
                               lifted_coeffs);
+                seeds.push_back({i, j, violation});
+
+                // Every violated pair of one clique lifts into the same row
+                // (#176); emit it once.  Lifting still runs per pair: the
+                // greedy clique grown from {i, j} need not be one emitted.
+                auto sorted_support = lifted_nodes;
+                std::ranges::sort(sorted_support);
+                if (std::ranges::find(emitted, sorted_support) != emitted.end()) {
+                    continue;
+                }
 
                 double sum_y = 0.0;
                 Cut cut;
@@ -324,10 +334,9 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
                 }
                 cut.violation = sum_y - cut.rhs;
                 if (cut.violation > tol) {
+                    emitted.push_back(std::move(sorted_support));
                     cuts.push_back(std::move(cut));
                 }
-
-                seeds.push_back({i, j, violation});
             }
         }
     }

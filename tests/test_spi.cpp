@@ -150,3 +150,58 @@ TEST_CASE("SPI separator: path problem returns no cuts without all-pairs", "[spi
     const auto cuts = spi.separate(ctx);
     REQUIRE(cuts.empty());
 }
+
+TEST_CASE("SPI separator: pairs of one conflict clique emit one lifted row", "[spi]") {
+    // Depot 0 and customers 1, 2, 3.  A single visit costs 20; two cost at
+    // least 40 (shortest paths between customers run through the depot), so
+    // under UB 30 every pair conflicts and each of the three violated pairs
+    // lifts into y1 + y2 + y3 <= 1 (#176).
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges;
+    std::vector<double> costs;
+    for (int i = 0; i < 4; ++i) {
+        for (int j = i + 1; j < 4; ++j) {
+            edges.push_back({i, j});
+            costs.push_back(i == 0 ? 10.0 : 100.0);
+        }
+    }
+    const std::vector<double> profits = {0, 0, 0, 0};
+    const std::vector<double> demands = {0, 1, 1, 1};
+    prob.build(4, edges, costs, profits, demands, 100.0, 0, 0);
+    REQUIRE(prob.is_tour());
+
+    const int32_t m = prob.num_edges();
+    const int32_t n = prob.num_nodes();
+    auto all_pairs = compute_all_pairs(prob);
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(n, 0.6);
+    y_values[0] = 1.0;
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        if (graph.edge_source(e) == 0 || graph.edge_target(e) == 0) {
+            x_values[e] = 0.6;
+        }
+    }
+
+    auto support = build_support(prob, x_values);
+    cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = 30.0,
+        .all_pairs = all_pairs,
+    };
+
+    cptp::sep::SPISeparator spi;
+    const auto cuts = spi.separate(ctx);
+    REQUIRE(cuts.size() == 1);
+    auto support_cols = cuts[0].indices;
+    std::ranges::sort(support_cols);
+    REQUIRE(support_cols == std::vector<int32_t>{m + 1, m + 2, m + 3});
+    REQUIRE(cuts[0].rhs == 1.0);
+}
