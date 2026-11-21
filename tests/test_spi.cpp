@@ -153,25 +153,31 @@ TEST_CASE("SPI separator: path problem returns no cuts without all-pairs", "[spi
 }
 
 TEST_CASE("SPI separator: pairs of one conflict clique emit one lifted row", "[spi]") {
-    // Depot 0 and customers 1, 2, 3.  A single visit costs 20; two cost at
+    // Depot 0 and customers 1..k.  A single visit costs 20; two cost at
     // least 40 (shortest paths between customers run through the depot), so
-    // under UB 30 every pair conflicts and each of the three violated pairs
-    // lifts into y1 + y2 + y3 <= 1 (#176).  At y = 0.9 Phase 2 also grows
-    // each seed into the triple, whose own row y1 + y2 + y3 <= 2 is violated
-    // but dominated by the clique row on the same support, so it is skipped.
+    // under UB 30 every pair conflicts and each violated pair lifts into
+    // y1 + ... + yk <= 1 (#176).  At y = 0.9 Phase 2 also grows each seed
+    // into all k customers and shrinks it to a triple, whose own row
+    // (y_a + y_b + y_c <= 2, violation 0.7) is violated but dominated by the
+    // clique row on a superset (#177; the same support when k = 3), so it is
+    // skipped.
+    const int32_t k = GENERATE(3, 4);
     const double y = GENERATE(0.6, 0.9);
+    CAPTURE(k, y);
+    const int32_t num_nodes = k + 1;
     cptp::Problem prob;
     std::vector<cptp::Edge> edges;
     std::vector<double> costs;
-    for (int i = 0; i < 4; ++i) {
-        for (int j = i + 1; j < 4; ++j) {
+    for (int i = 0; i < num_nodes; ++i) {
+        for (int j = i + 1; j < num_nodes; ++j) {
             edges.push_back({i, j});
             costs.push_back(i == 0 ? 10.0 : 100.0);
         }
     }
-    const std::vector<double> profits = {0, 0, 0, 0};
-    const std::vector<double> demands = {0, 1, 1, 1};
-    prob.build(4, edges, costs, profits, demands, 100.0, 0, 0);
+    const std::vector<double> profits(num_nodes, 0.0);
+    std::vector<double> demands(num_nodes, 1.0);
+    demands[0] = 0.0;
+    prob.build(num_nodes, edges, costs, profits, demands, 100.0, 0, 0);
     REQUIRE(prob.is_tour());
 
     const int32_t m = prob.num_edges();
@@ -206,6 +212,10 @@ TEST_CASE("SPI separator: pairs of one conflict clique emit one lifted row", "[s
     REQUIRE(cuts.size() == 1);
     auto support_cols = cuts[0].indices;
     std::ranges::sort(support_cols);
-    REQUIRE(support_cols == std::vector<int32_t>{m + 1, m + 2, m + 3});
+    std::vector<int32_t> clique_cols;
+    for (int32_t v = 1; v <= k; ++v) {
+        clique_cols.push_back(m + v);
+    }
+    REQUIRE(support_cols == clique_cols);
     REQUIRE(cuts[0].rhs == 1.0);
 }

@@ -284,10 +284,8 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
 
     // ── Phase 1: Find all violated infeasible pairs ──
     std::vector<Cut> cuts;
-    std::vector<std::vector<int32_t>> emitted;  // sorted supports, both phases
-    auto is_duplicate = [&](const std::vector<int32_t>& set) -> bool {
-        return std::ranges::any_of(emitted, [&](const auto& s) { return s == set; });
-    };
+    std::vector<std::vector<int32_t>> cliques;      // sorted supports, Phase 1
+    std::vector<std::vector<int32_t>> phase2_sets;  // sorted supports, Phase 2
 
     // Track infeasible pairs for seeding Phase 2
     struct InfeasiblePair {
@@ -323,7 +321,7 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
                 // greedy clique grown from {i, j} need not be one emitted.
                 auto sorted_support = lifted_nodes;
                 std::ranges::sort(sorted_support);
-                if (is_duplicate(sorted_support)) {
+                if (std::ranges::find(cliques, sorted_support) != cliques.end()) {
                     continue;
                 }
 
@@ -337,7 +335,7 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
                 }
                 cut.violation = sum_y - cut.rhs;
                 if (cut.violation > tol) {
-                    emitted.push_back(std::move(sorted_support));
+                    cliques.push_back(std::move(sorted_support));
                     cuts.push_back(std::move(cut));
                 }
             }
@@ -386,13 +384,18 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
             continue;
         }
 
-        // Dedup
+        // Skip a set inside an emitted clique C (equal to it included): the
+        // clique row dominates it, Σ_{v∈S} y_v ≤ Σ_{v∈C} y_v ≤ 1 ≤ |S| - 1
+        // (#177).  Otherwise skip only an exact repeat: a Phase 2 row over a
+        // subset of another Phase 2 set is the stronger of the two.
         auto sorted_set = set;
         std::ranges::sort(sorted_set);
-        if (is_duplicate(sorted_set)) {
+        if (std::ranges::any_of(
+                cliques, [&](const auto& c) { return std::ranges::includes(c, sorted_set); }) ||
+            std::ranges::find(phase2_sets, sorted_set) != phase2_sets.end()) {
             continue;
         }
-        emitted.push_back(sorted_set);
+        phase2_sets.push_back(sorted_set);
 
         // Emit the unlifted cut Σ_{v∈S} y_v ≤ |S| - 1 (see lift_pair_cut)
         Cut cut;
