@@ -408,7 +408,7 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
         // Skip a set sharing two nodes a, b with an emitted clique C (a set
         // inside C included): the clique row and y ≤ 1 imply its row,
         // Σ_{v∈S} y_v ≤ (y_a + y_b) + (|S| - 2) ≤ |S| - 1 (#177).  A violated S
-        // has y_a + y_b > 1 on every pair, so a conflicting pair in it was
+        // has y_a + y_b > 1 on every pair, so any conflicting pair in it was
         // lifted into some emitted C in Phase 1.  Likewise skip S containing
         // an emitted Phase 2 set T (S itself included), whose row and y ≤ 1
         // imply S's; a T strictly inside S is rare, as shrink would usually
