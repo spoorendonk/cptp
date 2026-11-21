@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -155,7 +156,10 @@ TEST_CASE("SPI separator: pairs of one conflict clique emit one lifted row", "[s
     // Depot 0 and customers 1, 2, 3.  A single visit costs 20; two cost at
     // least 40 (shortest paths between customers run through the depot), so
     // under UB 30 every pair conflicts and each of the three violated pairs
-    // lifts into y1 + y2 + y3 <= 1 (#176).
+    // lifts into y1 + y2 + y3 <= 1 (#176).  At y = 0.9 Phase 2 also grows
+    // each seed into the triple, whose own row y1 + y2 + y3 <= 2 is violated
+    // but dominated by the clique row on the same support, so it is skipped.
+    const double y = GENERATE(0.6, 0.9);
     cptp::Problem prob;
     std::vector<cptp::Edge> edges;
     std::vector<double> costs;
@@ -175,12 +179,12 @@ TEST_CASE("SPI separator: pairs of one conflict clique emit one lifted row", "[s
     auto all_pairs = compute_all_pairs(prob);
 
     std::vector<double> x_values(m, 0.0);
-    std::vector<double> y_values(n, 0.6);
+    std::vector<double> y_values(n, y);
     y_values[0] = 1.0;
     const auto& graph = prob.graph();
     for (auto e : graph.edges()) {
         if (graph.edge_source(e) == 0 || graph.edge_target(e) == 0) {
-            x_values[e] = 0.6;
+            x_values[e] = y;
         }
     }
 

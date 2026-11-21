@@ -284,7 +284,10 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
 
     // ── Phase 1: Find all violated infeasible pairs ──
     std::vector<Cut> cuts;
-    std::vector<std::vector<int32_t>> emitted;  // dedup
+    std::vector<std::vector<int32_t>> emitted;  // sorted supports, both phases
+    auto is_duplicate = [&](const std::vector<int32_t>& set) -> bool {
+        return std::ranges::any_of(emitted, [&](const auto& s) { return s == set; });
+    };
 
     // Track infeasible pairs for seeding Phase 2
     struct InfeasiblePair {
@@ -320,7 +323,7 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
                 // greedy clique grown from {i, j} need not be one emitted.
                 auto sorted_support = lifted_nodes;
                 std::ranges::sort(sorted_support);
-                if (std::ranges::find(emitted, sorted_support) != emitted.end()) {
+                if (is_duplicate(sorted_support)) {
                     continue;
                 }
 
@@ -355,10 +358,6 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
         return a.violation > b.violation;
     });
 
-    auto is_duplicate = [&](const std::vector<int32_t>& set) -> bool {
-        return std::ranges::any_of(emitted, [&](const auto& s) { return s == set; });
-    };
-
     size_t num_seeds = std::min(seeds.size(), static_cast<size_t>(max_seeds_));
     for (size_t si = 0; si < num_seeds; ++si) {
         auto [pi, pj, _] = seeds[si];
@@ -369,11 +368,12 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
         greedy_grow(prob, ctx.all_pairs, ub, set, cand_nodes, max_dp_size_);
 
         if (static_cast<int32_t>(set.size()) <= 2) {
-            continue;  // pair already emitted
+            continue;  // pair covered by its lifted Phase 1 clique row
         }
 
         // Shrink: remove nodes to find minimal infeasible subset.
-        // min_size=3: don't shrink back to pairs (already emitted in Phase 1).
+        // min_size=3: don't shrink back to pairs (each is covered by its
+        // lifted Phase 1 clique row).
         greedy_shrink(prob, ctx.all_pairs, ub, set, ctx.y_values, /*min_size=*/3);
 
         // Compute violation
