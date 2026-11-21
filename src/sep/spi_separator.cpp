@@ -224,6 +224,27 @@ void lift_pair_cut(const Problem& prob, std::span<const double> all_pairs, doubl
     }
 }
 
+/// True when the sorted node lists `a` and `b` share at least two nodes.
+bool shares_pair(const std::vector<int32_t>& a, const std::vector<int32_t>& b) {
+    int32_t common = 0;
+    size_t i = 0;
+    size_t j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (a[i] < b[j]) {
+            ++i;
+        } else if (b[j] < a[i]) {
+            ++j;
+        } else {
+            if (++common == 2) {
+                return true;
+            }
+            ++i;
+            ++j;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
@@ -384,15 +405,20 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
             continue;
         }
 
-        // Skip a set inside an emitted clique C (equal to it included): the
-        // clique row dominates it, Σ_{v∈S} y_v ≤ Σ_{v∈C} y_v ≤ 1 ≤ |S| - 1
-        // (#177).  Otherwise skip only an exact repeat: a Phase 2 row over a
-        // subset of another Phase 2 set is the stronger of the two.
+        // Skip a set sharing two nodes a, b with an emitted clique C (a set
+        // inside C included): the clique row and y ≤ 1 imply its row,
+        // Σ_{v∈S} y_v ≤ (y_a + y_b) + (|S| - 2) ≤ |S| - 1 (#177).  A violated S
+        // has y_a + y_b > 1 on every pair, so a conflicting pair in it was
+        // lifted into some emitted C in Phase 1.  Likewise skip S containing
+        // an emitted Phase 2 set T (S itself included), whose row and y ≤ 1
+        // imply S's; a T strictly inside S is rare, as shrink would usually
+        // have reached it.
         auto sorted_set = set;
         std::ranges::sort(sorted_set);
-        if (std::ranges::any_of(
-                cliques, [&](const auto& c) { return std::ranges::includes(c, sorted_set); }) ||
-            std::ranges::find(phase2_sets, sorted_set) != phase2_sets.end()) {
+        if (std::ranges::any_of(cliques,
+                                [&](const auto& c) { return shares_pair(c, sorted_set); }) ||
+            std::ranges::any_of(
+                phase2_sets, [&](const auto& t) { return std::ranges::includes(sorted_set, t); })) {
             continue;
         }
         phase2_sets.push_back(sorted_set);

@@ -219,3 +219,81 @@ TEST_CASE("SPI separator: pairs of one conflict clique emit one lifted row", "[s
     REQUIRE(support_cols == clique_cols);
     REQUIRE(cuts[0].rhs == 1.0);
 }
+
+TEST_CASE("SPI separator: Phase 2 emits only rows no clique row implies", "[spi]") {
+    // Depot 0, customers a = 1, b = 2, c = 3 and, optionally, d = 4.  Costs:
+    // depot to each customer 10, a-b 17, a-c and a-d 8, among b, c, d 10.
+    // Under UB 35 only {a, b} conflicts (lb 37; every other pair is at most
+    // 30), so Phase 1 emits y_a + y_b <= 1 and seeds Phase 2 with {a, b}.
+    // Without d, Phase 2 grows the seed to {a, b, c} (lb 38), whose row
+    // shares a, b with the clique and so is implied by it (#177): skipped.
+    // With d, it grows to all four and shrinks by dropping a (lb {b, c, d} =
+    // 40 beats 38 and 36), to a triple of pairwise feasible nodes whose row
+    // y_b + y_c + y_d <= 2 (violation 0.7) no clique row implies: emitted.
+    const bool with_d = GENERATE(false, true);
+    CAPTURE(with_d);
+    const int32_t num_nodes = with_d ? 5 : 4;
+    const auto customer_cost = [](int32_t i, int32_t j) -> double {
+        if (i == 1) {
+            return j == 2 ? 17.0 : 8.0;
+        }
+        return 10.0;
+    };
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges;
+    std::vector<double> costs;
+    for (int32_t i = 0; i < num_nodes; ++i) {
+        for (int32_t j = i + 1; j < num_nodes; ++j) {
+            edges.push_back({i, j});
+            costs.push_back(i == 0 ? 10.0 : customer_cost(i, j));
+        }
+    }
+    const std::vector<double> profits(num_nodes, 0.0);
+    std::vector<double> demands(num_nodes, 1.0);
+    demands[0] = 0.0;
+    prob.build(num_nodes, edges, costs, profits, demands, 100.0, 0, 0);
+    REQUIRE(prob.is_tour());
+
+    const int32_t m = prob.num_edges();
+    auto all_pairs = compute_all_pairs(prob);
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(num_nodes, 0.9);
+    y_values[0] = 1.0;
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        if (graph.edge_source(e) == 0 || graph.edge_target(e) == 0) {
+            x_values[e] = 0.9;
+        }
+    }
+
+    auto support = build_support(prob, x_values);
+    cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = 35.0,
+        .all_pairs = all_pairs,
+    };
+
+    cptp::sep::SPISeparator spi;
+    const auto cuts = spi.separate(ctx);
+    REQUIRE(cuts.size() == (with_d ? 2U : 1U));
+
+    auto clique_cols = cuts[0].indices;
+    std::ranges::sort(clique_cols);
+    REQUIRE(clique_cols == std::vector<int32_t>{m + 1, m + 2});
+    REQUIRE(cuts[0].rhs == 1.0);
+
+    if (with_d) {
+        auto triple_cols = cuts[1].indices;
+        std::ranges::sort(triple_cols);
+        REQUIRE(triple_cols == std::vector<int32_t>{m + 2, m + 3, m + 4});
+        REQUIRE(cuts[1].rhs == 2.0);
+        REQUIRE(cuts[1].violation > 0.7 - 1e-9);
+    }
+}
