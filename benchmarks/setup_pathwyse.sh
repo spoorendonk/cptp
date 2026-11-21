@@ -61,7 +61,10 @@ cmake --build build -j"$NCPU"
 
 # Every file a run uses, relative to bin/: the executable, the shared
 # libpathwyse_core it loads (the solver code), and the pathwyse.set that
-# compare_pathwyse.py starts its parameter file from.
+# compare_pathwyse.py starts its parameter file from. The stamp also names
+# bin/ itself: the executable loads the library through an absolute rpath
+# to this directory, so a copy moved elsewhere would still load the library
+# here, and compare_pathwyse.py accepts the stamp only in place.
 if command -v sha256sum >/dev/null; then
     SHA256=(sha256sum)
 else
@@ -70,11 +73,13 @@ fi
 cd "$PW_DIR/bin"
 {
     echo "commit $PATHWYSE_COMMIT"
-    for f in * ../pathwyse.set; do
+    echo "dir $(pwd -P)"
+    for f in *; do
         if [ -f "$f" ]; then
             "${SHA256[@]}" "$f"
         fi
     done
+    "${SHA256[@]}" ../pathwyse.set
 } > "$PW_DIR/pathwyse.provenance.tmp"  # outside bin/, so not hashed itself
 mv "$PW_DIR/pathwyse.provenance.tmp" "$STAMP"
 

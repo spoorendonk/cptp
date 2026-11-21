@@ -295,40 +295,47 @@ def load_optimal_csv(instance_path: Path) -> float | None:
 UNKNOWN_REVISION = "unknown"
 
 
-def _read_stamp(stamp: Path) -> tuple[str, dict[str, str]] | None:
-    """(commit, {path: sha256}) from a provenance stamp, or None if unreadable."""
+def _read_stamp(stamp: Path) -> tuple[str, Path, dict[str, str]] | None:
+    """(commit, build directory, {path: sha256}) from a provenance stamp, or None if unreadable."""
     try:
         lines = stamp.read_text().splitlines()
     except (OSError, UnicodeDecodeError):
         return None
-    if not lines or not re.fullmatch(r"commit [0-9a-f]{40}", lines[0]):
+    if (
+        len(lines) < 2
+        or not re.fullmatch(r"commit [0-9a-f]{40}", lines[0])
+        or not lines[1].startswith("dir /")
+    ):
         return None
     digests: dict[str, str] = {}
-    for line in lines[1:]:
+    for line in lines[2:]:
         # sha256sum / shasum -a 256 lines: "<hex>  <path>" ("<hex> *<path>" in binary mode)
         match = re.fullmatch(r"([0-9a-f]{64}) [ *](.+)", line)
         if match is None:
             return None
         digests[match.group(2)] = match.group(1)
-    return lines[0].removeprefix("commit "), digests
+    return lines[0].removeprefix("commit "), Path(lines[1].removeprefix("dir ")), digests
 
 
 def pathwyse_revision(pw_bin: Path) -> str:
     """Commit the binary was built at, as its provenance stamp proves it, or "unknown".
 
     setup_pathwyse.sh writes the stamp, <binary>.provenance, after building at
-    the pinned commit: the commit, and the sha256 of each file a run uses
-    (paths relative to the binary's directory: the binary, the shared library
-    it loads, ../pathwyse.set). The commit stands only while the binary is
-    listed and every listed file still hashes as recorded, so a binary rebuilt
-    or a file changed since then is "unknown", whatever the checkout's HEAD is.
+    the pinned commit: the commit, the directory it was built in, and the
+    sha256 of each file a run uses (paths relative to that directory: the
+    binary, the shared library it loads, ../pathwyse.set). The commit stands
+    only while the binary is listed and every listed file still hashes as
+    recorded, so a binary rebuilt or a file changed since then is "unknown",
+    whatever the checkout's HEAD is. So is a binary moved or copied out of its
+    build directory: it loads the library through an absolute rpath to that
+    directory, not the copy beside it.
     """
     pw_bin = pw_bin.resolve()
     stamp = _read_stamp(pw_bin.with_name(pw_bin.name + ".provenance"))
     if stamp is None:
         return UNKNOWN_REVISION
-    commit, digests = stamp
-    if pw_bin.name not in digests:
+    commit, build_dir, digests = stamp
+    if pw_bin.parent != build_dir.resolve() or pw_bin.name not in digests:
         return UNKNOWN_REVISION
     for rel, digest in digests.items():
         try:
@@ -679,6 +686,7 @@ def write_rows(csv_path: Path, rows: list[list[str]]) -> None:
     """
     head, body = _kept_lines(csv_path, {(row[0], row[2]) for row in rows})
     tmp = csv_path.with_name(f".{csv_path.name}.{os.getpid()}.tmp")
+    tmp.unlink(missing_ok=True)  # left by a killed run whose pid this one reuses
     try:
         with open(tmp, "x", newline="") as f:
             f.writelines(head)

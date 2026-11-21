@@ -31,8 +31,10 @@
 # Prerequisites:
 #   PathWyse must be built: run ./benchmarks/setup_pathwyse.sh first. Only the
 #   pinned build runs: a binary whose provenance stamp does not prove it was
-#   built at setup_pathwyse.sh's PATHWYSE_COMMIT is refused (PATHWYSE_BIN may
-#   point elsewhere, at a binary with such a stamp beside it).
+#   built at setup_pathwyse.sh's PATHWYSE_COMMIT, in the directory it was
+#   built in, is refused (PATHWYSE_BIN may point at another such build; a
+#   binary copied out of its build directory is refused, as it would still
+#   load its library from there).
 
 set -euo pipefail
 
@@ -85,7 +87,7 @@ if [[ -f "$OUTFILE" ]]; then
     have_header="${have_header%$'\r'}"  # Python's csv writer ends lines with \r\n
     if [[ -n "$have_header" && "$have_header" != "$EXPECTED_HEADER" ]]; then
         echo "Error: $OUTFILE has header '$have_header', expected '$EXPECTED_HEADER'" >&2
-        exit 1
+        exit 2
     fi
 fi
 
@@ -106,7 +108,7 @@ MACHINE="$CPU ${NCPU}T"
 PIN="$(sed -n 's/^PATHWYSE_COMMIT="\([0-9a-f]\{40\}\)"$/\1/p' "$SCRIPT_DIR/setup_pathwyse.sh")"
 if [[ -z "$PIN" ]]; then
     echo "Error: no PATHWYSE_COMMIT pin found in $SCRIPT_DIR/setup_pathwyse.sh" >&2
-    exit 1
+    exit 2
 fi
 
 echo "PathWyse reference run — algorithm: $ALGO, time limit: ${TIME_LIMIT}s"

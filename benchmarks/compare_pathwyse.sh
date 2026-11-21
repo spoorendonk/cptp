@@ -92,6 +92,8 @@ def read_csv(path):
 
 pw = read_csv(pw_file)
 cptp = read_csv(cptp_file)
+if any('gap_pct' not in row for row in cptp.values()):
+    sys.exit(f"Error: {cptp_file} has no gap_pct column, so no cptp row proves optimality")
 
 # Merge on instance name
 all_instances = sorted(set(pw.keys()) | set(cptp.keys()))
@@ -110,18 +112,18 @@ def pw_verdict(row):
     Only status Optimal proves it (a failed run's row keeps no objective,
     and one that ended Feasible or Super optimal proves nothing)."""
     status = row.get('status', '')
-    if status == 'Optimal' and number(row, 'obj') is not None:
-        return ''
     if status == 'TIMEOUT':
         return 'TLIM'
-    return 'ERR' if not status or status.startswith('ERROR') else 'UNPR'
+    if not status or status.startswith('ERROR') or number(row, 'obj') is None:
+        return 'ERR'
+    return '' if status == 'Optimal' else 'UNPR'
 
 def cptp_verdict(row):
     """'' if the cptp row proves optimality (an objective at gap 0), else why not."""
     gap = number(row, 'gap_pct')
-    if number(row, 'obj') is not None and gap == 0:
-        return ''
-    return 'TLIM' if gap is not None else 'ERR'
+    if number(row, 'obj') is None or gap is None:
+        return 'ERR'
+    return '' if gap == 0 else 'TLIM'
 
 matches = mismatches = unproven = missing = 0
 pw_solved = cptp_solved = 0

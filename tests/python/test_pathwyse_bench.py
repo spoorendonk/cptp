@@ -9,6 +9,7 @@ import csv
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -70,10 +71,10 @@ def pinned_commit() -> str:
 
 
 def write_stamp(checkout: Path, commit: str) -> None:
-    """The stamp setup_pathwyse.sh writes: commit, then sha256sum lines relative to bin/."""
+    """The stamp setup_pathwyse.sh writes: commit, bin/, then sha256sum lines relative to it."""
     bin_dir = checkout / "bin"
     files = [p.name for p in sorted(bin_dir.iterdir()) if p.name != "pathwyse.provenance"]
-    lines = [f"commit {commit}"]
+    lines = [f"commit {commit}", f"dir {bin_dir.resolve()}"]
     for rel in [*files, "../pathwyse.set"]:
         lines.append(f"{hashlib.sha256((bin_dir / rel).read_bytes()).hexdigest()}  {rel}")
     (bin_dir / "pathwyse.provenance").write_text("\n".join(lines) + "\n")
@@ -158,6 +159,21 @@ def test_changed_build_is_unknown(
         (checkout / "bin" / "pathwyse.provenance").unlink()
     out = tmp_path / "out.csv"
     env = stub_env(tmp_path, checkout, pw_output(-42))
+    proc = compare(instances / "tiny.sppcc", env, "--csv", str(out))
+    assert proc.returncode == 0, proc.stderr
+    assert [r["pathwyse"] for r in rows(out)] == ["unknown"]
+
+
+def test_binary_copied_out_of_its_build_is_unknown(
+    tmp_path: Path, checkout: Path, instances: Path
+) -> None:
+    """The copy would still load the library of the build directory, which may have changed."""
+    write_stamp(checkout, OTHER_COMMIT)
+    copy = tmp_path / "copy"
+    shutil.copytree(checkout, copy)
+    out = tmp_path / "out.csv"
+    env = stub_env(tmp_path, checkout, pw_output(-42))
+    env["PATHWYSE_BIN"] = str(copy / "bin" / "pathwyse")
     proc = compare(instances / "tiny.sppcc", env, "--csv", str(out))
     assert proc.returncode == 0, proc.stderr
     assert [r["pathwyse"] for r in rows(out)] == ["unknown"]
@@ -259,6 +275,29 @@ def test_unproven_rows_are_not_compared(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stdout
     assert "Matches: 0  Mismatches: 0  Not both proven: 2" in proc.stdout
     assert "Geometric mean" not in proc.stdout
+
+
+def test_rows_without_an_objective_are_errors(tmp_path: Path) -> None:
+    proc = aggregate(
+        tmp_path,
+        "a,s,PWDefault,,0.5,Optimal,t,m,c,\nb,s,PWDefault,-7,1.0,Optimal,t,m,c,\n",
+        "a,-42,0,2.0\nb,,0,2.0\n",
+    )
+    assert proc.returncode == 0, proc.stdout
+    assert re.search(r"^a .* ERR$", proc.stdout, re.M)
+    assert re.search(r"^b .* ERR$", proc.stdout, re.M)
+    assert "Proven optimal: PathWyse 1, cptp 1" in proc.stdout
+
+
+def test_cptp_file_without_gap_is_refused(tmp_path: Path) -> None:
+    pw, cptp = tmp_path / "pw.csv", tmp_path / "cptp.csv"
+    pw.write_text(HEADER + "\na,s,PWDefault,-42,0.5,Optimal,t,m,c,\n")
+    cptp.write_text("instance,obj,time_s\na,-42,2.0\n")
+    proc = run(
+        ["bash", str(AGGREGATE), "--pathwyse", str(pw), "--cptp", str(cptp)], dict(os.environ)
+    )
+    assert proc.returncode == 1
+    assert "no gap_pct column" in proc.stderr
 
 
 def test_aggregate_mismatch_exits_1(tmp_path: Path) -> None:
