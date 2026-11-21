@@ -43,6 +43,12 @@ else
     fi
 fi
 
+# The provenance stamp says which commit bin/ was built at: compare_pathwyse.py
+# records that commit only while every file listed here still hashes as it
+# did, and "unknown" otherwise. Removed first, so a failed build leaves none.
+STAMP="$PW_DIR/bin/pathwyse.provenance"
+rm -f "$STAMP"
+
 echo "Building PathWyse..."
 cd "$PW_DIR"
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -52,5 +58,24 @@ else
     NCPU="$(sysctl -n hw.logicalcpu)"
 fi
 cmake --build build -j"$NCPU"
+
+# Every file a run uses, relative to bin/: the executable, the shared
+# libpathwyse_core it loads (the solver code), and the pathwyse.set that
+# compare_pathwyse.py starts its parameter file from.
+if command -v sha256sum >/dev/null; then
+    SHA256=(sha256sum)
+else
+    SHA256=(shasum -a 256)
+fi
+cd "$PW_DIR/bin"
+{
+    echo "commit $PATHWYSE_COMMIT"
+    for f in * ../pathwyse.set; do
+        if [ -f "$f" ]; then
+            "${SHA256[@]}" "$f"
+        fi
+    done
+} > "$PW_DIR/pathwyse.provenance.tmp"  # outside bin/, so not hashed itself
+mv "$PW_DIR/pathwyse.provenance.tmp" "$STAMP"
 
 echo "PathWyse $PATHWYSE_TAG built successfully at $PW_DIR/bin/pathwyse"

@@ -16,7 +16,11 @@
 # Output:
 #   Comparison table with columns:
 #     instance, pw_obj, pw_time, cptp_obj, cptp_time, speedup, obj_match
-#   Summary: geometric mean speedup, match/mismatch counts.
+#   A pair is compared only when both rows prove optimality (PathWyse status
+#   Optimal; cptp gap_pct 0): OK or FAIL. Otherwise obj_match says why not:
+#   TLIM (time limit), ERR (failed run), UNPR (ended unproven), ? (no row).
+#   Summary: match/mismatch counts, proven-optimal counts per solver, and the
+#   geometric mean speedup over the OK pairs only. Exits 1 on a FAIL.
 
 set -euo pipefail
 
@@ -96,55 +100,76 @@ header = f"{'Instance':<35} {'PW Obj':>12} {'PW Time':>10} {'CPTP Obj':>12} {'CP
 print(header)
 print('-' * len(header))
 
-matches = mismatches = missing = 0
+def number(row, key):
+    value = row.get(key, '')
+    return float(value) if value else None
+
+def pw_verdict(row):
+    """'' if the PathWyse row proves optimality, else why not.
+
+    Only status Optimal proves it (a failed run's row keeps no objective,
+    and one that ended Feasible or Super optimal proves nothing)."""
+    status = row.get('status', '')
+    if status == 'Optimal' and number(row, 'obj') is not None:
+        return ''
+    if status == 'TIMEOUT':
+        return 'TLIM'
+    return 'ERR' if not status or status.startswith('ERROR') else 'UNPR'
+
+def cptp_verdict(row):
+    """'' if the cptp row proves optimality (an objective at gap 0), else why not."""
+    gap = number(row, 'gap_pct')
+    if number(row, 'obj') is not None and gap == 0:
+        return ''
+    return 'TLIM' if gap is not None else 'ERR'
+
+matches = mismatches = unproven = missing = 0
+pw_solved = cptp_solved = 0
 log_speedups = []
 
 for name in all_instances:
-    p = pw.get(name, {})
-    c = cptp.get(name, {})
+    p = pw.get(name)
+    c = cptp.get(name)
+    p_why = pw_verdict(p) if p is not None else '?'
+    c_why = cptp_verdict(c) if c is not None else '?'
+    pw_solved += p_why == ''
+    cptp_solved += c_why == ''
+    p, c = p or {}, c or {}
 
-    pw_obj_str = p.get('obj', '')
-    pw_time_str = p.get('time_s', '')
-    cptp_obj_str = c.get('obj', '')
-    cptp_time_str = c.get('time_s', '')
-
-    pw_obj = float(pw_obj_str) if pw_obj_str else None
-    pw_time = float(pw_time_str) if pw_time_str else None
-    cptp_obj = float(cptp_obj_str) if cptp_obj_str else None
-    cptp_time = float(cptp_time_str) if cptp_time_str else None
-    cptp_gap = float(c.get('gap_pct', '0') or '0')
-
-    # Objective match
-    match_str = '?'
-    if pw_obj is not None and cptp_obj is not None:
-        if cptp_gap > 0:
-            match_str = 'TLIM'
-            mismatches += 1
-        elif abs(pw_obj - cptp_obj) < 0.01:
-            match_str = 'OK'
-            matches += 1
-        else:
-            match_str = 'FAIL'
-            mismatches += 1
-    else:
-        missing += 1
-
-    # Speedup (PathWyse time / cptp time)
+    # Only a pair that both prove optimal is compared, and only an agreeing
+    # pair counts toward the speedup: a failed, timed-out or unproven row is
+    # neither a match nor a speedup.
     speedup_str = ''
-    if pw_time and cptp_time and cptp_time > 0:
-        speedup = pw_time / cptp_time
-        speedup_str = f'{speedup:.2f}x'
-        if pw_time > 0:
+    if p_why == '?' or c_why == '?':
+        match_str = '?'
+        missing += 1
+    elif p_why or c_why:
+        match_str = p_why or c_why
+        unproven += 1
+    elif abs(number(p, 'obj') - number(c, 'obj')) < 0.01:
+        match_str = 'OK'
+        matches += 1
+        pw_time, cptp_time = number(p, 'time_s'), number(c, 'time_s')
+        if pw_time and cptp_time:
+            speedup = pw_time / cptp_time
+            speedup_str = f'{speedup:.2f}x'
             log_speedups.append(math.log(speedup))
+    else:
+        match_str = 'FAIL'
+        mismatches += 1
 
-    print(f"{name:<35} {pw_obj_str:>12} {pw_time_str:>10} {cptp_obj_str:>12} {cptp_time_str:>10} {speedup_str:>8} {match_str:>6}")
+    print(f"{name:<35} {p.get('obj', ''):>12} {p.get('time_s', ''):>10} {c.get('obj', ''):>12} {c.get('time_s', ''):>10} {speedup_str:>8} {match_str:>6}")
 
 print('-' * len(header))
 
 # Summary
-total = matches + mismatches + missing
-print(f"\nInstances: {total}  Matches: {matches}  Mismatches: {mismatches}  Missing: {missing}")
+total = matches + mismatches + unproven + missing
+print(f"\nInstances: {total}  Matches: {matches}  Mismatches: {mismatches}  "
+      f"Not both proven: {unproven}  Missing: {missing}")
+print(f"Proven optimal: PathWyse {pw_solved}, cptp {cptp_solved}")
 if log_speedups:
     geo_mean = math.exp(sum(log_speedups) / len(log_speedups))
-    print(f"Geometric mean speedup (PW/cptp): {geo_mean:.2f}x  (over {len(log_speedups)} comparable instances)")
+    print(f"Geometric mean speedup (PW/cptp): {geo_mean:.2f}x  (over {len(log_speedups)} matching instances)")
+if mismatches:
+    sys.exit(1)
 PYEOF

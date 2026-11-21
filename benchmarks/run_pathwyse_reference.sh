@@ -23,11 +23,16 @@
 # Output:
 #   The --out CSV, with algo, timestamp, machine and PathWyse commit columns.
 #   Existing rows for re-run instances are replaced; other rows are preserved.
+#   Each target's rows replace the old ones only once that target has run to
+#   the end, so a target that fails or is interrupted keeps its old rows.
 #   benchmarks/pathwyse.csv holds the paper's rows (an unpinned PathWyse, see
 #   setup_pathwyse.sh) in the older column layout and is not written to.
 #
 # Prerequisites:
-#   PathWyse must be built: run ./benchmarks/setup_pathwyse.sh first.
+#   PathWyse must be built: run ./benchmarks/setup_pathwyse.sh first. Only the
+#   pinned build runs: a binary whose provenance stamp does not prove it was
+#   built at setup_pathwyse.sh's PATHWYSE_COMMIT is refused (PATHWYSE_BIN may
+#   point elsewhere, at a binary with such a stamp beside it).
 
 set -euo pipefail
 
@@ -72,8 +77,8 @@ if [[ -z "$OUTFILE" ]]; then
     OUTFILE="$SCRIPT_DIR/pathwyse-$ALGO.csv"
 fi
 
-# Refuse a file in another column layout (e.g. pathwyse.csv) before the
-# row replacement below rewrites it; compare_pathwyse.py writes this header.
+# Refuse a file in another column layout (e.g. pathwyse.csv) up front, as
+# compare_pathwyse.py would for each target; it writes this header.
 EXPECTED_HEADER="instance,set,algo,obj,time_s,status,timestamp,machine,pathwyse,note"
 if [[ -f "$OUTFILE" ]]; then
     have_header="$(grep -v '^#' "$OUTFILE" | grep -m1 . || true)"
@@ -97,60 +102,39 @@ else
 fi
 MACHINE="$CPU ${NCPU}T"
 
-# Collect instance stems to be (re-)run for dedup
-collect_stems() {
-    local target="$1"
-    if [[ -f "$target" ]]; then
-        basename "${target%.*}"
-    elif [[ -d "$target" ]]; then
-        find "$target" -maxdepth 1 \( -name '*.sppcc' -o -name '*.vrp' \) -exec basename {} \; | sed 's/\.[^.]*$//' | sort
-    fi
-}
-
-INSTANCE_STEMS=()
-for target in "${TARGETS[@]}"; do
-    while IFS= read -r stem; do
-        INSTANCE_STEMS+=("$stem")
-    done < <(collect_stems "$target")
-done
-
-# Remove existing rows for instances we're about to run
-if [[ -f "$OUTFILE" ]]; then
-    TMPFILE="$(mktemp)"
-    trap 'rm -f "$TMPFILE"' EXIT
-    head -1 "$OUTFILE" > "$TMPFILE"
-    tail -n +2 "$OUTFILE" | while IFS= read -r line; do
-        # Replace only this algorithm's rows: a file may hold several
-        IFS=, read -r row_instance _ row_algo _ <<< "$line"
-        skip=false
-        for stem in "${INSTANCE_STEMS[@]}"; do
-            if [[ "$row_instance" == "$stem" && "$row_algo" == "$ALGO" ]]; then
-                skip=true
-                break
-            fi
-        done
-        if ! $skip; then
-            echo "$line" >> "$TMPFILE"
-        fi
-    done
-    cp "$TMPFILE" "$OUTFILE"
-    rm -f "$TMPFILE"
+# The pin setup_pathwyse.sh builds; compare_pathwyse.py refuses any other build.
+PIN="$(sed -n 's/^PATHWYSE_COMMIT="\([0-9a-f]\{40\}\)"$/\1/p' "$SCRIPT_DIR/setup_pathwyse.sh")"
+if [[ -z "$PIN" ]]; then
+    echo "Error: no PATHWYSE_COMMIT pin found in $SCRIPT_DIR/setup_pathwyse.sh" >&2
+    exit 1
 fi
 
 echo "PathWyse reference run — algorithm: $ALGO, time limit: ${TIME_LIMIT}s"
+echo "PathWyse pin: $PIN"
 echo "Output: $OUTFILE"
 echo
 
-# A target with a mismatch exits 1 after writing its rows; run the rest
-# anyway (their old rows are already gone) and fail at the end.
+# compare_pathwyse.py replaces a target's old rows only after the target has
+# run, so nothing is removed up front. A target with a mismatch exits 1 after
+# writing its rows: run the rest anyway and fail at the end. A refusal before
+# any run (exit 2: an unproven binary, a wrong header, a missing target)
+# stops the whole run, with the rows of the targets before it written.
 STATUS=0
 for target in "${TARGETS[@]}"; do
     echo "--- Running: $target ---"
+    rc=0
     python3 "$SCRIPT_DIR/compare_pathwyse.py" "$target" \
         --time-limit "$TIME_LIMIT" \
         --algo "$ALGO" \
         --csv "$OUTFILE" \
-        --machine "$MACHINE" || STATUS=1
+        --machine "$MACHINE" \
+        --require-pathwyse "$PIN" || rc=$?
+    if [[ $rc -eq 2 ]]; then
+        echo "Error: compare_pathwyse.py refused $target; $OUTFILE is unchanged by it" >&2
+        exit 2
+    elif [[ $rc -ne 0 ]]; then
+        STATUS=1
+    fi
     echo
 done
 

@@ -29,12 +29,15 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -289,27 +292,52 @@ def load_optimal_csv(instance_path: Path) -> float | None:
     return None
 
 
-def pathwyse_revision(pw_bin: Path) -> str:
-    """Commit of the PathWyse checkout the binary was built in, or "" if unknown.
+UNKNOWN_REVISION = "unknown"
 
-    "" also when the binary's directory is not the top of a git checkout, so a
-    binary inside another repository does not get that repository's commit.
-    """
-    root = pw_bin.resolve().parent.parent
+
+def _read_stamp(stamp: Path) -> tuple[str, dict[str, str]] | None:
+    """(commit, {path: sha256}) from a provenance stamp, or None if unreadable."""
     try:
-        proc = subprocess.run(
-            ["git", "-C", str(root), "rev-parse", "--show-toplevel", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return ""
-    lines = proc.stdout.splitlines()
-    if len(lines) != 2:
-        return ""
-    toplevel, commit = lines
-    return commit if Path(toplevel).resolve() == root else ""
+        lines = stamp.read_text().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not lines or not re.fullmatch(r"commit [0-9a-f]{40}", lines[0]):
+        return None
+    digests: dict[str, str] = {}
+    for line in lines[1:]:
+        # sha256sum / shasum -a 256 lines: "<hex>  <path>" ("<hex> *<path>" in binary mode)
+        match = re.fullmatch(r"([0-9a-f]{64}) [ *](.+)", line)
+        if match is None:
+            return None
+        digests[match.group(2)] = match.group(1)
+    return lines[0].removeprefix("commit "), digests
+
+
+def pathwyse_revision(pw_bin: Path) -> str:
+    """Commit the binary was built at, as its provenance stamp proves it, or "unknown".
+
+    setup_pathwyse.sh writes the stamp, <binary>.provenance, after building at
+    the pinned commit: the commit, and the sha256 of each file a run uses
+    (paths relative to the binary's directory: the binary, the shared library
+    it loads, ../pathwyse.set). The commit stands only while the binary is
+    listed and every listed file still hashes as recorded, so a binary rebuilt
+    or a file changed since then is "unknown", whatever the checkout's HEAD is.
+    """
+    pw_bin = pw_bin.resolve()
+    stamp = _read_stamp(pw_bin.with_name(pw_bin.name + ".provenance"))
+    if stamp is None:
+        return UNKNOWN_REVISION
+    commit, digests = stamp
+    if pw_bin.name not in digests:
+        return UNKNOWN_REVISION
+    for rel, digest in digests.items():
+        try:
+            actual = hashlib.sha256((pw_bin.parent / rel).read_bytes()).hexdigest()
+        except OSError:
+            return UNKNOWN_REVISION
+        if actual != digest:
+            return UNKNOWN_REVISION
+    return commit
 
 
 # Overrides of the checkout's own pathwyse.set, per algorithm. PWDefault runs
@@ -376,6 +404,37 @@ def write_settings(pw_bin: Path, algo: str, output_path: Path, unit_buckets: boo
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _KEY_VALUE = re.compile(r"^\s*([A-Za-z][A-Za-z0-9_ ]*?)\s*:\s*(.*?)\s*$")
 
+# The only PathWyse solution status that proves optimality (src/core/data/path.cpp);
+# "Feasible", "Super optimal", "NG-route" and the others are unproven.
+PROVEN_STATUS = "Optimal"
+
+
+def _no_result(status: str) -> dict[str, Any]:
+    return {"status": status, "obj": None, "tour": [], "time": None}
+
+
+def parse_output(output: str, algo: str) -> dict[str, Any]:
+    """Result fields from PathWyse's output; status "ERROR" if it names no status.
+
+    Reads both output styles: "Obj: v" and "PWDefault global time: t" (before
+    1.0.0), and the aligned "Obj   : v" and "PWDefault Time   : t" (1.1.0).
+    """
+    result = _no_result("ERROR")
+    for line in _ANSI.sub("", output).split("\n"):
+        kv = _KEY_VALUE.match(line)
+        if kv is None:
+            continue
+        key, value = kv.group(1), kv.group(2)
+        if key == "Obj":
+            result["obj"] = float(value)
+        elif key == "Tour":
+            result["tour"] = list(map(int, value.split()))
+        elif key == "Solution Status":
+            result["status"] = value
+        elif key in (f"{algo} Time", f"{algo} global time"):
+            result["time"] = float(value)
+    return result
+
 
 def run_pathwyse(
     pw_bin: Path,
@@ -386,10 +445,9 @@ def run_pathwyse(
 ) -> dict[str, Any]:
     """Run PathWyse on an instance and parse the result.
 
-    Reads both output styles: "Obj: v" and "PWDefault global time: t" (before
-    1.0.0), and the aligned "Obj   : v" and "PWDefault Time   : t" (1.1.0).
+    A run that exits nonzero, or is killed by a signal, is an ERROR whatever it
+    printed: its objective and time are not kept, so they cannot be counted.
     """
-    result: dict[str, Any] = {"status": "ERROR", "obj": None, "tour": [], "time": None}
     cmd = [str(pw_bin), str(instance_path)]
     if settings_path is not None:
         cmd += ["-param", str(settings_path)]
@@ -401,25 +459,18 @@ def run_pathwyse(
             timeout=time_limit + 10,
             cwd=str(pw_bin.parent.parent),
         )
-        output = _ANSI.sub("", proc.stdout + proc.stderr)
-        for line in output.split("\n"):
-            kv = _KEY_VALUE.match(line)
-            if kv is None:
-                continue
-            key, value = kv.group(1), kv.group(2)
-            if key == "Obj":
-                result["obj"] = float(value)
-            elif key == "Tour":
-                result["tour"] = list(map(int, value.split()))
-            elif key == "Solution Status":
-                result["status"] = value
-            elif key in (f"{algo} Time", f"{algo} global time"):
-                result["time"] = float(value)
     except subprocess.TimeoutExpired:
-        result["status"] = "TIMEOUT"
-    except Exception as e:
-        result["status"] = f"ERROR: {e}"
-    return result
+        return _no_result("TIMEOUT")
+    except (OSError, ValueError) as e:
+        return _no_result(f"ERROR: {e}")
+    if proc.returncode < 0:
+        return _no_result(f"ERROR: signal {-proc.returncode}")
+    if proc.returncode != 0:
+        return _no_result(f"ERROR: exit {proc.returncode}")
+    try:
+        return parse_output(proc.stdout + proc.stderr, algo)
+    except ValueError as e:  # an unreadable Obj, Tour or time value
+        return _no_result(f"ERROR: {e}")
 
 
 def instance_set(instance_path: Path) -> str:
@@ -450,6 +501,29 @@ def convert_instance(instance_path: Path, tmpdir: Path) -> tuple[Path, int, dict
     return instance_path, 1, None
 
 
+def classify(result: dict[str, Any]) -> str:
+    """One run's verdict, the same in single-instance and batch mode.
+
+    "OK" / "FAIL": proven optimal, objective equal to / different from the
+    expected optimum. "-": proven optimal, no known optimum. "TLIM": timed out.
+    "ERR": failed (nonzero exit, unreadable output). "UNPR": finished without
+    proving optimality. Only "OK" and "-" count as solved, and only "FAIL" as a
+    mismatch.
+    """
+    status: str = result["status"]
+    if status == "TIMEOUT":
+        return "TLIM"
+    if status.startswith("ERROR"):
+        return "ERR"
+    if status != PROVEN_STATUS:
+        return "UNPR"
+    if result["obj"] is None:
+        return "ERR"
+    if result["expected"] is None:
+        return "-"
+    return "OK" if abs(result["obj"] - result["expected"]) < 0.01 else "FAIL"
+
+
 def print_result(result: dict[str, Any], expected: float | None) -> None:
     """Print one instance's result, as single-instance mode reports it."""
     print(f"\nInstance: {result['instance']}")
@@ -467,12 +541,13 @@ def print_result(result: dict[str, Any], expected: float | None) -> None:
         print(f"  Tour ({len(result['tour'])} nodes): {tour_str}")
     if expected is not None:
         print(f"  Expected:        {expected:.6g}")
-        if result["obj"] is not None:
-            diff = abs(result["obj"] - expected)
-            if diff < 0.01:
-                print(f"  MATCH (diff={diff:.6f})")
-            else:
-                print(f"  MISMATCH (diff={diff:.4f})")
+        verdict = classify(result)
+        if verdict == "OK":
+            print(f"  MATCH (diff={abs(result['obj'] - expected):.6f})")
+        elif verdict == "FAIL":
+            print(f"  MISMATCH (diff={abs(result['obj'] - expected):.4f})")
+        else:
+            print(f"  NOT COMPARED ({verdict}: not proven optimal)")
 
 
 def run_single(
@@ -503,10 +578,8 @@ def run_single(
             pw_bin, pw_instance, time_limit=time_limit, algo=algo, settings_path=settings_path
         )
     except (OSError, ValueError, AssertionError, IndexError, KeyError, OverflowError) as e:
-        result = {"status": f"ERROR: {e}", "obj": None, "tour": [], "time": None}
+        result = _no_result(f"ERROR: {e}")
     finally:
-        import shutil
-
         shutil.rmtree(tmpdir, ignore_errors=True)
 
     # Unscale the objective
@@ -520,11 +593,11 @@ def run_single(
 
     if expected is None:
         expected = load_optimal_csv(instance_path)
+    result["expected"] = expected
 
     if verbose:
         print_result(result, expected)
 
-    result["expected"] = expected
     return result
 
 
@@ -542,17 +615,22 @@ CSV_HEADER = [
 ]
 
 
-def csv_needs_header(csv_path: Path) -> bool:
-    """True if csv_path has no data lines yet; exits if its header is not CSV_HEADER.
+def _is_data(line: str) -> bool:
+    """True for a CSV line, header or row; False for a blank or comment line."""
+    return bool(line.strip()) and not line.startswith("#")
+
+
+def check_csv_header(csv_path: Path) -> None:
+    """Exit (2), before anything runs, if csv_path has a header other than CSV_HEADER.
 
     benchmarks/pathwyse.csv (the paper's rows) has the older header without
     the algo and pathwyse columns, so new rows go to a file of their own.
     """
     if not csv_path.exists():
-        return True
+        return
     with open(csv_path) as check:
         for line in check:
-            if line.strip() and not line.startswith("#"):
+            if _is_data(line):
                 header = next(csv.reader([line]))
                 if header != CSV_HEADER:
                     print(
@@ -560,9 +638,60 @@ def csv_needs_header(csv_path: Path) -> bool:
                         "write to another file",
                         file=sys.stderr,
                     )
-                    sys.exit(1)
-                return False
-    return True
+                    sys.exit(2)
+                return
+
+
+def _kept_lines(csv_path: Path, replaced: set[tuple[str, str]]) -> tuple[list[str], list[str]]:
+    """(comment lines above the header, lines below it) of csv_path, minus replaced rows.
+
+    A row is replaced when its (instance, algo) is in replaced.
+    """
+    head: list[str] = []
+    body: list[str] = []
+    if not csv_path.exists():
+        return head, body
+    seen_header = False
+    with open(csv_path, newline="") as f:
+        for raw in f:
+            line = raw if raw.endswith("\n") else raw + "\n"
+            if not seen_header:
+                seen_header = _is_data(line)
+                if not seen_header:
+                    head.append(line)
+                continue
+            if _is_data(line):
+                fields = next(csv.reader([line]))
+                if len(fields) > 2 and (fields[0], fields[2]) in replaced:
+                    continue
+            body.append(line)
+    return head, body
+
+
+def write_rows(csv_path: Path, rows: list[list[str]]) -> None:
+    """Write rows (CSV_HEADER's columns) into csv_path, replacing earlier runs.
+
+    A row replaces the file's rows of the same instance and algorithm; every
+    other row, and every comment line, is kept as it was. The new file is
+    written beside the old one and then moved over it, so a run that fails or
+    is interrupted before this point, or while writing, leaves the existing
+    rows untouched.
+    """
+    head, body = _kept_lines(csv_path, {(row[0], row[2]) for row in rows})
+    tmp = csv_path.with_name(f".{csv_path.name}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "x", newline="") as f:
+            f.writelines(head)
+            writer = csv.writer(f)
+            writer.writerow(CSV_HEADER)
+            f.writelines(body)
+            writer.writerows(rows)
+        if csv_path.exists():
+            shutil.copymode(csv_path, tmp)
+        os.replace(tmp, csv_path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def main() -> None:  # noqa: C901 - argument handling and the report loop
@@ -586,113 +715,117 @@ def main() -> None:  # noqa: C901 - argument handling and the report loop
         default="PWDefault",
         help="PathWyse algorithm (default: PWDefault, with the checkout's pathwyse.set)",
     )
-    parser.add_argument("--csv", help="Append results to CSV file")
+    parser.add_argument(
+        "--csv",
+        help="Write results to this CSV file, replacing its rows of the same instances "
+        "and algorithm (other rows are kept)",
+    )
     parser.add_argument("--machine", help="Machine description (e.g. 'AMD Ryzen 9 3950X 32T')")
+    parser.add_argument(
+        "--require-pathwyse",
+        metavar="COMMIT",
+        help="Refuse to run unless the binary's provenance stamp proves it was built at "
+        "COMMIT (run_pathwyse_reference.sh passes setup_pathwyse.sh's pin)",
+    )
     args = parser.parse_args()
 
+    # Every refusal before a run exits 2, so a caller can tell it from a mismatch (1).
     pw_bin = find_pathwyse_bin(args.pathwyse_bin)
     if not pw_bin.exists():
         print(f"Error: PathWyse binary not found at {pw_bin}", file=sys.stderr)
         print("Run ./benchmarks/setup_pathwyse.sh first", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(2)
 
-    write_header = csv_needs_header(Path(args.csv)) if args.csv else False
+    if args.csv:
+        check_csv_header(Path(args.csv))
     revision = pathwyse_revision(pw_bin)
+    if args.require_pathwyse and revision != args.require_pathwyse:
+        print(
+            f"Error: {pw_bin} is PathWyse {revision}, not the pinned {args.require_pathwyse}: "
+            "no provenance stamp proves it. Run ./benchmarks/setup_pathwyse.sh",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
-    target = Path(args.instance)
-    if target.is_dir():
-        instances = sorted(target.glob("*.sppcc")) + sorted(target.glob("*.vrp"))
-        if not instances:
-            print(f"No .sppcc or .vrp files found in {target}", file=sys.stderr)
-            sys.exit(1)
-    elif target.is_file():
-        instances = [target]
-    else:
-        print(f"Error: {target} not found", file=sys.stderr)
-        sys.exit(1)
+    instances = find_instances(Path(args.instance))
 
     # Table header for batch mode
     batch = len(instances) > 1
     if batch:
         print(
-            f"Running PathWyse {args.algo} on {len(instances)} instances "
+            f"Running PathWyse {args.algo} ({revision}) on {len(instances)} instances "
             f"(time limit: {args.time_limit}s)"
         )
         print(f"{'Instance':<30} {'PW Obj':>12} {'PW Time':>10} {'Expected':>12} {'Match':>7}")
         print("-" * 73)
 
     results = []
-    matches = mismatches = errors = unchecked = 0
+    verdicts: Counter[str] = Counter()
 
     for inst_path in instances:
-        expected = args.expected  # only meaningful for single instance
-        if batch:
-            expected = None  # always use optimal.csv in batch mode
+        # --expected is only meaningful for a single instance; a batch uses optimal.csv
+        expected = None if batch else args.expected
 
         r = run_single(
             pw_bin, inst_path, expected, args.time_limit, verbose=not batch, algo=args.algo
         )
         results.append(r)
+        verdict = classify(r)
+        verdicts[verdict] += 1
 
         if batch:
-            name = inst_path.stem
             obj_str = f"{r['obj']:.6g}" if r["obj"] is not None else "N/A"
             time_str = f"{r['time']:.2f}s" if r["time"] else "N/A"
             exp_str = f"{r['expected']:.6g}" if r["expected"] is not None else "N/A"
-
-            match_str = "?"
-            if r["obj"] is not None and r["expected"] is not None:
-                if abs(r["obj"] - r["expected"]) < 0.01:
-                    match_str = "OK"
-                    matches += 1
-                else:
-                    match_str = "FAIL"
-                    mismatches += 1
-            elif r["obj"] is not None:
-                match_str = "-"  # solved, no known optimum (e.g. multicap)
-                unchecked += 1
-            elif r["status"] == "TIMEOUT":
-                match_str = "TLIM"
-                errors += 1
-            else:
-                match_str = "ERR"
-                errors += 1
-
-            print(f"{name:<30} {obj_str:>12} {time_str:>10} {exp_str:>12} {match_str:>7}")
+            print(f"{inst_path.stem:<30} {obj_str:>12} {time_str:>10} {exp_str:>12} {verdict:>7}")
 
     if batch:
         print("-" * 73)
         print(
-            f"{matches} match, {mismatches} mismatch, {unchecked} solved without a known "
-            f"optimum, {errors} timeout/error out of {len(instances)}"
+            f"{verdicts['OK']} match, {verdicts['FAIL']} mismatch, {verdicts['-']} solved "
+            f"without a known optimum, {verdicts['UNPR']} not proven optimal, "
+            f"{verdicts['TLIM'] + verdicts['ERR']} timeout/error out of {len(instances)}"
         )
 
-    # Write CSV if requested
     if args.csv:
         timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
         machine = args.machine or ""
-        with open(args.csv, "a", newline="") as f:
-            writer = csv.writer(f)
-            if write_header:
-                writer.writerow(CSV_HEADER)
-            for r in results:
-                writer.writerow(
-                    [
-                        r["instance"],
-                        r["set"],
-                        args.algo,
-                        f"{r['obj']:.12g}" if r["obj"] is not None else "",
-                        f"{r['time']:.3f}" if r["time"] is not None else "",
-                        r["status"],
-                        timestamp,
-                        machine,
-                        revision,
-                        r["note"],
-                    ]
-                )
+        write_rows(
+            Path(args.csv), [csv_row(r, args.algo, timestamp, machine, revision) for r in results]
+        )
 
-    if mismatches > 0:
+    if verdicts["FAIL"] > 0:
         sys.exit(1)
+
+
+def find_instances(target: Path) -> list[Path]:
+    """The instance file, or a directory's .sppcc and .vrp files; exits (2) if none."""
+    if target.is_dir():
+        instances = sorted(target.glob("*.sppcc")) + sorted(target.glob("*.vrp"))
+        if not instances:
+            print(f"No .sppcc or .vrp files found in {target}", file=sys.stderr)
+            sys.exit(2)
+        return instances
+    if target.is_file():
+        return [target]
+    print(f"Error: {target} not found", file=sys.stderr)
+    sys.exit(2)
+
+
+def csv_row(r: dict[str, Any], algo: str, timestamp: str, machine: str, revision: str) -> list[str]:
+    """One result as a CSV_HEADER row."""
+    return [
+        r["instance"],
+        r["set"],
+        algo,
+        f"{r['obj']:.12g}" if r["obj"] is not None else "",
+        f"{r['time']:.3f}" if r["time"] is not None else "",
+        r["status"],
+        timestamp,
+        machine,
+        revision,
+        r["note"],
+    ]
 
 
 if __name__ == "__main__":
