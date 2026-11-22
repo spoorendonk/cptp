@@ -13,6 +13,8 @@ class gomory_hu_tree;
 
 namespace cptp::sep {
 
+class LargestSideCache;
+
 /// Default fractional separation tolerance.
 /// Jepsen et al. (2014) found 0.4 optimal with CPLEX's built-in cuts.
 /// HiGHS needs more custom cuts, so we use a lower threshold.
@@ -34,6 +36,11 @@ struct SeparationContext {
     /// caller does not provide it.
     const digraph* support_graph = nullptr;
     const std::vector<double>* support_capacity = nullptr;
+
+    /// The largest sides on `support_graph`, shared by the separators that
+    /// use them (#175). Null when the caller does not provide it: each such
+    /// separator then runs its own max-flows on the support graph.
+    LargestSideCache* largest_sides = nullptr;
 
     /// Current incumbent upper bound (for cost-based separators).
     double upper_bound = std::numeric_limits<double>::infinity();

@@ -3,9 +3,11 @@
 #include "core/dinitz.h"
 #include "core/gomory_hu.h"
 #include "core/problem.h"
+#include "sep/largest_side_cache.h"
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -164,6 +166,11 @@ std::vector<Cut> XCoverSeparator::separate(const SeparationContext& ctx) {
         }
     };
     const bool have_support = ctx.support_graph != nullptr && ctx.support_capacity != nullptr;
+    std::optional<LargestSideCache> own_sides;
+    LargestSideCache* largest_sides = ctx.largest_sides;
+    if (have_support && largest_sides == nullptr) {
+        largest_sides = &own_sides.emplace(*ctx.support_graph, *ctx.support_capacity, depot);
+    }
     for (int32_t target = 0; target < n; ++target) {
         if (target == depot || (!is_tour && target == path_target) || ctx.y_values[target] <= tol) {
             continue;
@@ -174,17 +181,32 @@ std::vector<Cut> XCoverSeparator::separate(const SeparationContext& ctx) {
             smallest[u] = !reachable[u];
         }
         add_set(smallest);
-        if (have_support) {
-            add_set(
-                largest_min_cut_sink_side(*ctx.support_graph, *ctx.support_capacity, depot, target)
-                    .on_sink_side);
+        if (largest_sides != nullptr) {
+            add_set(largest_sides->get(target).on_sink_side);
         }
     }
     add_set(std::vector<bool>(n, true));
 
+    // A boundary edge of S and its endpoint outside S, found once per S for
+    // z and every row's cover (#175).
+    struct Crossing {
+        int32_t edge;
+        int32_t outside;
+    };
+    std::vector<Crossing> boundary;
+
     std::vector<Cut> cuts;
     std::vector<double> z(n);
     for (const auto& in_S : sets) {
+        boundary.clear();
+        for (auto e : graph.edges()) {
+            const int32_t u = graph.edge_source(e);
+            const int32_t v = graph.edge_target(e);
+            if (in_S[u] != in_S[v]) {
+                boundary.push_back({e, in_S[u] ? v : u});
+            }
+        }
+
         // z_i = y_i in S, z_j = x(j : S) outside (the depot left out).
         std::ranges::fill(z, 0.0);
         for (int32_t i = 0; i < n; ++i) {
@@ -192,13 +214,7 @@ std::vector<Cut> XCoverSeparator::separate(const SeparationContext& ctx) {
                 z[i] = ctx.y_values[i];
             }
         }
-        for (auto e : graph.edges()) {
-            const int32_t u = graph.edge_source(e);
-            const int32_t v = graph.edge_target(e);
-            if (in_S[u] == in_S[v]) {
-                continue;
-            }
-            const int32_t outside = in_S[u] ? v : u;
+        for (const auto [e, outside] : boundary) {
             if (outside != depot) {
                 z[outside] += ctx.x_values[e];
             }
@@ -231,13 +247,7 @@ std::vector<Cut> XCoverSeparator::separate(const SeparationContext& ctx) {
             //   2 sum_{i in S} w_i y_i - sum_{e in delta(S)} (1 - 2 w_{t(e)}) x_e <= 0
             Cut cut;
             double lhs = 0.0;
-            for (auto e : graph.edges()) {
-                const int32_t u = graph.edge_source(e);
-                const int32_t v = graph.edge_target(e);
-                if (in_S[u] == in_S[v]) {
-                    continue;
-                }
-                const int32_t outside = in_S[u] ? v : u;
+            for (const auto [e, outside] : boundary) {
                 const double w = outside == depot ? 0.0 : alpha[outside] / rhs;
                 const double coeff = 1.0 - 2.0 * w;
                 lhs -= coeff * ctx.x_values[e];

@@ -10,6 +10,7 @@
 #include "parallel/parallel.h"
 #include "preprocess/edge_elimination.h"
 #include "preprocess/reachability.h"
+#include "sep/largest_side_cache.h"
 #include "sep/sec_separator.h"
 #include "sep/separation_context.h"
 #include "sep/separation_oracle.h"
@@ -404,6 +405,8 @@ void HiGHSBridge::install_separators() {
 
         // Build Gomory-Hu tree: n-1 max-flows instead of 3*n
         gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
+        // Largest sides, run on demand and shared by the separators (#175).
+        sep::LargestSideCache largest_sides(support_graph, capacity, prob_.source());
 
         // Thread budget (#159): the separators run on `sep_threads` of it,
         // and the rest, plus the thread it runs on, goes to RCI's candidate
@@ -423,6 +426,7 @@ void HiGHSBridge::install_separators() {
             .flow_tree = &flow_tree,
             .support_graph = &support_graph,
             .support_capacity = &capacity,
+            .largest_sides = &largest_sides,
             .upper_bound = mipsolver.mipdata_->upper_limit,
             .all_pairs = std::span<const double>(*all_pairs_),
             .threads = budget - sep_threads + 1,

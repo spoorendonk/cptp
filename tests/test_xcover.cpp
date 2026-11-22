@@ -1,6 +1,9 @@
 #include "core/digraph.h"
 #include "core/gomory_hu.h"
 #include "core/problem.h"
+#include "parallel/parallel.h"
+#include "sep/largest_side_cache.h"
+#include "sep/multistar_separator.h"
 #include "sep/separation_context.h"
 #include "sep/xcover_separator.h"
 
@@ -267,4 +270,86 @@ TEST_CASE("XCover cuts: no feasible tour or s-t path violates them", "[xcover]")
         }
     }
     REQUIRE(cuts_checked > 20);
+}
+
+TEST_CASE("Largest sides: one max-flow per target for multistar and covers together",
+          "[xcover][multistar]") {
+    // Both separators ask for every target with y > tol; run in parallel on a
+    // shared cache they cost one depot-target max-flow per target, not two,
+    // and give the cuts each gives on its own max-flows (#175).
+    std::mt19937 rng(175);
+    std::uniform_int_distribution<int32_t> demand(1, 4);
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    constexpr int32_t kNodes = 8;
+    const auto same = [](const std::vector<cptp::sep::Cut>& a,
+                         const std::vector<cptp::sep::Cut>& b) {
+        return std::ranges::equal(a, b, [](const cptp::sep::Cut& p, const cptp::sep::Cut& q) {
+            return p.indices == q.indices && p.values == q.values && p.rhs == q.rhs &&
+                   p.violation == q.violation;
+        });
+    };
+    int32_t cuts_compared = 0;
+    for (int32_t trial = 0; trial < 40; ++trial) {
+        const int32_t target = trial % 2 == 0 ? 0 : kNodes - 1;
+        std::vector<std::vector<double>> rows(2, std::vector<double>(kNodes, 0.0));
+        for (auto& row : rows) {
+            for (int32_t i = 1; i < kNodes; ++i) {
+                row[i] = demand(rng);
+            }
+        }
+        const auto prob = make_problem(kNodes, rows, {7.0, 7.0}, target);
+        const int32_t m = prob.num_edges();
+        std::vector<double> x(m);
+        std::vector<double> y(kNodes);
+        // Few distinct values, so that min cuts tie.
+        for (auto& v : x) {
+            v = unit(rng) < 0.5 ? 0.0 : 0.25 * static_cast<double>(1 + (rng() % 4));
+        }
+        for (auto& v : y) {
+            v = unit(rng) < 0.2 ? 0.0 : 0.5 + 0.5 * unit(rng);
+        }
+        y[0] = 1.0;
+        y[target] = 1.0;
+        auto support = build_support(prob, x);
+        cptp::sep::SeparationContext ctx{
+            .problem = prob,
+            .x_values = x,
+            .y_values = y,
+            .x_offset = 0,
+            .y_offset = m,
+            .tol = 1e-6,
+            .flow_tree = support.tree.get(),
+            .support_graph = &support.graph,
+            .support_capacity = &support.capacity,
+        };
+        int64_t targets = 0;
+        for (int32_t i = 1; i < kNodes; ++i) {
+            targets += (i != target && y[i] > ctx.tol) ? 1 : 0;
+        }
+
+        cptp::sep::MultistarSeparator multistar(cptp::sep::CapacityRows::kAll, true);
+        cptp::sep::XCoverSeparator xcover;
+        const auto multistar_alone = multistar.separate(ctx);
+        const auto xcover_alone = xcover.separate(ctx);
+
+        cptp::sep::LargestSideCache shared(support.graph, support.capacity, prob.source());
+        ctx.largest_sides = &shared;
+        std::vector<cptp::sep::Cut> multistar_shared;
+        std::vector<cptp::sep::Cut> xcover_shared;
+        {
+            cptp::parallel::task_group tg;
+            tg.run([&] { multistar_shared = multistar.separate(ctx); });
+            tg.run([&] { xcover_shared = xcover.separate(ctx); });
+        }
+        INFO("trial " << trial);
+        REQUIRE(shared.max_flows() == targets);
+        REQUIRE(same(multistar_shared, multistar_alone));
+        REQUIRE(same(xcover_shared, xcover_alone));
+        cuts_compared += static_cast<int32_t>(multistar_alone.size() + xcover_alone.size());
+
+        // A second round on the same cache runs no max-flow.
+        REQUIRE(same(multistar.separate(ctx), multistar_alone));
+        REQUIRE(shared.max_flows() == targets);
+    }
+    REQUIRE(cuts_compared > 20);
 }

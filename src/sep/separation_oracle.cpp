@@ -5,6 +5,7 @@
 #include "core/problem.h"
 #include "parallel/parallel.h"
 #include "sep/comb_separator.h"
+#include "sep/largest_side_cache.h"
 #include "sep/multistar_separator.h"
 #include "sep/rci_separator.h"
 #include "sep/sec_separator.h"
@@ -51,6 +52,7 @@ std::vector<Cut> SeparationOracle::separate(std::span<const double> x_values,
 
     // Compute Gomory-Hu tree (n-1 max-flows via Gusfield)
     gomory_hu_tree flow_tree(support_graph, capacity, prob_.source());
+    LargestSideCache largest_sides(support_graph, capacity, prob_.source());
 
     SeparationContext ctx{
         .problem = prob_,
@@ -62,6 +64,7 @@ std::vector<Cut> SeparationOracle::separate(std::span<const double> x_values,
         .flow_tree = &flow_tree,
         .support_graph = &support_graph,
         .support_capacity = &capacity,
+        .largest_sides = &largest_sides,
     };
 
     // Run all separators in parallel

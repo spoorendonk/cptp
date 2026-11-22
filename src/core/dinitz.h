@@ -20,32 +20,7 @@ public:
           target_(t),
           flow_(g.num_arcs(), 0.0),
           level_(g.num_nodes()),
-          iter_(g.num_nodes()) {
-        // Build reverse-arc mapping: for arc a, rev_[a] is its reverse arc.
-        // We assume arcs come in forward/reverse pairs OR we need to find them.
-        // Actually, our support graphs are built with explicit forward+reverse
-        // arcs. We need to find the reverse of each arc efficiently.
-        int32_t m = g.num_arcs();
-        rev_.assign(m, -1);
-
-        // For each arc (u,v), find the arc (v,u) as its reverse
-        // Build a map: (u,v) -> arc index
-        for (int32_t a = 0; a < m; ++a) {
-            if (rev_[a] >= 0) {
-                continue;
-            }
-            int32_t u = g.arc_source(a);
-            int32_t v = g.arc_target(a);
-            // Find reverse arc (v,u)
-            for (int32_t b : g.out_arcs(v)) {
-                if (g.arc_target(b) == u && rev_[b] < 0) {
-                    rev_[a] = b;
-                    rev_[b] = a;
-                    break;
-                }
-            }
-        }
-    }
+          iter_(g.num_nodes()) {}
 
     dinitz& run() {
         flow_value_ = 0.0;
@@ -176,7 +151,6 @@ private:
     std::vector<double> flow_;
     std::vector<int32_t> level_;
     std::vector<int32_t> iter_;
-    std::vector<int32_t> rev_;
     std::vector<Step> path_;
     double flow_value_ = 0.0;
 };
