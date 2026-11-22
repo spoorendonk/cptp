@@ -181,7 +181,7 @@ std::vector<Cut> XCoverSeparator::separate(const SeparationContext& ctx) {
             smallest[u] = !reachable[u];
         }
         add_set(smallest);
-        if (have_support && largest_sides != nullptr) {
+        if (have_support) {
             add_set(largest_sides->get(target).on_sink_side);
         }
     }

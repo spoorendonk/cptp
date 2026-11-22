@@ -17,9 +17,10 @@ namespace cptp::sep {
 /// targets, and a round runs its separators in parallel, so get() may be
 /// called from several threads at once: each target's max-flow runs once,
 /// and a second caller waits for it (#175). A separator's time in the solve
-/// stats holds the max-flows it asked for first: all of them when it is the
-/// only caller, as before the sharing; with both on, they are split by which
-/// asks first.
+/// stats holds the max-flows it runs or waits on: all of them when it is the
+/// only caller, as before the sharing; with both on, one that a separator
+/// runs while the other waits on it counts in both, and one already done
+/// counts in neither.
 class LargestSideCache {
 public:
     /// `g` and `cap` must outlive the cache.
