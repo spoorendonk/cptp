@@ -6,8 +6,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
+#include <initializer_list>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <tuple>
+#include <vector>
 
 namespace {
 
@@ -557,6 +561,128 @@ TEST_CASE("SeparationOracle: is_feasible works in path mode", "[oracle][path]") 
     y_values[2] = 1.0;
 
     REQUIRE_FALSE(oracle.is_feasible(x_values, y_values, 0, m));
+}
+
+namespace {
+
+/// Complete graph on n nodes with unit costs, zero demands and no profits.
+cptp::Problem make_complete_problem(int32_t n, int32_t source, int32_t target) {
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges;
+    std::vector<double> costs;
+    for (int32_t i = 0; i < n; ++i) {
+        for (int32_t j = i + 1; j < n; ++j) {
+            edges.push_back({i, j});
+            costs.push_back(1.0);
+        }
+    }
+    std::vector<double> profits(static_cast<size_t>(n), 0.0);
+    std::vector<double> demands(static_cast<size_t>(n), 0.0);
+    prob.build(n, edges, costs, profits, demands, 1.0, source, target);
+    return prob;
+}
+
+/// x and y of the edges given as {u, v, value}; y_i = 1 on their endpoints.
+struct IntegralSolution {
+    std::vector<double> x;
+    std::vector<double> y;
+};
+
+IntegralSolution make_solution(const cptp::Problem& prob,
+                               std::initializer_list<std::tuple<int32_t, int32_t, double>> used) {
+    const auto& graph = prob.graph();
+    IntegralSolution sol{std::vector<double>(static_cast<size_t>(prob.num_edges()), 0.0),
+                         std::vector<double>(static_cast<size_t>(prob.num_nodes()), 0.0)};
+    for (const auto& [a, b, value] : used) {
+        for (auto e : graph.edges()) {
+            const int32_t u = graph.edge_source(e);
+            const int32_t v = graph.edge_target(e);
+            if ((u == a && v == b) || (u == b && v == a)) {
+                sol.x[static_cast<size_t>(e)] = value;
+            }
+        }
+        sol.y[static_cast<size_t>(a)] = 1.0;
+        sol.y[static_cast<size_t>(b)] = 1.0;
+    }
+    return sol;
+}
+
+/// The traversal answers (no max-flow) and agrees with the max-flow check.
+void require_traversal_parity(const cptp::Problem& prob, const IntegralSolution& sol,
+                              bool expected) {
+    const cptp::sep::SeparationOracle oracle(prob);
+    const int32_t m = prob.num_edges();
+    const auto fast = oracle.integral_connectivity(sol.x, sol.y);
+    REQUIRE(fast.has_value());
+    CHECK(fast == std::optional<bool>{expected});
+    CHECK(oracle.is_feasible_by_max_flow(sol.x, sol.y, 0, m) == expected);
+    CHECK(oracle.is_feasible(sol.x, sol.y, 0, m) == expected);
+}
+
+}  // namespace
+
+TEST_CASE("SeparationOracle: traversal check matches max-flow on integral incumbents", "[oracle]") {
+    SECTION("connected tour") {
+        const auto prob = make_complete_problem(5, 0, 0);
+        require_traversal_parity(prob, make_solution(prob, {{0, 1, 1}, {1, 2, 1}, {2, 0, 1}}),
+                                 true);
+    }
+    SECTION("doubled depot edge") {
+        const auto prob = make_complete_problem(5, 0, 0);
+        require_traversal_parity(prob, make_solution(prob, {{0, 3, 2}}), true);
+    }
+    SECTION("s-t path") {
+        const auto prob = make_complete_problem(5, 0, 4);
+        require_traversal_parity(prob, make_solution(prob, {{0, 2, 1}, {2, 1, 1}, {1, 4, 1}}),
+                                 true);
+    }
+    SECTION("disconnected subtour beside a doubled depot edge") {
+        const auto prob = make_complete_problem(5, 0, 0);
+        require_traversal_parity(
+            prob, make_solution(prob, {{0, 1, 2}, {2, 3, 1}, {3, 4, 1}, {4, 2, 1}}), false);
+    }
+    SECTION("disconnected subtour beside an s-t path") {
+        const auto prob = make_complete_problem(6, 0, 5);
+        require_traversal_parity(
+            prob, make_solution(prob, {{0, 5, 1}, {1, 2, 1}, {2, 3, 1}, {3, 1, 1}}), false);
+    }
+    SECTION("values within the margin of integers") {
+        const auto prob = make_complete_problem(5, 0, 0);
+        auto sol = make_solution(prob, {{0, 1, 1}, {1, 2, 1}, {2, 0, 1}, {3, 4, 2}});
+        for (auto& v : sol.x) {
+            v = (v > 0.5) ? v - 1e-7 : 1e-7;
+        }
+        require_traversal_parity(prob, sol, false);
+    }
+}
+
+TEST_CASE("SeparationOracle: traversal check declines inputs outside its guard", "[oracle]") {
+    const auto prob = make_complete_problem(5, 0, 0);
+    const cptp::sep::SeparationOracle oracle(prob);
+    const int32_t m = prob.num_edges();
+
+    SECTION("fractional value") {
+        auto sol = make_solution(prob, {{0, 1, 0.5}, {1, 2, 0.5}, {2, 0, 0.5}});
+        CHECK_FALSE(oracle.integral_connectivity(sol.x, sol.y).has_value());
+        CHECK(oracle.is_feasible(sol.x, sol.y, 0, m) ==
+              oracle.is_feasible_by_max_flow(sol.x, sol.y, 0, m));
+    }
+    SECTION("degree row violated") {
+        // Path 1-0-2 in a tour problem: nodes 1 and 2 have degree 1.
+        auto sol = make_solution(prob, {{1, 0, 1}, {0, 2, 1}});
+        CHECK_FALSE(oracle.integral_connectivity(sol.x, sol.y).has_value());
+    }
+    SECTION("used edge short of its value by more than the margin") {
+        auto sol = make_solution(prob, {{0, 1, 1}, {1, 2, 1}, {2, 0, 1}});
+        for (auto& v : sol.x) {
+            if (v > 0.5) {
+                v -= 5e-7;
+            }
+        }
+        CHECK_FALSE(oracle.integral_connectivity(sol.x, sol.y).has_value());
+        CHECK(oracle.is_feasible(sol.x, sol.y, 0, m) ==
+              oracle.is_feasible_by_max_flow(sol.x, sol.y, 0, m));
+    }
 }
 
 TEST_CASE("SeparationOracle: separate with non-zero x_offset", "[oracle]") {

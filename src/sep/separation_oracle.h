@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -63,9 +64,32 @@ public:
 
     /// Check whether an integer solution satisfies all SECs.
     /// Returns true if feasible (no violated lazy constraints).
+    ///
+    /// Answers through integral_connectivity() when its preconditions hold,
+    /// else through is_feasible_by_max_flow(); the two agree wherever the
+    /// former answers.
     [[nodiscard]] bool is_feasible(std::span<const double> x_values,
                                    std::span<const double> y_values, int32_t x_offset,
                                    int32_t y_offset) const;
+
+    /// SEC feasibility of an integral, degree-feasible solution by a graph
+    /// traversal, with no max-flow.
+    ///
+    /// Answers only when every value is within 1e-6 of an integer, every y
+    /// rounds to 0 or 1, the rounded values satisfy the degree rows
+    /// (x(δ(i)) = 2·y_i, or y_i at a path terminal), and the deviations are
+    /// small enough that the answer equals is_feasible_by_max_flow()'s: the
+    /// selected vertices are then all reachable from the source along the
+    /// used edges exactly when no SEC is violated. Returns std::nullopt
+    /// otherwise.
+    [[nodiscard]] std::optional<bool> integral_connectivity(std::span<const double> x_values,
+                                                            std::span<const double> y_values) const;
+
+    /// SEC feasibility by the Gomory-Hu tree of the support graph: true when
+    /// SECSeparator finds no SEC violated by more than 1e-6. Any input.
+    [[nodiscard]] bool is_feasible_by_max_flow(std::span<const double> x_values,
+                                               std::span<const double> y_values, int32_t x_offset,
+                                               int32_t y_offset) const;
 
     /// Max cuts to keep per separator per round (0 = unlimited).
     void set_max_cuts_per_separator(int32_t max_cuts) { max_cuts_per_sep_ = max_cuts; }
