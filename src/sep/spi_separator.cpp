@@ -152,8 +152,8 @@ void greedy_grow(const Problem& prob, std::span<const double> all_pairs, double 
 /// preferring to remove low-y nodes (which increases cut violation).
 /// Will not shrink below min_size.
 void greedy_shrink(const Problem& prob, std::span<const double> all_pairs, double ub,
-                   std::vector<int32_t>& set, std::span<const double> y_values,
-                   size_t min_size = 2) {
+                   std::vector<int32_t>& set, std::span<const double> y_values, size_t min_size = 2,
+                   int32_t max_dp_size = 15) {
     bool improved = true;
     while (improved && set.size() > min_size) {
         improved = false;
@@ -170,7 +170,7 @@ void greedy_shrink(const Problem& prob, std::span<const double> all_pairs, doubl
                 }
             }
 
-            double lb = compute_set_lb(prob, all_pairs, reduced);
+            double lb = compute_set_lb(prob, all_pairs, reduced, max_dp_size);
             if (lb > ub + 1e-6) {
                 // Prefer removing the node that:
                 //  1) keeps lb highest (most slack for further shrinking)
@@ -393,7 +393,7 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
         // Shrink: remove nodes to find minimal infeasible subset.
         // min_size=3: don't shrink back to pairs (each is covered by its
         // lifted Phase 1 clique row).
-        greedy_shrink(prob, ctx.all_pairs, ub, set, ctx.y_values, /*min_size=*/3);
+        greedy_shrink(prob, ctx.all_pairs, ub, set, ctx.y_values, /*min_size=*/3, max_dp_size_);
 
         // Compute violation
         double sum_y = 0.0;

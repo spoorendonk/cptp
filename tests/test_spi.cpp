@@ -297,3 +297,76 @@ TEST_CASE("SPI separator: Phase 2 emits only rows no clique row implies", "[spi]
         REQUIRE(cuts[1].violation > 0.7 - 1e-9);
     }
 }
+
+TEST_CASE("SPI separator: Phase 2 shrinks sets above the default DP cap", "[spi]") {
+    // As above with seventeen customers: a = 1, b = 2 and 3..17, under UB 35
+    // only {a, b} conflicts.  With max_dp_size 17, Phase 2 grows the seed to
+    // all seventeen, then shrinks: dropping a first (its 8-cost edges lower
+    // every lb it is in), then any node, down to a triple without a (lb 40)
+    // whose row (violation 0.7) is emitted.  Shrink ran its DP under the
+    // default cap of 15 (#178), so every 16-node reduction had lb -inf, the
+    // set stayed whole and its row (0.9 * 17 - 16 < 0) was not violated.
+    constexpr int32_t kCustomers = 17;
+    constexpr int32_t kNumNodes = kCustomers + 1;
+    const auto customer_cost = [](int32_t i, int32_t j) -> double {
+        if (i == 1) {
+            return j == 2 ? 17.0 : 8.0;
+        }
+        return 10.0;
+    };
+    cptp::Problem prob;
+    std::vector<cptp::Edge> edges;
+    std::vector<double> costs;
+    for (int32_t i = 0; i < kNumNodes; ++i) {
+        for (int32_t j = i + 1; j < kNumNodes; ++j) {
+            edges.push_back({i, j});
+            costs.push_back(i == 0 ? 10.0 : customer_cost(i, j));
+        }
+    }
+    const std::vector<double> profits(kNumNodes, 0.0);
+    std::vector<double> demands(kNumNodes, 1.0);
+    demands[0] = 0.0;
+    prob.build(kNumNodes, edges, costs, profits, demands, 100.0, 0, 0);
+    REQUIRE(prob.is_tour());
+
+    const int32_t m = prob.num_edges();
+    auto all_pairs = compute_all_pairs(prob);
+
+    std::vector<double> x_values(m, 0.0);
+    std::vector<double> y_values(kNumNodes, 0.9);
+    y_values[0] = 1.0;
+    const auto& graph = prob.graph();
+    for (auto e : graph.edges()) {
+        if (graph.edge_source(e) == 0 || graph.edge_target(e) == 0) {
+            x_values[e] = 0.9;
+        }
+    }
+
+    auto support = build_support(prob, x_values);
+    cptp::sep::SeparationContext ctx{
+        .problem = prob,
+        .x_values = x_values,
+        .y_values = y_values,
+        .x_offset = 0,
+        .y_offset = m,
+        .tol = 1e-6,
+        .flow_tree = support.tree.get(),
+        .upper_bound = 35.0,
+        .all_pairs = all_pairs,
+    };
+
+    cptp::sep::SPISeparator spi;
+    spi.set_max_dp_size(kCustomers);
+    const auto cuts = spi.separate(ctx);
+    REQUIRE(cuts.size() == 2U);
+
+    auto clique_cols = cuts[0].indices;
+    std::ranges::sort(clique_cols);
+    REQUIRE(clique_cols == std::vector<int32_t>{m + 1, m + 2});
+
+    const auto& shrunk = cuts[1];
+    REQUIRE(shrunk.indices.size() == 3U);
+    REQUIRE(shrunk.rhs == 2.0);
+    REQUIRE(std::ranges::find(shrunk.indices, m + 1) == shrunk.indices.end());
+    REQUIRE(shrunk.violation > 0.7 - 1e-9);
+}
