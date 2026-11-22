@@ -3,6 +3,7 @@
 #include "core/dinitz.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <vector>
@@ -15,7 +16,10 @@ namespace cptp::sep {
 /// separator's largest-side option and the cross-row covers ask for the same
 /// targets, and a round runs its separators in parallel, so get() may be
 /// called from several threads at once: each target's max-flow runs once,
-/// and a second caller waits for it (#175).
+/// and a second caller waits for it (#175). A separator's time in the solve
+/// stats holds the max-flows it asked for first: all of them when it is the
+/// only caller, as before the sharing; with both on, they are split by which
+/// asks first.
 class LargestSideCache {
 public:
     /// `g` and `cap` must outlive the cache.
