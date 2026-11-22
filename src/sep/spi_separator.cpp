@@ -257,7 +257,7 @@ std::vector<Cut> SPISeparator::separate(const SeparationContext& ctx) {
     if (ub >= kInf || ctx.all_pairs.empty()) {
         return {};
     }
-    if (static_cast<int32_t>(ctx.all_pairs.size()) < n * n) {
+    if (ctx.all_pairs.size() < static_cast<size_t>(n) * n) {
         return {};
     }
 
