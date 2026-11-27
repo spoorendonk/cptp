@@ -15,8 +15,39 @@ must satisfy. It is a C++23 library with a command-line solver and Python
 bindings, on [HiGHS](https://highs.dev) as the MIP solver. The documentation,
 with the C++ and Python API reference, is at <https://spoorendonk.dk/cptp/>.
 
-**Status:** complete, and not under active development. The accompanying
-preprint, [arXiv:2607.04497](https://arxiv.org/abs/2607.04497), stays at v1.
+The accompanying preprint is
+[arXiv:2607.04497](https://arxiv.org/abs/2607.04497).
+
+## Model
+
+The tour variant has `source = target = depot (0)`. `y_i` says whether node `i`
+is visited and `x_e` whether edge `e` is used; edges at the depot may take the
+value 2, which allows a tour to one customer and back.
+
+$$
+\begin{aligned}
+\min \quad & \sum_{e \in E} c_e x_e - \sum_{i \in V} p_i y_i \\
+\text{s.t.} \quad
+& \sum_{e \in \delta(i)} x_e = 2 y_i && \forall i \in V \\
+& y_0 = 1 \\
+& \sum_{i \in V} d^k_i y_i \le Q_k && k = 1, \dots, m \\
+& \sum_{e \in \delta(S)} x_e \ge 2 y_i && \forall S \subset V \setminus \{0\}, \ \forall i \in S \\
+& x_e \in \{0,1\} && \forall e \in E \setminus \delta(0) \\
+& x_e \in \{0,1,2\} && \forall e \in \delta(0) \\
+& y_i \in \{0,1\} && \forall i \in V
+\end{aligned}
+$$
+
+`c_e` is the edge cost, `p_i` the node profit, `d^k_i` the demand of node `i` on
+capacity row `k`, `Q_k` that row's capacity, and `δ(S)` the edges with one end
+in `S`. The classical CPTP has m = 1. The connectivity (subtour elimination)
+constraints are separated as cuts during branch-and-cut, not stated up front.
+The s–t path variant visits its source and target (`y = 1` there) with degree
+1 instead of 2, and allows no value 2. [Several capacity
+rows](#several-capacity-rows) says which rows each component of the solver
+uses.
+
+## Capabilities
 
 What the solver brings to HiGHS's branch-and-bound:
 
@@ -171,41 +202,15 @@ HiGHS's options); presolve stays off. With more than one thread, node counts and
 among tied optima, the tour can differ between runs with the same seed;
 `parallel off` or `threads 1` gives the same run every time.
 
-## Model
+## Several capacity rows
 
-The tour variant has `source = target = depot (0)`. `y_i` says whether node `i`
-is visited and `x_e` whether edge `e` is used; edges at the depot may take the
-value 2, which allows a tour to one customer and back.
-
-$$
-\begin{aligned}
-\min \quad & \sum_{e \in E} c_e x_e - \sum_{i \in V} p_i y_i \\
-\text{s.t.} \quad
-& \sum_{e \in \delta(i)} x_e = 2 y_i && \forall i \in V \\
-& y_0 = 1 \\
-& \sum_{i \in V} d^k_i y_i \le Q_k && k = 1, \dots, m \\
-& \sum_{e \in \delta(S)} x_e \ge 2 y_i && \forall S \subset V \setminus \{0\}, \ \forall i \in S \\
-& x_e \in \{0,1\} && \forall e \in E \setminus \delta(0) \\
-& x_e \in \{0,1,2\} && \forall e \in \delta(0) \\
-& y_i \in \{0,1\} && \forall i \in V
-\end{aligned}
-$$
-
-`c_e` is the edge cost, `p_i` the node profit, `d^k_i` the demand of node `i` on
-capacity row `k`, `Q_k` that row's capacity, and `δ(S)` the edges with one end
-in `S`. The classical CPTP has m = 1. The connectivity (subtour elimination)
-constraints are separated as cuts during branch-and-cut, not stated up front.
-The s–t path variant visits its source and target (`y = 1` there) with degree
-1 instead of 2, and allows no value 2.
-
-### Several capacity rows
-
-Rows are numbered k = 1..m here; the code, its log and `--help` call row 1
-"row 0". A row is *bounded* when `Q_k < 1e17`. An unbounded row gives no
-capacity cuts and no reachability fixing, and no hyperplanes unless it is row 1
-(the labeling and the hyperplanes use row 1 even when it is unbounded). A row
-with `Q_k = 0` gives no capacity cuts either, nor a hyperplane for k ≥ 2;
-reachability fixing removes its customers of positive demand.
+Rows are numbered k = 1..m as in the [Model](#model); the code, its log and
+`--help` call row 1 "row 0". A row is *bounded* when `Q_k < 1e17`. An
+unbounded row gives no capacity cuts and no reachability fixing, and no
+hyperplanes unless it is row 1 (the labeling and the hyperplanes use row 1
+even when it is unbounded). A row with `Q_k = 0` gives no capacity cuts
+either, nor a hyperplane for k ≥ 2; reachability fixing removes its customers
+of positive demand.
 
 With m rows, each component uses by default:
 
