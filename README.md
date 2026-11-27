@@ -37,7 +37,13 @@ What the solver brings to HiGHS's branch-and-bound:
   tree on reduced graphs (LP threshold, RINS, neighbourhood).
 - **Hyperplane branching** (off by default): one integer column z = a·y per
   hyperplane, linked by the row z − a·y = 0, which HiGHS branches on as on any
-  other column.
+  other column. The hyperplanes are fixed before the solve: pairs
+  (Ryan–Foster-style customer pairs), clusters (small customer groups seeded by
+  row 1's demands, weighed by the demands of row 1 and each bounded row),
+  demand (one for row 1 and each bounded row) and cardinality (the number of
+  selected customers); `all` adds every family. A capacity row whose demands
+  are not all integer gives no demand or cluster hyperplane, since z would not
+  be integer there.
 
 ## Quickstart
 
@@ -48,8 +54,10 @@ it, so the first build takes a few minutes.
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+cmake --build build --parallel 4
 ```
+
+Set `--parallel` to the cores (and memory, about 2 GB a job) you can spare.
 
 ### Command line
 
@@ -120,8 +128,9 @@ and any other file as TSPLIB when its content is, else as numeric:
   demand_m`; one line per arc, `tail head cost`; then the capacities
   `Q_1 .. Q_m` on one line; then, optionally, `source target` on one line, and
   nothing after it. The graph is undirected: an arc with tail < head gives the
-  edge at its cost, and one with tail > head is read and dropped, so a file may
-  list each edge once or both ways. With m = 1 the capacity line may be left
+  edge at its cost, and one with tail > head is read and dropped without a
+  warning, so a file lists each edge either once with tail < head or both
+  ways. With m = 1 the capacity line may be left
   out, for no limit, but only when the source/target line is left out too.
   [`tests/data/tiny4.txt`](tests/data/tiny4.txt) is a tour and
   [`tests/data/tiny4_path.txt`](tests/data/tiny4_path.txt) a path.
@@ -139,8 +148,8 @@ rows (made by [`benchmarks/gen_multicap.py`](benchmarks/gen_multicap.py)).
 
 Options are `--key value` pairs on `cptp-solve` and `python -m cptp`, and
 `(key, value)` string pairs in `Model.solve`. **[docs/options.md](docs/options.md)
-lists every one with its default**, as `cptp-solve --help` prints them. The ones
-most often set:
+lists them with their defaults**: `cptp-solve --help` word for word, and the
+defaults and tuning knobs the help leaves out. The ones most often set:
 
 | Option | What it does |
 |---|---|
@@ -201,7 +210,7 @@ With m rows, each component uses by default:
 | Primal heuristics | feasibility under every row; the LP-guided heuristic breaks ties by row 1's profit/demand | — |
 | Capacity cuts (RCI, multistar/GLM, RGLM) | every bounded row, each round | `capacity_cut_rows`: `all`, `most_violated`, `first` |
 | Surrogate capacity cuts (RCI, RGLM on `sum_k d^k / Q_k`) | off | `capacity_cut_surrogate`: `false`, `true` |
-| Multistar/GLM also on each target's largest depot–target min-cut side connected to the target, not only the Gomory–Hu tree's smallest | off | `multistar_largest_side`: `false`, `true` |
+| Multistar/GLM also on each target's largest depot–target min-cut side connected to the target, not only the Gomory–Hu tree's smallest (any m) | off | `multistar_largest_side`: `false`, `true` |
 | Cross-row lifted cover w-GLMs: per bounded row a cover over the min-cut sides and V minus the depot, lifted against every bounded row | off | `enable_xcover`: `false`, `true` |
 | Labeling bounds: edge elimination, bounds propagation, reduced-cost fixing, all-pairs bounds (SPI) | row 1 | `labeling_rows`: `first`, `all`, `surrogate`, `vector` |
 | Edge elimination's join of the two labeling halves | by row 1's load | `labeling_join`: `load`, `min` |
@@ -209,7 +218,7 @@ With m rows, each component uses by default:
 | Branching hyperplanes (`demand`, `clusters`) | row 1 and every bounded row k ≥ 2, each only when its demands are all integer; clusters are seeded by row 1's demands | `branch_hyper` (default `off`) |
 
 SEC and comb cuts use no capacity row. Bounds from row 1 alone are valid, since
-a relaxation of one row is a relaxation of all of them, but weaker than per-row
+a relaxation of one row is a relaxation of the intersection, but weaker than per-row
 ones: `labeling_rows=all` gains mainly at m = 10, at about 1.2x the total time,
 and `vector` costs 3x at m = 10, with labelings of up to 972 s. Surrogate
 capacity cuts closed none of the root gap at m = 2, 5 and 10, which is why they
@@ -218,7 +227,7 @@ links the measurements behind each default.
 
 ## Results
 
-### Several capacity rows
+### Multi-capacity smoke test
 
 *Not yet run.* A smoke test of the solver against PathWyse 1.1.0 (its
 `PWDefault` and `PWBucket` algorithms) on several capacity rows is scheduled on

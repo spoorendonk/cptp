@@ -134,9 +134,23 @@ HiGHS:
 - `rc_fixing`: `adaptive`.
 - `heu_lpg_strategy`: `0` (all three neighbourhoods).
 - `heu_lpg_deterministic_restarts`: `32`.
+- `branch_hyper`: `off`.
+- `cutoff`: none.
 - `time_limit`: no limit.
 - `threads`: half the machine's hardware threads, rounded up, for HiGHS and
   for cptp's own parallel work alike.
+
+## Options the help does not list
+
+Tuning knobs, accepted like the others:
+
+- `max_cuts_sec`, `max_cuts_rci`, `max_cuts_multistar`, `max_cuts_comb`,
+  `max_cuts_rglm`, `max_cuts_spi`: a cap on one family's cuts per round,
+  most violated first, before `max_cuts_per_round` applies (default: no cap of
+  its own; `0` is no cap too). `max_cuts_sec` also caps the SEC cuts in HiGHS's
+  sub-MIPs, where the default is 3 and `0` adds none.
+- `preproc_fast_restarts`: the size of the warm-start construction pool, at
+  least the thread count (default `12`).
 
 ## Options that go to HiGHS
 
@@ -158,5 +172,5 @@ them.
 
 `python -m cptp` sets its own defaults: `time_limit` 600 s, `threads` 1, and
 `output_flag` false (`--verbose` turns it on). `cptp.solve(...)` takes
-`time_limit`, `num_threads` and `verbose` as arguments; any other option goes
-through `Model.solve`.
+`time_limit` (default 600 s), `num_threads` (default as above) and `verbose`
+(default false) as arguments; any other option goes through `Model.solve`.

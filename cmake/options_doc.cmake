@@ -5,7 +5,13 @@
 # prose around it alone.
 #
 # Usage: cmake -DSOLVE=<cptp-solve> -DDOC=<docs/options.md> -DMODE=check|update
-#              -P options_doc.cmake
+#              [-DWORK_DIR=<dir for check's diff files>] -P options_doc.cmake
+#
+# WORK_DIR defaults to the directory the script runs in.
+
+if(NOT WORK_DIR)
+    set(WORK_DIR "${CMAKE_CURRENT_BINARY_DIR}")
+endif()
 
 set(begin_marker "<!-- cptp-solve --help: begin -->\n")
 set(end_marker "<!-- cptp-solve --help: end -->")
@@ -42,9 +48,9 @@ if(MODE STREQUAL "update")
     file(WRITE "${DOC}" "${head}${block}${tail}")
 elseif(MODE STREQUAL "check")
     if(NOT committed STREQUAL block)
-        # For the diff, beside the test (ctest runs it in the build tree).
-        set(expected "${CMAKE_CURRENT_BINARY_DIR}/options_doc.expected")
-        set(actual "${CMAKE_CURRENT_BINARY_DIR}/options_doc.committed")
+        # For the diff, in the build tree.
+        set(expected "${WORK_DIR}/options_doc.expected")
+        set(actual "${WORK_DIR}/options_doc.committed")
         file(WRITE "${expected}" "${block}\n")
         file(WRITE "${actual}" "${committed}\n")
         execute_process(COMMAND diff -u "${actual}" "${expected}")

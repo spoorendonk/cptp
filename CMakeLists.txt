@@ -180,7 +180,8 @@ if(CPTP_BUILD_TESTS)
     # the two differ, and the update target rewrites the doc's help block.
     set(CPTP_OPTIONS_DOC_ARGS
         -DSOLVE=$<TARGET_FILE:cptp-solve>
-        -DDOC=${CMAKE_CURRENT_SOURCE_DIR}/docs/options.md)
+        -DDOC=${CMAKE_CURRENT_SOURCE_DIR}/docs/options.md
+        -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR})
     add_test(NAME options_doc
         COMMAND ${CMAKE_COMMAND} ${CPTP_OPTIONS_DOC_ARGS} -DMODE=check
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/options_doc.cmake)

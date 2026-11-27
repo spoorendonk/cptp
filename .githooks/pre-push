@@ -433,7 +433,8 @@ fi
 # ccache's hits and misses over it, and once more on one line at the end.
 #
 # Skipped when the push changes only documentation: `*.md` other than
-# CLAUDE.md (its blocks are this CI's commands), LICENSE, .gitignore.
+# CLAUDE.md (its blocks are this CI's commands) and docs/options.md (the
+# options_doc test reads it), LICENSE, .gitignore.
 
 #: The test-name prefix of a project's per-source clang-tidy tests.
 TIDY_TESTS='clang_tidy:'
@@ -2338,7 +2339,7 @@ for sha in $(printf '%s\n' "$pushed" | awk 'NF { print $1 }' | awk '!seen[$0]++'
 	fi
 	CI_CHANGED=$(printf '%s\n' "$pushed" | awk -v sha="$sha" '$1 == sha { print substr($0, length(sha) + 2) }')
 	code=$(printf '%s\n' "$CI_CHANGED" |
-		awk '$0 == "CLAUDE.md" || !($0 == "" || /\.md$/ || $0 == "LICENSE" || $0 == ".gitignore")')
+		awk '$0 == "CLAUDE.md" || $0 == "docs/options.md" || !($0 == "" || /\.md$/ || $0 == "LICENSE" || $0 == ".gitignore")')
 	if [ -z "$code" ]; then
 		err "=== Local CI: skipped for $(printf '%.12s' "$sha"), which changes only documentation ==="
 		continue
