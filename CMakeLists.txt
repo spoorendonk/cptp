@@ -176,6 +176,21 @@ if(CPTP_BUILD_TESTS)
     target_link_libraries(test_heuristic_stage_ub PRIVATE cptp Catch2::Catch2WithMain)
     cptp_set_compiler_flags(test_heuristic_stage_ub)
 
+    # docs/options.md carries `cptp-solve --help` verbatim; the test fails when
+    # the two differ, and the update target rewrites the doc's help block.
+    set(CPTP_OPTIONS_DOC_ARGS
+        -DSOLVE=$<TARGET_FILE:cptp-solve>
+        -DDOC=${CMAKE_CURRENT_SOURCE_DIR}/docs/options.md)
+    add_test(NAME options_doc
+        COMMAND ${CMAKE_COMMAND} ${CPTP_OPTIONS_DOC_ARGS} -DMODE=check
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/options_doc.cmake)
+    add_custom_target(cptp_options_doc_update
+        COMMAND ${CMAKE_COMMAND} ${CPTP_OPTIONS_DOC_ARGS} -DMODE=update
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/options_doc.cmake
+        DEPENDS cptp-solve
+        COMMENT "Refreshing docs/options.md from cptp-solve --help"
+        VERBATIM)
+
     if(CPTP_PYTHON_TESTS)
         add_test(NAME python_tests
             COMMAND ${CMAKE_COMMAND}
