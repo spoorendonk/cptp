@@ -1,7 +1,9 @@
 """Draw the docs site's problem figure, logo and favicon from a real cptp solve.
 
-Run it from the repository root, with the extension built (`uv sync`):
+Run it from the repository root, with the extension rebuilt from the current
+C++ (the editable install keeps an old build until it is reinstalled):
 
+    uv sync --reinstall-package cptp
     uv run python docs/figures/make_tour.py
 
 It solves INSTANCE to optimality through the cptp Python API and writes, next
@@ -141,40 +143,49 @@ def circle(frame: Frame, p: Point, r: float, color: str, opacity: float = 1.0) -
     return f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{color}"{alpha}/>'
 
 
-def draw_figure(coords: list[Point], profits: list[float], tour: list[int], pal: Palette) -> str:
+def draw_figure(
+    coords: list[Point], profits: list[float], tour: list[int], depot: int, pal: Palette
+) -> str:
     """Customers sized by profit, the optimal tour drawn, the rest faded."""
     frame = Frame.fit(coords, FIGURE_WIDTH, MARGIN)
-    top = max(*profits[1:], 0.0) or 1.0
+    customers = [i for i in range(len(coords)) if i != depot]
+    top = max((profits[i] for i in customers), default=0.0)
+    top = top if top > 0.0 else 1.0
 
     def radius(i: int) -> float:
         return 2.5 + 7.5 * math.sqrt(max(profits[i], 0.0) / top)
 
     visited = set(tour)
     body = [
-        circle(frame, coords[i], radius(i), pal.faded, 0.4)
-        for i in range(1, len(coords))
-        if i not in visited
+        circle(frame, coords[i], radius(i), pal.faded, 0.4) for i in customers if i not in visited
     ]
     body.append(tour_path(frame, coords, tour, pal.accent, 2.5))
-    body += [circle(frame, coords[i], radius(i), pal.accent) for i in tour if i != 0]
-    body.append(depot_square(frame, coords[0], 12.0, pal.depot))
+    body += [circle(frame, coords[i], radius(i), pal.accent) for i in tour if i != depot]
+    body.append(depot_square(frame, coords[depot], 12.0, pal.depot))
     return svg(frame, "The optimal tour of a CPTP instance", body)
 
 
 def draw_logo(
-    coords: list[Point], tour: list[int], accent: str, depot: str, size: float, icon: bool
+    coords: list[Point],
+    tour: list[int],
+    depot: int,
+    colors: tuple[str, str],
+    size: float,
+    icon: bool,
 ) -> str:
     """The tour alone, cropped to its own nodes: the depot and its loop.
 
-    An `icon` is square, with strokes heavy enough to read at 16 pixels.
+    `colors` are the tour's and the depot's. An `icon` is square, with strokes
+    heavy enough to read at 16 pixels.
     """
+    accent, depot_color = colors
     stops = [coords[i] for i in tour]
     frame = Frame.fit(stops, size, size / (8 if icon else 10), square=icon)
     line, dot, side = (size / 10, size / 14, size / 5) if icon else (size / 16, size / 24, size / 8)
     body = [
         tour_path(frame, coords, tour, accent, line),
-        *(circle(frame, coords[i], dot, accent) for i in tour if i != 0),
-        depot_square(frame, coords[0], side, depot),
+        *(circle(frame, coords[i], dot, accent) for i in tour if i != depot),
+        depot_square(frame, coords[depot], side, depot_color),
     ]
     return svg(frame, "cptp", body)
 
@@ -187,22 +198,29 @@ def main() -> None:
     if not result.is_optimal():
         raise SystemExit(f"{INSTANCE.name}: no optimum ({result.status})")
     tour = [int(i) for i in result.tour]
+    depot = problem.source
     coords = read_coords(INSTANCE)
     profits = [float(p) for p in problem.profits]
     if len(coords) != problem.num_nodes:
         raise SystemExit(f"{INSTANCE.name}: {len(coords)} coordinates, {problem.num_nodes} nodes")
+    # The tour starts and ends at the depot; a figure needs two customers on it.
+    visited = len(set(tour) - {depot})
+    if visited < 2:
+        raise SystemExit(
+            f"{INSTANCE.name}: the optimum visits {visited} customers, too few to draw"
+        )
 
     for mode, pal in (("light", LIGHT), ("dark", DARK)):
-        (HERE / f"tour-{mode}.svg").write_text(draw_figure(coords, profits, tour, pal))
+        (HERE / f"tour-{mode}.svg").write_text(draw_figure(coords, profits, tour, depot, pal))
         (HERE / f"logo-{mode}.svg").write_text(
-            draw_logo(coords, tour, pal.accent, pal.depot, 128.0, icon=False)
+            draw_logo(coords, tour, depot, (pal.accent, pal.depot), 128.0, icon=False)
         )
     (HERE / "favicon.svg").write_text(
-        draw_logo(coords, tour, FAVICON_ACCENT, FAVICON_ACCENT, 64.0, icon=True)
+        draw_logo(coords, tour, depot, (FAVICON_ACCENT, FAVICON_ACCENT), 64.0, icon=True)
     )
     print(
         f"{INSTANCE.name}: objective {result.objective:.3f}, "
-        f"{len(tour) - 2} of {problem.num_nodes - 1} customers visited"
+        f"{visited} of {problem.num_nodes - 1} customers visited"
     )
 
 

@@ -75,8 +75,9 @@ a push to a branch or a pull request.
 The landing page's figure, the sidebar logo and the favicon are committed SVGs
 in `docs/figures/`, drawn by `docs/figures/make_tour.py` from an optimal solve
 of a Roberti instance through the Python API; the docs build does not run it.
-Redraw them after a change that moves that tour, with the extension built:
-`uv run python docs/figures/make_tour.py`. It prints the instance and how many
+Redraw them after a change that moves that tour, with the extension rebuilt
+from the current C++ (`uv sync --reinstall-package cptp`, under the build
+budget): `uv run python docs/figures/make_tour.py`. It prints the instance and how many
 customers the tour visits, which the captions in `docs/index.md` state: update
 them to match. The accent colour is set in `docs/conf.py`, and the script
 draws in the same colours.
