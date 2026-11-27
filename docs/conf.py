@@ -66,8 +66,9 @@ html_title = "cptp"
 html_baseurl = "https://spoorendonk.dk/cptp/"
 
 # The site's identity: an accent colour, and a logo and favicon cut from the
-# landing page's figure. figures/make_tour.py draws all three in these
-# colours; change them there too.
+# landing page's figure. figures/make_tour.py draws the figure and the logos
+# in these colours, and the favicon in FAVICON_ACCENT, a teal between them;
+# change them there too.
 ACCENT_LIGHT = "#0f766e"
 ACCENT_DARK = "#2dd4bf"
 html_theme_options = {

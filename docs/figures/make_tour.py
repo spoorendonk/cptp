@@ -144,7 +144,7 @@ def circle(frame: Frame, p: Point, r: float, color: str, opacity: float = 1.0) -
 def draw_figure(coords: list[Point], profits: list[float], tour: list[int], pal: Palette) -> str:
     """Customers sized by profit, the optimal tour drawn, the rest faded."""
     frame = Frame.fit(coords, FIGURE_WIDTH, MARGIN)
-    top = max(profits[1:])
+    top = max(*profits[1:], 0.0) or 1.0
 
     def radius(i: int) -> float:
         return 2.5 + 7.5 * math.sqrt(max(profits[i], 0.0) / top)
