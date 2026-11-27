@@ -75,9 +75,10 @@ version the site was built from, read from `git describe --tags`: the tag for
 a tag deploy, or `main (after v0.2.0, abc1234)` for a build from main.
 
 The version itself has one source, `project(VERSION)` in `CMakeLists.txt`.
-`pyproject.toml`, `CITATION.cff` and the README's software citation repeat it,
-and the ctest test `version_sync` fails when one of them differs: bump them
-together at a release.
+`pyproject.toml`, `CITATION.cff` and the README's software citation and
+version-DOI sentence repeat it, and the ctest test `version_sync` fails when
+one of them differs: bump them together at a release, with the version DOIs
+beside them, which no test can check.
 
 The landing page's figure, the sidebar logo and the favicon are committed SVGs
 in `docs/figures/`, drawn by `docs/figures/make_tour.py` from an optimal solve

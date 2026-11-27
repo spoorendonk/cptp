@@ -29,7 +29,7 @@ def _describe() -> str:
     """
     try:
         described = subprocess.run(
-            ["git", "describe", "--tags", "--always"],
+            ["git", "describe", "--tags", "--match", "v[0-9]*", "--always"],
             cwd=ROOT,
             capture_output=True,
             text=True,
