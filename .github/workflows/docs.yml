@@ -1,0 +1,42 @@
+# Builds the Sphinx site (docs/) and deploys it to GitHub Pages, served at
+# https://spoorendonk.dk/cptp/. It runs by hand or on a release tag, never on
+# a push to a branch or a pull request: the local gate is the CI.
+name: docs
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Doxygen
+        run: sudo apt-get update && sudo apt-get install -y doxygen
+      - uses: astral-sh/setup-uv@v10
+      - name: Build the site
+        run: uv run --only-group docs sphinx-build -W -b html docs build/docs/html
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/docs/html
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

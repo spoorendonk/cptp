@@ -1,6 +1,6 @@
 # cptp — Capacitated Profitable Tour Problem Solver
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/spoorendonk/cptp/blob/main/LICENSE)
 ![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
 [![arXiv](https://img.shields.io/badge/arXiv-2607.04497-b31b1b.svg)](https://arxiv.org/abs/2607.04497)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20844234.svg)](https://doi.org/10.5281/zenodo.20844234)
@@ -12,7 +12,8 @@ collected profit is smallest and the visited customers' demand fits the
 vehicle's capacity. It also solves the open variant, a path from a source to a
 target, and instances with several capacity rows, every one of which a solution
 must satisfy. It is a C++23 library with a command-line solver and Python
-bindings, on [HiGHS](https://highs.dev) as the MIP solver.
+bindings, on [HiGHS](https://highs.dev) as the MIP solver. The documentation,
+with the C++ and Python API reference, is at <https://spoorendonk.dk/cptp/>.
 
 **Status:** complete, and not under active development. The accompanying
 preprint, [arXiv:2607.04497](https://arxiv.org/abs/2607.04497), stays at v1.
@@ -137,17 +138,17 @@ and any other file as TSPLIB when its content is, else as numeric:
   warning, so a file lists each edge either once with tail < head or both
   ways. With m = 1 the capacity line may be left
   out, for no limit, but only when the source/target line is left out too.
-  [`tests/data/tiny4.txt`](tests/data/tiny4.txt) is a tour and
-  [`tests/data/tiny4_path.txt`](tests/data/tiny4_path.txt) a path.
+  [`tests/data/tiny4.txt`](https://github.com/spoorendonk/cptp/blob/main/tests/data/tiny4.txt) is a tour and
+  [`tests/data/tiny4_path.txt`](https://github.com/spoorendonk/cptp/blob/main/tests/data/tiny4_path.txt) a path.
 - **TSPLIB (`.vrp`)**: the CVRP format, with `CAPACITY` and `DEMAND_SECTION`.
   With m rows, `CAPACITY : Q_1 .. Q_m`, and each `DEMAND_SECTION` line is
   `id d_1 .. d_m`.
 - **SPPCC (`.sppcc`)**: the SPPRCLIB column-generation subproblem format, with
   m rows as in TSPLIB.
 
-[`benchmarks/instances/`](benchmarks/instances) holds the SPPRCLIB and Roberti
+[`benchmarks/instances/`](https://github.com/spoorendonk/cptp/tree/main/benchmarks/instances) holds the SPPRCLIB and Roberti
 benchmark sets, and `multicap/` versions of them with m = 2, 5 and 10 capacity
-rows (made by [`benchmarks/gen_multicap.py`](benchmarks/gen_multicap.py)).
+rows (made by [`benchmarks/gen_multicap.py`](https://github.com/spoorendonk/cptp/blob/main/benchmarks/gen_multicap.py)).
 
 ## Options
 
@@ -272,8 +273,8 @@ off an optimal solution and so report a suboptimal objective as optimal:
 
 Every result produced before cf191b2 (2026-11-12) may therefore hold wrong
 optima. That includes the table below, every version of
-[`benchmarks/cptp.csv`](benchmarks/cptp.csv) and
-[`benchmarks/ablation.csv`](benchmarks/ablation.csv), the v0.1.0 and v0.2.0
+[`benchmarks/cptp.csv`](https://github.com/spoorendonk/cptp/blob/main/benchmarks/cptp.csv) and
+[`benchmarks/ablation.csv`](https://github.com/spoorendonk/cptp/blob/main/benchmarks/ablation.csv), the v0.1.0 and v0.2.0
 releases, and the tables of the preprint (arXiv v1, 2026-07-05). They have not
 been rerun. Regenerate any result you rely on from cf191b2 or later, the first
 commit with both fixes.
@@ -296,7 +297,7 @@ reports these instances proven optimal within 3600 s each, with HiGHS v1.15.0:
 
 The per-instance rows are in `benchmarks/cptp.csv`, and the per-component
 ablation (SEC only, capacity cuts, comb/RGLM, reduced-cost fixing and SPI on
-and off) in `benchmarks/ablation.csv`. [`benchmarks/`](benchmarks) holds the
+and off) in `benchmarks/ablation.csv`. [`benchmarks/`](https://github.com/spoorendonk/cptp/tree/main/benchmarks) holds the
 scripts that produce them: `run_benchmarks.sh`, `run_ablation.sh`, and
 `run_pathwyse_reference.sh` with `compare_pathwyse.sh` for the PathWyse
 comparison.
@@ -304,7 +305,7 @@ comparison.
 ## Citing
 
 Cite the paper for the result and the archived release for the code.
-[`CITATION.cff`](CITATION.cff) carries both in machine-readable form — GitHub's
+[`CITATION.cff`](https://github.com/spoorendonk/cptp/blob/main/CITATION.cff) carries both in machine-readable form — GitHub's
 "Cite this repository" button reads it.
 
 The paper is **arXiv:2607.04497**, <https://arxiv.org/abs/2607.04497> — a
@@ -354,4 +355,4 @@ Release notes are on the [GitHub releases](https://github.com/spoorendonk/cptp/r
 
 MIT License — Copyright (c) 2026 Simon Spoorendonk
 
-See [LICENSE](LICENSE) for the full text.
+See [LICENSE](https://github.com/spoorendonk/cptp/blob/main/LICENSE) for the full text.

@@ -6,7 +6,7 @@ page is for working on it.
 ## Build and gate
 
 The local gate is the three blocks under `## Build & Test` in
-[CLAUDE.md](../CLAUDE.md): clean, build (Ninja when installed), and the full
+[CLAUDE.md](https://github.com/spoorendonk/cptp/blob/main/CLAUDE.md): clean, build (Ninja when installed), and the full
 ctest suite. The `pre-push` hook in `.githooks/` runs them in a fresh worktree
 of the pushed commit, after checking for a review receipt; a fresh clone has no
 hooks until `wcp init` (or `git config core.hooksPath .githooks`) is run in it.
@@ -42,6 +42,26 @@ the committed copy differs:
 
 The options target rewrites only the block between the two marker comments in
 `docs/options.md`; the prose around it is edited by hand.
+
+## Documentation site
+
+The site at <https://spoorendonk.dk/cptp/> is built with Sphinx from `docs/`:
+`docs/index.md` pulls in the README, and next to it are this page, the
+options, a C++ reference (Doxygen XML of the user-facing headers, rendered by
+Breathe) and a Python reference (sphinx-autoapi, read statically from
+`python/cptp/` and the committed `_cptp.pyi`, so the extension is not
+compiled). It also writes `llms.txt` and `llms-full.txt`. Build it with
+`doxygen` on PATH:
+
+```bash
+uv run --only-group docs sphinx-build -W -b html docs build/docs/html
+```
+
+`-W` turns warnings into errors; the build is warning-free. `--only-group docs`
+installs the Sphinx packages into the venv without building cptp. The `docs`
+workflow (`.github/workflows/docs.yml`) builds and deploys the site to GitHub
+Pages; it runs on a `v*` tag or by hand (`gh workflow run docs.yml`), never on
+a push.
 
 ## Parallel tree search
 
@@ -82,7 +102,7 @@ HiGHS-internal suppressions are needed (2026-11-18, HiGHS v1.16).
 
 ## Where the defaults come from
 
-The README's [Several capacity rows](../README.md#several-capacity-rows) table
+The README's [Several capacity rows](https://github.com/spoorendonk/cptp#several-capacity-rows) table
 gives each component's default; these issues hold the work and the
 measurements behind them:
 
