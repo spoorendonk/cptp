@@ -10,11 +10,16 @@ names the binary in CPTP_DOXYGEN and its output directory, in the build
 directory, in CPTP_DOXYGEN_OUT.
 """
 
+import html
 import os
 import re
 import shutil
+import struct
 import subprocess
 from pathlib import Path
+from typing import Any
+
+from sphinx.application import Sphinx
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -130,18 +135,52 @@ html_static_path = [
 ]
 html_favicon = "figures/favicon.svg"
 
+# The site in a sentence: the landing page's description in link previews and
+# search results, and llms.txt's summary. The page's own first paragraph,
+# which they would take otherwise, is the README's badge row.
+SUMMARY = (
+    "cptp is a branch-and-cut solver for the Capacitated Profitable Tour Problem, "
+    "with its open s-t path variant and several capacity rows: a C++ library, "
+    "a command-line solver and Python bindings, on HiGHS."
+)
+
 # Open Graph tags, so that a link to the site shows a card on LinkedIn and
 # elsewhere. The image is a PNG, as they render no SVG; figures/make_tour.py
-# draws it at CARD_SIZE. The landing page's description is in its front matter
-# (index.md): its first paragraph is the README's badge row.
+# draws it, and its size is read from its PNG header.
+CARD = ROOT / "docs" / "figures" / "tour-card.png"
+CARD_WIDTH, CARD_HEIGHT = struct.unpack(">II", CARD.read_bytes()[16:24])
 ogp_site_url = html_baseurl
 ogp_site_name = "cptp"
 ogp_image = "_static/tour-card.png"
 ogp_image_alt = "The optimal tour of a CPTP instance, its customers sized by profit."
 ogp_custom_meta_tags = (
-    '<meta property="og:image:width" content="1200" />',
-    '<meta property="og:image:height" content="627" />',
+    f'<meta property="og:image:width" content="{CARD_WIDTH}" />',
+    f'<meta property="og:image:height" content="{CARD_HEIGHT}" />',
+    '<meta name="twitter:card" content="summary_large_image" />',
 )
+
+
+def _describe_landing_page(
+    app: Sphinx, pagename: str, templatename: str, context: dict[str, Any], doctree: Any
+) -> None:
+    """Give the root page SUMMARY as its description, and the site's URL.
+
+    Runs before sphinxext-opengraph's handler, which reads the page's metadata
+    for og: overrides and adds no description meta tag where one exists.
+    """
+    if pagename != app.config.root_doc:
+        return
+    context["meta"] = {
+        **(context.get("meta") or {}),
+        "og:description": SUMMARY,
+        "og:url": html_baseurl,
+    }
+    context["metatags"] += f'<meta name="description" content="{html.escape(SUMMARY)}" />\n'
+
+
+def setup(app: Sphinx) -> None:
+    app.connect("html-page-context", _describe_landing_page, priority=400)
+
 
 myst_enable_extensions = ["dollarmath", "amsmath"]
 myst_heading_anchors = 3
@@ -158,13 +197,7 @@ autoapi_file_patterns = ["*.pyi", "*.py"]
 autoapi_ignore = ["*__main__*"]
 autoapi_add_toctree_entry = False
 
-# The root page's first paragraph is the README's badge row.
-llms_txt_summary = (
-    "cptp is a branch-and-cut solver for the Capacitated Profitable Tour Problem, "
-    "with its open s-t path variant and several capacity rows: a C++ library, "
-    "a command-line solver and Python bindings, on HiGHS. "
-    f"This is the documentation of cptp {release}."
-)
+llms_txt_summary = f"{SUMMARY} This is the documentation of cptp {release}."
 # llms-full.txt concatenates the page sources, where the README's MyST
 # include and the Breathe directives stay unexpanded: append what they render.
 llms_txt_code_files = [f"+:../{f}" for f in ["README.md", *CPP_HEADERS]]
