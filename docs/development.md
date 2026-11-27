@@ -58,7 +58,14 @@ uv run --only-group docs sphinx-build -W -b html docs build/docs/html
 ```
 
 `-W` turns warnings into errors; the build is warning-free. `--only-group docs`
-installs the Sphinx packages into the venv without building cptp. The `docs`
+installs the Sphinx packages into the venv without building cptp.
+
+The gate keeps it warning-free: the ctest test `docs_build` (label `docs`)
+runs the same build, into the build directory's `docs/html`, when configure finds `doxygen` and
+the venv's Python has the `docs` group, and a push changing the README or a
+page under `docs/` runs the gate. Without either, configure warns and the test
+is not registered. `uv sync --group docs` keeps the group in the venv beside
+`dev`; a plain `uv sync` removes it again. The `docs`
 workflow (`.github/workflows/docs.yml`) builds and deploys the site to GitHub
 Pages; it runs on a `v*` tag or by hand (`gh workflow run docs.yml`), never on
 a push to a branch or a pull request.

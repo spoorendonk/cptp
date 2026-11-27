@@ -76,6 +76,7 @@ option(CPTP_BUILD_PYTHON "Build Python bindings" OFF)
 # Python setup. NO_CACHE, so a .venv made after a first configure is picked up.
 # Top level only, and never inside a wheel build (SKBUILD).
 set(CPTP_PYTHON_TESTS OFF)
+set(CPTP_DOCS_TEST OFF)
 if(CPTP_BUILD_TESTS AND PROJECT_IS_TOP_LEVEL AND NOT SKBUILD)
     find_program(CPTP_TEST_PYTHON NAMES python3 python
         HINTS "${CMAKE_CURRENT_SOURCE_DIR}/.venv/bin" NAMES_PER_DIR NO_CACHE)
@@ -96,6 +97,24 @@ if(CPTP_BUILD_TESTS AND PROJECT_IS_TOP_LEVEL AND NOT SKBUILD)
         message(WARNING "No Python 3.10+ with pytest, numpy and its development "
                         "headers found: python_tests is not registered, so the "
                         "gate skips the binding tests. Install with: uv sync")
+    endif()
+
+    # The documentation site builds warning-free (docs_build, label `docs`)
+    # when doxygen and that interpreter with the `docs` group are found.
+    # Skipped with a warning otherwise: the gate installs nothing.
+    find_program(CPTP_DOXYGEN doxygen NO_CACHE)
+    if(CPTP_DOXYGEN AND CPTP_TEST_PYTHON)
+        execute_process(COMMAND ${CPTP_TEST_PYTHON} -c
+            "import breathe, furo, myst_parser, autoapi, sphinx, sphinx_llms_txt"
+            RESULT_VARIABLE CPTP_DOCS_PYTHON_OK OUTPUT_QUIET ERROR_QUIET)
+    endif()
+    if(CPTP_DOXYGEN AND CPTP_DOCS_PYTHON_OK EQUAL 0)
+        set(CPTP_DOCS_TEST ON)
+    else()
+        message(WARNING "No doxygen, or no Python with the docs group, found: "
+                        "docs_build is not registered, so the gate skips the "
+                        "Sphinx build of docs/. Install doxygen, and the group "
+                        "with: uv sync --group docs")
     endif()
 endif()
 
@@ -207,6 +226,18 @@ if(CPTP_BUILD_TESTS)
                 -DGENERATED=${CPTP_STUB}
                 -DCOMMITTED=${CPTP_STUB_SOURCE}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_stub.cmake)
+    endif()
+
+    # The `docs` workflow's build, `-W` included; `-E` re-reads every page, so
+    # a warning in one that did not change is not lost to Sphinx's cache.
+    if(CPTP_DOCS_TEST)
+        add_test(NAME docs_build
+            COMMAND ${CPTP_TEST_PYTHON} -m sphinx -W -E -q -b html
+                ${CMAKE_CURRENT_SOURCE_DIR}/docs
+                ${CMAKE_CURRENT_BINARY_DIR}/docs/html)
+        set_tests_properties(docs_build PROPERTIES
+            LABELS docs
+            ENVIRONMENT "CPTP_DOXYGEN=${CPTP_DOXYGEN};CPTP_DOXYGEN_OUT=${CMAKE_CURRENT_BINARY_DIR}/docs/doxygen")
     endif()
 endif()
 

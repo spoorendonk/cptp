@@ -5,15 +5,19 @@ Build it from the repository root (see docs/development.md):
     uv run --only-group docs sphinx-build -W -b html docs build/docs/html
 
 The C++ reference needs `doxygen` on PATH; this file runs it on the
-user-facing headers before Sphinx reads the pages.
+user-facing headers before Sphinx reads the pages. The ctest test docs_build
+names the binary in CPTP_DOXYGEN and its output directory, in the build
+directory, in CPTP_DOXYGEN_OUT.
 """
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DOXYGEN_OUT = ROOT / "build" / "docs" / "doxygen"
+DOXYGEN = os.environ.get("CPTP_DOXYGEN") or shutil.which("doxygen")
+DOXYGEN_OUT = Path(os.environ.get("CPTP_DOXYGEN_OUT") or ROOT / "build" / "docs" / "doxygen")
 
 # The user-facing C++ headers; the rest of src/ is internal.
 CPP_HEADERS = [
@@ -37,10 +41,10 @@ QUIET            = YES
 WARN_IF_UNDOCUMENTED = NO
 """
 
-if shutil.which("doxygen") is None:
+if DOXYGEN is None:
     raise RuntimeError("the docs build needs doxygen on PATH for the C++ reference")
 DOXYGEN_OUT.mkdir(parents=True, exist_ok=True)
-subprocess.run(["doxygen", "-"], input=DOXYGEN_CONFIG, text=True, check=True, cwd=ROOT)
+subprocess.run([DOXYGEN, "-"], input=DOXYGEN_CONFIG, text=True, check=True, cwd=ROOT)
 
 project = "cptp"
 author = "Simon Spoorendonk"
