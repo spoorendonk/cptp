@@ -16,7 +16,10 @@ import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DOXYGEN = os.environ.get("CPTP_DOXYGEN") or shutil.which("doxygen")
+# The one configure found, unless it has gone since: then PATH's.
+DOXYGEN = os.environ.get("CPTP_DOXYGEN", "")
+if not os.path.isfile(DOXYGEN):
+    DOXYGEN = shutil.which("doxygen") or ""
 DOXYGEN_OUT = Path(os.environ.get("CPTP_DOXYGEN_OUT") or ROOT / "build" / "docs" / "doxygen")
 
 # The user-facing C++ headers; the rest of src/ is internal.
@@ -41,7 +44,7 @@ QUIET            = YES
 WARN_IF_UNDOCUMENTED = NO
 """
 
-if DOXYGEN is None:
+if not DOXYGEN:
     raise RuntimeError("the docs build needs doxygen on PATH for the C++ reference")
 DOXYGEN_OUT.mkdir(parents=True, exist_ok=True)
 subprocess.run([DOXYGEN, "-"], input=DOXYGEN_CONFIG, text=True, check=True, cwd=ROOT)
