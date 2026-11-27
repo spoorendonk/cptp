@@ -105,7 +105,7 @@ autoapi_add_toctree_entry = False
 # The root page's first paragraph is the README's badge row.
 llms_txt_summary = (
     "cptp is a branch-and-cut solver for the Capacitated Profitable Tour Problem, "
-    "with its open s-t path variant and several capacity rows: a C++23 library, "
+    "with its open s-t path variant and several capacity rows: a C++ library, "
     "a command-line solver and Python bindings, on HiGHS."
 )
 # llms-full.txt concatenates the page sources, where the README's MyST

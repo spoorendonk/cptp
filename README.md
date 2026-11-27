@@ -1,7 +1,7 @@
 # cptp — Capacitated Profitable Tour Problem Solver
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/spoorendonk/cptp/blob/main/LICENSE)
-![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)
+![C++](https://img.shields.io/badge/C%2B%2B-blue.svg)
 [![arXiv](https://img.shields.io/badge/arXiv-2607.04497-b31b1b.svg)](https://arxiv.org/abs/2607.04497)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20844234.svg)](https://doi.org/10.5281/zenodo.20844234)
 
@@ -11,7 +11,7 @@ choose which customers to visit and in what order, so that travel cost minus
 collected profit is smallest and the visited customers' demand fits the
 vehicle's capacity. It also solves the open variant, a path from a source to a
 target, and instances with several capacity rows, every one of which a solution
-must satisfy. It is a C++23 library with a command-line solver and Python
+must satisfy. It is a C++ library with a command-line solver and Python
 bindings, on [HiGHS](https://highs.dev) as the MIP solver. The documentation,
 with the C++ and Python API reference, is at <https://spoorendonk.dk/cptp/>.
 
@@ -340,8 +340,8 @@ of benchmark results. The earlier v0.1.0 is
 
 ```bibtex
 @software{spoorendonk2026cptpsoftware,
-  title     = {cptp: a C++23 branch-and-cut solver for the Capacitated
-               Profitable Tour Problem},
+  title     = {cptp: a branch-and-cut solver for the Capacitated Profitable
+               Tour Problem},
   author    = {Spoorendonk, Simon},
   year      = {2026},
   version   = {0.2.0},
