@@ -4,7 +4,8 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "cptp"
-version = "0.1.0"
+# The same as CMakeLists.txt's project(VERSION); the version_sync test checks.
+version = "0.2.0"
 description = "Branch-and-cut solver for the Capacitated Profitable Tour Problem"
 readme = "README.md"
 license = "MIT"

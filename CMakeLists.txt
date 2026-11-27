@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(cptp VERSION 0.1.0 LANGUAGES CXX)
+project(cptp VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -210,6 +210,12 @@ if(CPTP_BUILD_TESTS)
         DEPENDS cptp-solve
         COMMENT "Refreshing docs/options.md from cptp-solve --help"
         VERBATIM)
+
+    # project(VERSION) is the one version; the other files that name it agree.
+    add_test(NAME version_sync
+        COMMAND ${CMAKE_COMMAND} -DVERSION=${PROJECT_VERSION}
+            -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_versions.cmake)
 
     if(CPTP_PYTHON_TESTS)
         add_test(NAME python_tests

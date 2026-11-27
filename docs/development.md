@@ -70,7 +70,14 @@ must be on PATH in the shell that pushes. `uv sync` installs the `docs` group
 beside `dev`. The `docs`
 workflow (`.github/workflows/docs.yml`) builds and deploys the site to GitHub
 Pages; it runs on a `v*` tag or by hand (`gh workflow run docs.yml`), never on
-a push to a branch or a pull request.
+a push to a branch or a pull request. The sidebar and `llms.txt` name the
+version the site was built from, read from `git describe --tags`: the tag for
+a tag deploy, or `main (after v0.2.0, abc1234)` for a build from main.
+
+The version itself has one source, `project(VERSION)` in `CMakeLists.txt`.
+`pyproject.toml`, `CITATION.cff` and the README's software citation repeat it,
+and the ctest test `version_sync` fails when one of them differs: bump them
+together at a release.
 
 The landing page's figure, the sidebar logo and the favicon are committed SVGs
 in `docs/figures/`, drawn by `docs/figures/make_tour.py` from an optimal solve
