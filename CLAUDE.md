@@ -38,8 +38,8 @@ is enough): the bindings are then built too, and the tests import the
 freshly built extension, not the venv's editable snapshot. Without one,
 configure warns and the gate skips them. Likewise `docs_build` (label
 `docs`) builds the documentation site with `sphinx-build -W` when configure
-finds `doxygen` and that Python with the `docs` group (`uv sync --group
-docs`; a plain `uv sync` removes the group again). The lint tests (label `lint`) are
+finds `doxygen` and that Python with the `docs` group, which `uv sync`
+installs beside `dev`. The lint tests (label `lint`) are
 also ctest tests; `ctest --test-dir build -LE lint` skips them while
 iterating.
 

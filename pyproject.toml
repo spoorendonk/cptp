@@ -33,6 +33,11 @@ docs = [
     "sphinx-llms-txt>=0.7.1",
 ]
 
+# docs too, so that the `uv sync` CLAUDE.md asks for keeps the venv able to
+# run the docs_build test rather than removing its packages.
+[tool.uv]
+default-groups = ["dev", "docs"]
+
 [project.urls]
 Repository = "https://github.com/spoorendonk/cptp"
 

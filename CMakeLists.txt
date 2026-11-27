@@ -114,7 +114,7 @@ if(CPTP_BUILD_TESTS AND PROJECT_IS_TOP_LEVEL AND NOT SKBUILD)
         message(WARNING "No doxygen, or no Python with the docs group, found: "
                         "docs_build is not registered, so the gate skips the "
                         "Sphinx build of docs/. Install doxygen, and the group "
-                        "with: uv sync --group docs")
+                        "with: uv sync")
     endif()
 endif()
 
