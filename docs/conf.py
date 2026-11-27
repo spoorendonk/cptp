@@ -95,6 +95,7 @@ extensions = [
     "breathe",
     "autoapi.extension",
     "sphinx_llms_txt",
+    "sphinxext.opengraph",
 ]
 
 html_theme = "furo"
@@ -120,9 +121,27 @@ html_theme_options = {
     "light_logo": "logo-light.svg",
     "dark_logo": "logo-dark.svg",
 }
-# The logos are named one by one, so that _static gets no copy of the script.
-html_static_path = ["figures/logo-light.svg", "figures/logo-dark.svg"]
+# The logos and the link-preview card are named one by one, so that _static
+# gets no copy of the script.
+html_static_path = [
+    "figures/logo-light.svg",
+    "figures/logo-dark.svg",
+    "figures/tour-card.png",
+]
 html_favicon = "figures/favicon.svg"
+
+# Open Graph tags, so that a link to the site shows a card on LinkedIn and
+# elsewhere. The image is a PNG, as they render no SVG; figures/make_tour.py
+# draws it at CARD_SIZE. The landing page's description is in its front matter
+# (index.md): its first paragraph is the README's badge row.
+ogp_site_url = html_baseurl
+ogp_site_name = "cptp"
+ogp_image = "_static/tour-card.png"
+ogp_image_alt = "The optimal tour of a CPTP instance, its customers sized by profit."
+ogp_custom_meta_tags = (
+    '<meta property="og:image:width" content="1200" />',
+    '<meta property="og:image:height" content="627" />',
+)
 
 myst_enable_extensions = ["dollarmath", "amsmath"]
 myst_heading_anchors = 3

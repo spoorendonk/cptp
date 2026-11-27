@@ -105,7 +105,7 @@ if(CPTP_BUILD_TESTS AND PROJECT_IS_TOP_LEVEL AND NOT SKBUILD)
     find_program(CPTP_DOXYGEN doxygen NO_CACHE)
     if(CPTP_DOXYGEN AND CPTP_TEST_PYTHON)
         execute_process(COMMAND ${CPTP_TEST_PYTHON} -c
-            "import breathe, furo, myst_parser, autoapi, sphinx, sphinx_llms_txt"
+            "import breathe, furo, myst_parser, autoapi, sphinx, sphinx_llms_txt, sphinxext.opengraph"
             RESULT_VARIABLE CPTP_DOCS_PYTHON_OK OUTPUT_QUIET ERROR_QUIET)
     endif()
     if(CPTP_DOXYGEN AND CPTP_DOCS_PYTHON_OK EQUAL 0)

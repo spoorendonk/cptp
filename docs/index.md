@@ -1,3 +1,18 @@
+---
+# The link-preview and search description: the page's first paragraph, which
+# sphinxext-opengraph would use, is the README's badge row.
+og:description: >-
+  cptp is a branch-and-cut solver for the Capacitated Profitable Tour Problem,
+  with its open s-t path variant and several capacity rows: a C++ library, a
+  command-line solver and Python bindings, on HiGHS.
+myst:
+  html_meta:
+    description: >-
+      cptp is a branch-and-cut solver for the Capacitated Profitable Tour
+      Problem, with its open s-t path variant and several capacity rows: a C++
+      library, a command-line solver and Python bindings, on HiGHS.
+---
+
 ```{include} ../README.md
 :relative-docs: docs/
 :relative-images:

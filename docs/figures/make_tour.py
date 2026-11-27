@@ -9,15 +9,18 @@ C++ (the editable install keeps an old build until it is reinstalled):
 It solves INSTANCE to optimality through the cptp Python API and writes, next
 to itself, `tour-light.svg` and `tour-dark.svg` (the landing page's figure,
 one per Furo colour mode), `logo-light.svg` and `logo-dark.svg` (the sidebar
-logo: the tour cut out of the figure) and `favicon.svg`. The docs build uses
-the committed SVGs and never runs this script.
+logo: the tour cut out of the figure), `favicon.svg`, and `tour-card.png`
+(the light figure on a white card, the image a link to the site shows on
+LinkedIn and elsewhere, which do not render SVG). The docs build uses the
+committed files and never runs this script.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import cptp
+from PIL import Image, ImageColor, ImageDraw
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
@@ -30,6 +33,12 @@ OPTIONS = [("output_flag", "false"), ("threads", "1")]
 
 FIGURE_WIDTH = 640.0
 MARGIN = 16.0
+# The link-preview card: LinkedIn's 1.91:1 image, drawn SUPERSAMPLE times
+# larger and scaled down, so that its edges are smooth.
+CARD_SIZE = (1200, 627)
+CARD_MARGIN = 40.0
+CARD_BACKGROUND = "#ffffff"
+SUPERSAMPLE = 4
 
 
 @dataclass(frozen=True)
@@ -143,26 +152,77 @@ def circle(frame: Frame, p: Point, r: float, color: str, opacity: float = 1.0) -
     return f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{color}"{alpha}/>'
 
 
+# The figure's marks, on its FIGURE_WIDTH canvas; the card scales them.
+TOUR_WIDTH = 2.5
+DEPOT_SIDE = 12.0
+FADED_OPACITY = 0.4
+
+
+def profit_radii(profits: list[float], customers: list[int]) -> dict[int, float]:
+    """Each customer's circle radius on the figure's canvas, by its profit."""
+    top = max((profits[i] for i in customers), default=0.0)
+    top = top if top > 0.0 else 1.0
+    return {i: 2.5 + 7.5 * math.sqrt(max(profits[i], 0.0) / top) for i in customers}
+
+
 def draw_figure(
     coords: list[Point], profits: list[float], tour: list[int], depot: int, pal: Palette
 ) -> str:
     """Customers sized by profit, the optimal tour drawn, the rest faded."""
     frame = Frame.fit(coords, FIGURE_WIDTH, MARGIN)
     customers = [i for i in range(len(coords)) if i != depot]
-    top = max((profits[i] for i in customers), default=0.0)
-    top = top if top > 0.0 else 1.0
-
-    def radius(i: int) -> float:
-        return 2.5 + 7.5 * math.sqrt(max(profits[i], 0.0) / top)
-
+    radius = profit_radii(profits, customers)
     visited = set(tour)
     body = [
-        circle(frame, coords[i], radius(i), pal.faded, 0.4) for i in customers if i not in visited
+        circle(frame, coords[i], radius[i], pal.faded, FADED_OPACITY)
+        for i in customers
+        if i not in visited
     ]
-    body.append(tour_path(frame, coords, tour, pal.accent, 2.5))
-    body += [circle(frame, coords[i], radius(i), pal.accent) for i in tour if i != depot]
-    body.append(depot_square(frame, coords[depot], 12.0, pal.depot))
+    body.append(tour_path(frame, coords, tour, pal.accent, TOUR_WIDTH))
+    body += [circle(frame, coords[i], radius[i], pal.accent) for i in tour if i != depot]
+    body.append(depot_square(frame, coords[depot], DEPOT_SIDE, pal.depot))
     return svg(frame, "The optimal tour of a CPTP instance", body)
+
+
+def draw_card(
+    coords: list[Point], profits: list[float], tour: list[int], depot: int, pal: Palette
+) -> Image.Image:
+    """The figure as a CARD_SIZE PNG on CARD_BACKGROUND, centred, for link previews."""
+    width, height = (side * SUPERSAMPLE for side in CARD_SIZE)
+    # A square as tall as the card, its marks scaled as the figure's are to
+    # FIGURE_WIDTH, then moved to the card's middle.
+    square = Frame.fit(coords, height, CARD_MARGIN * SUPERSAMPLE, square=True)
+    frame = replace(square, left=square.left + (width - height) / 2, width=width)
+    unit = (height - 2 * CARD_MARGIN * SUPERSAMPLE) / (FIGURE_WIDTH - 2 * MARGIN)
+
+    image = Image.new("RGB", (width, height), CARD_BACKGROUND)
+    # RGBA drawing on an RGB image blends, as the SVG's fill-opacity does.
+    draw = ImageDraw.Draw(image, "RGBA")
+
+    def dot(i: int, r: float, color: str, opacity: float = 1.0) -> None:
+        x, y = frame(coords[i])
+        rgba = (*ImageColor.getrgb(color)[:3], round(255 * opacity))
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=rgba)
+
+    customers = [i for i in range(len(coords)) if i != depot]
+    radius = profit_radii(profits, customers)
+    visited = set(tour)
+    for i in customers:
+        if i not in visited:
+            dot(i, radius[i] * unit, pal.faded, FADED_OPACITY)
+    draw.line(
+        [frame(coords[i]) for i in tour],
+        fill=pal.accent,
+        width=round(TOUR_WIDTH * unit),
+        joint="curve",
+    )
+    for i in tour:
+        if i != depot:
+            dot(i, radius[i] * unit, pal.accent)
+    x, y = frame(coords[depot])
+    half = DEPOT_SIDE * unit / 2
+    draw.rectangle((x - half, y - half, x + half, y + half), fill=pal.depot)
+    return image.resize(CARD_SIZE, Image.Resampling.LANCZOS)
 
 
 def draw_logo(
@@ -218,6 +278,7 @@ def main() -> None:
     (HERE / "favicon.svg").write_text(
         draw_logo(coords, tour, depot, (FAVICON_ACCENT, FAVICON_ACCENT), 64.0, icon=True)
     )
+    draw_card(coords, profits, tour, depot, LIGHT).save(HERE / "tour-card.png", optimize=True)
     print(
         f"{INSTANCE.name}: objective {result.objective:.3f}, "
         f"{visited} of {problem.num_nodes - 1} customers visited"

@@ -22,6 +22,8 @@ dev = [
     "clang-format==22.1.8",
     "clang-tidy==22.1.8",
     "mypy>=2.4",
+    # docs/figures/make_tour.py draws the link-preview PNG with it.
+    "pillow>=12.0.0",
     "pytest>=9.1",
     "ruff>=0.17",
 ]
@@ -32,6 +34,7 @@ docs = [
     "sphinx>=8.1.3",
     "sphinx-autoapi>=3.9.0",
     "sphinx-llms-txt>=0.7.1",
+    "sphinxext-opengraph>=0.13.0",
 ]
 
 # docs too, so that the `uv sync` CLAUDE.md asks for keeps the venv able to

@@ -81,7 +81,10 @@ one of them differs: bump them together at a release, with the version DOIs
 beside them, which no test can check.
 
 The landing page's figure, the sidebar logo and the favicon are committed SVGs
-in `docs/figures/`, drawn by `docs/figures/make_tour.py` from an optimal solve
+in `docs/figures/`, beside `tour-card.png`, the 1200×627 image of the Open
+Graph tags (`sphinxext-opengraph`) that gives a link to the site its preview
+card on LinkedIn and elsewhere, which render no SVG. `docs/figures/make_tour.py`
+draws them all from an optimal solve
 of a Roberti instance through the Python API; the docs build does not run it.
 Redraw them after a change that moves that tour, with the extension rebuilt
 from the current C++ (`uv sync --reinstall-package cptp`, under the build
