@@ -166,10 +166,12 @@ def _describe_landing_page(
     """Give the root page SUMMARY as its description, and the site's URL.
 
     Runs before sphinxext-opengraph's handler, which reads the page's metadata
-    for og: overrides and adds no description meta tag where one exists.
+    for og: overrides and adds no description meta tag where one exists. The
+    canonical link (`pageurl`) names the root too, as og:url does.
     """
     if pagename != app.config.root_doc:
         return
+    context["pageurl"] = html_baseurl
     context["meta"] = {
         **(context.get("meta") or {}),
         "og:description": SUMMARY,
