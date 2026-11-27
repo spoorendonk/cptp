@@ -25,9 +25,9 @@ CPP_HEADERS = [
 
 DOXYGEN_CONFIG = f"""
 PROJECT_NAME     = cptp
-INPUT            = {" ".join(str(ROOT / h) for h in CPP_HEADERS)}
-STRIP_FROM_PATH  = {ROOT / "src"}
-OUTPUT_DIRECTORY = {DOXYGEN_OUT}
+INPUT            = {" ".join(f'"{ROOT / h}"' for h in CPP_HEADERS)}
+STRIP_FROM_PATH  = "{ROOT / "src"}"
+OUTPUT_DIRECTORY = "{DOXYGEN_OUT}"
 EXTRACT_ALL      = YES
 GENERATE_XML     = YES
 GENERATE_HTML    = NO

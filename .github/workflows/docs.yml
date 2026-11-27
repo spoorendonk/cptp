@@ -10,8 +10,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
@@ -24,7 +22,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install Doxygen
         run: sudo apt-get update && sudo apt-get install -y doxygen
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.4.0
       - name: Build the site
         run: uv run --only-group docs sphinx-build -W -b html docs build/docs/html
       - uses: actions/upload-pages-artifact@v5
@@ -34,6 +32,9 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
