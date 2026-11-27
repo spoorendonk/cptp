@@ -61,7 +61,7 @@ uv run --only-group docs sphinx-build -W -b html docs build/docs/html
 installs the Sphinx packages into the venv without building cptp. The `docs`
 workflow (`.github/workflows/docs.yml`) builds and deploys the site to GitHub
 Pages; it runs on a `v*` tag or by hand (`gh workflow run docs.yml`), never on
-a push.
+a push to a branch or a pull request.
 
 ## Parallel tree search
 

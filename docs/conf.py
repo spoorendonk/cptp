@@ -8,6 +8,7 @@ The C++ reference needs `doxygen` on PATH; this file runs it on the
 user-facing headers before Sphinx reads the pages.
 """
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -36,6 +37,8 @@ QUIET            = YES
 WARN_IF_UNDOCUMENTED = NO
 """
 
+if shutil.which("doxygen") is None:
+    raise RuntimeError("the docs build needs doxygen on PATH for the C++ reference")
 DOXYGEN_OUT.mkdir(parents=True, exist_ok=True)
 subprocess.run(["doxygen", "-"], input=DOXYGEN_CONFIG, text=True, check=True, cwd=ROOT)
 
@@ -79,3 +82,5 @@ llms_txt_summary = (
 # llms-full.txt concatenates the page sources, where the README's MyST
 # include and the Breathe directives stay unexpanded: append what they render.
 llms_txt_code_files = [f"+:../{f}" for f in ["README.md", *CPP_HEADERS]]
+# For the same reason llms.txt links the rendered pages, not their sources.
+llms_txt_uri_template = "{base_url}{docname}.html"
