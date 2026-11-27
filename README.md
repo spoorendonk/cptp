@@ -84,10 +84,13 @@ when a solution was found.
 
 ### Python
 
-The package builds the same C++ code, so it needs the same compiler and CMake:
+`pip install` builds the C++ core with scikit-build-core and nanobind and
+installs the `cptp` package and a `cptp` command, so it needs the same
+compiler and CMake as the build above:
 
 ```bash
-pip install .
+pip install .                                            # from a clone
+pip install git+https://github.com/spoorendonk/cptp      # straight from GitHub
 ```
 
 ```python
@@ -117,8 +120,8 @@ print(result.objective, result.tour.tolist())  # -1.0 [0, 1, 3, 0]
 
 `cptp.solve` also takes `depot`, `source`, `target`, `time_limit`,
 `num_threads` and `verbose`; any other option goes through `Model.solve`.
-`python -m cptp <instance> [--<option> <value> ...]` is the Python counterpart
-of `cptp-solve`.
+`cptp <instance> [--<option> <value> ...]` (or `python -m cptp ...`) is the
+Python counterpart of `cptp-solve`.
 
 ## Instance formats
 
