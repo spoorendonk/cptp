@@ -154,8 +154,10 @@ Tuning knobs, accepted like the others:
 
 ## Options that go to HiGHS
 
-A key cptp does not know goes to HiGHS, and one HiGHS rejects is logged as a
-warning and ignored. Two that matter here:
+A key cptp does not know goes to HiGHS, and one HiGHS rejects is ignored, with
+a warning in the log. With `output_flag false` there is no log, so a misspelt
+option is ignored without a word: check the settings line of a logged run.
+Two HiGHS options that matter here:
 
 - `parallel`: HiGHS's parallel tree search, on (HiGHS's `choose`) whenever a
   solve has more than one thread. With it, node counts, statistics and, among
@@ -172,5 +174,6 @@ them.
 
 `python -m cptp` sets its own defaults: `time_limit` 600 s, `threads` 1, and
 `output_flag` false (`--verbose` turns it on). `cptp.solve(...)` takes
-`time_limit` (default 600 s), `num_threads` (default as above) and `verbose`
-(default false) as arguments; any other option goes through `Model.solve`.
+`time_limit` (default 600 s), `num_threads` (default the solver's own, above,
+not 1) and `verbose` (default false) as arguments; any other option goes
+through `Model.solve`.

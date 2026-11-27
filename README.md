@@ -70,12 +70,12 @@ $ ./build/cptp-solve tests/data/tiny4.txt --time_limit 30 --output_flag false
 Instance: tiny4 (4 nodes, 6 edges, tour from depot 0)
 
 Tour: 0 -> 1 -> 2 -> 0
-Objective: -11  Bound: -11  Gap: 0%  Time: 0.0068s  Nodes: 1
+Objective: -11  Bound: -11  Gap: 0%  Time: <seconds>s  Nodes: 1
 ...
 $ ./build/cptp-solve tests/data/tiny4.txt --source 0 --target 3 --output_flag false
 ...
 Path: 0 -> 1 -> 3
-Objective: -13  Bound: -13  Gap: 0%  Time: 0.0045s  Nodes: 1
+Objective: -13  Bound: -13  Gap: 0%  Time: <seconds>s  Nodes: 1
 ```
 
 The objective is travel cost minus collected profit, so a negative one is a
@@ -107,10 +107,12 @@ costs = np.array([10.0, 8.0, 12.0, 6.0, 7.0, 5.0])
 profits = np.array([0.0, 20.0, 15.0, 10.0])
 demands = np.array([0.0, 3.0, 4.0, 2.0])
 result = cptp.solve(4, edges, costs, profits, demands, capacity=7.0)
+print(result.objective, result.tour.tolist())  # -11.0 [0, 1, 2, 0]
 
 # Two capacity rows: demands is (m, n) and capacity has m values
-demands = np.array([[0.0, 3.0, 4.0, 2.0], [0.0, 1.0, 1.0, 5.0]])
-result = cptp.solve(4, edges, costs, profits, demands, capacity=[7.0, 4.0])
+demands = np.array([[0.0, 3.0, 4.0, 2.0], [0.0, 1.0, 3.0, 0.0]])
+result = cptp.solve(4, edges, costs, profits, demands, capacity=[7.0, 3.0])
+print(result.objective, result.tour.tolist())  # -1.0 [0, 1, 3, 0]
 ```
 
 `cptp.solve` also takes `depot`, `source`, `target`, `time_limit`,
@@ -156,7 +158,7 @@ defaults and tuning knobs the help leaves out. The ones most often set:
 | `time_limit` | Wall-clock limit in seconds, preprocessing included |
 | `threads` | Threads for HiGHS and for cptp's own parallel work |
 | `random_seed` | Seed for HiGHS and the heuristics |
-| `output_flag` | Log to the console (`true` on the CLI, `false` in `python -m cptp`) |
+| `output_flag` | Log to the console (`true` on `cptp-solve` and in `Model.solve`, `false` in `python -m cptp` and `cptp.solve`) |
 | `cutoff` | A known upper bound, to prove it optimal |
 | `parallel` | HiGHS's parallel tree search; `off` for a reproducible solve with more than one thread |
 
