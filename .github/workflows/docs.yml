@@ -6,7 +6,8 @@ name: docs
 on:
   workflow_dispatch:
   push:
-    tags: ["v*"]
+    # Release tags, the ones docs/conf.py names the version from.
+    tags: ["v[0-9]*"]
 
 permissions:
   contents: read
@@ -20,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # The full history, tags included: docs/conf.py names the version from
-      # `git describe --tags`.
+      # `git describe` over those release tags.
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0

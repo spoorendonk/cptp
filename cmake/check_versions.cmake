@@ -9,26 +9,28 @@
 
 set(mismatches "")
 
-# The one line of FILE matching REGEX, whose first group is the version.
-function(check_version file regex)
+# The one line of FILE matching REGEX, whose first group is the version;
+# WHAT names that line in the report.
+function(check_version file what regex)
     file(STRINGS "${SOURCE_DIR}/${file}" lines REGEX "${regex}")
     list(LENGTH lines count)
     if(NOT count EQUAL 1)
-        set(mismatches "${mismatches}\n  ${file}: ${count} version lines, expected one"
+        set(mismatches "${mismatches}\n  ${file} (${what}): ${count} matching lines, expected one"
             PARENT_SCOPE)
         return()
     endif()
     string(REGEX MATCH "${regex}" _ "${lines}")
     if(NOT CMAKE_MATCH_1 STREQUAL VERSION)
-        set(mismatches "${mismatches}\n  ${file}: ${CMAKE_MATCH_1}" PARENT_SCOPE)
+        set(mismatches "${mismatches}\n  ${file} (${what}): ${CMAKE_MATCH_1}" PARENT_SCOPE)
     endif()
 endfunction()
 
-check_version(pyproject.toml "^version = \"([^\"]*)\"$")
-check_version(CITATION.cff "^version: \"([^\"]*)\"$")
-check_version(README.md "^ +version += {([^}]*)},?$")
-# The README's sentence naming the version DOI: "**v0.2.0 is [10.5281/...".
-check_version(README.md "\\*\\*v([0-9.]+) is \\[")
+check_version(pyproject.toml "version" "^version = \"([^\"]*)\"$")
+check_version(CITATION.cff "version" "^version: \"([^\"]*)\"$")
+check_version(README.md "BibTeX version" "^ +version += {([^}]*)},?$")
+# "**v0.2.0 is [10.5281/...", on one line: rewrapped between "is" and "[", it
+# no longer matches.
+check_version(README.md "version-DOI sentence" "\\*\\*v([0-9.]+) is \\[")
 
 if(mismatches)
     message(FATAL_ERROR "CMakeLists.txt's project(VERSION) is ${VERSION}, "

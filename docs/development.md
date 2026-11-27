@@ -69,10 +69,11 @@ prefixes, so on macOS `brew install doxygen` is enough; a binary anywhere else
 must be on PATH in the shell that pushes. `uv sync` installs the `docs` group
 beside `dev`. The `docs`
 workflow (`.github/workflows/docs.yml`) builds and deploys the site to GitHub
-Pages; it runs on a `v*` tag or by hand (`gh workflow run docs.yml`), never on
-a push to a branch or a pull request. The sidebar and `llms.txt` name the
-version the site was built from, read from `git describe --tags`: the tag for
-a tag deploy, or `main (after v0.2.0, abc1234)` for a build from main.
+Pages; it runs on a release tag (`v` and a digit, `v[0-9]*`) or by hand
+(`gh workflow run docs.yml`), never on a push to a branch or a pull request.
+The sidebar and `llms.txt` name the version the site was built from, read from
+`git describe` over the release tags: the tag for a tag deploy, or
+`main (after v0.2.0, abc1234)` for a build from main.
 
 The version itself has one source, `project(VERSION)` in `CMakeLists.txt`.
 `pyproject.toml`, `CITATION.cff` and the README's software citation and
