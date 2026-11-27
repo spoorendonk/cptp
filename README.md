@@ -18,6 +18,8 @@ with the C++ and Python API reference, is at <https://spoorendonk.dk/cptp/>.
 The accompanying preprint is
 [arXiv:2607.04497](https://arxiv.org/abs/2607.04497).
 
+<!-- docs/index.md puts the docs site's problem figure here. -->
+
 ## Model
 
 The tour variant has `source = target = depot (0)`. `y_i` says whether node `i`

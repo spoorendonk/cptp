@@ -65,6 +65,27 @@ html_theme = "furo"
 html_title = "cptp"
 html_baseurl = "https://spoorendonk.dk/cptp/"
 
+# The site's identity: an accent colour, and a logo and favicon cut from the
+# landing page's figure. figures/make_tour.py draws all three in these
+# colours; change them there too.
+ACCENT_LIGHT = "#0f766e"
+ACCENT_DARK = "#2dd4bf"
+html_theme_options = {
+    "light_css_variables": {
+        "color-brand-primary": ACCENT_LIGHT,
+        "color-brand-content": ACCENT_LIGHT,
+    },
+    "dark_css_variables": {
+        "color-brand-primary": ACCENT_DARK,
+        "color-brand-content": ACCENT_DARK,
+    },
+    "light_logo": "logo-light.svg",
+    "dark_logo": "logo-dark.svg",
+}
+# The logos are named one by one, so that _static gets no copy of the script.
+html_static_path = ["figures/logo-light.svg", "figures/logo-dark.svg"]
+html_favicon = "figures/favicon.svg"
+
 myst_enable_extensions = ["dollarmath", "amsmath"]
 myst_heading_anchors = 3
 

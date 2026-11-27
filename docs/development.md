@@ -64,10 +64,19 @@ The gate keeps it warning-free: the ctest test `docs_build` (label `docs`)
 runs the same build, into the build directory's `docs/html`, when configure finds `doxygen` and
 the venv's Python has the `docs` group, and a push changing the README or a
 page under `docs/` runs the gate. Without either, configure warns and the test
-is not registered. `uv sync` installs the `docs` group beside `dev`. The `docs`
+is not registered. Configure looks for `doxygen` on PATH only (on macOS,
+`brew install doxygen`, or the release's binary in a directory on PATH), so a
+push from a shell without it skips the test. `uv sync` installs the `docs` group beside `dev`. The `docs`
 workflow (`.github/workflows/docs.yml`) builds and deploys the site to GitHub
 Pages; it runs on a `v*` tag or by hand (`gh workflow run docs.yml`), never on
 a push to a branch or a pull request.
+
+The landing page's figure, the sidebar logo and the favicon are committed SVGs
+in `docs/figures/`, drawn by `docs/figures/make_tour.py` from an optimal solve
+of a Roberti instance through the Python API; the docs build does not run it.
+Redraw them after a change that moves that tour, with the extension built:
+`uv run python docs/figures/make_tour.py`. The accent colour is set in
+`docs/conf.py`, and the script draws in the same colours.
 
 ## Parallel tree search
 

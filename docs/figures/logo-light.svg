@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="86" viewBox="0 0 128 86" role="img">
+<title>cptp</title>
+<polyline points="12.8,50.7 31.8,69.7 65.9,58.3 69.7,73.5 96.2,69.7 115.2,46.9 96.2,20.4 69.7,12.8 69.7,31.8 54.5,43.1 50.7,50.7 31.8,43.1 12.8,50.7" fill="none" stroke="#0f766e" stroke-width="8.0" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="31.8" cy="69.7" r="5.3" fill="#0f766e"/>
+<circle cx="65.9" cy="58.3" r="5.3" fill="#0f766e"/>
+<circle cx="69.7" cy="73.5" r="5.3" fill="#0f766e"/>
+<circle cx="96.2" cy="69.7" r="5.3" fill="#0f766e"/>
+<circle cx="115.2" cy="46.9" r="5.3" fill="#0f766e"/>
+<circle cx="96.2" cy="20.4" r="5.3" fill="#0f766e"/>
+<circle cx="69.7" cy="12.8" r="5.3" fill="#0f766e"/>
+<circle cx="69.7" cy="31.8" r="5.3" fill="#0f766e"/>
+<circle cx="54.5" cy="43.1" r="5.3" fill="#0f766e"/>
+<circle cx="50.7" cy="50.7" r="5.3" fill="#0f766e"/>
+<circle cx="31.8" cy="43.1" r="5.3" fill="#0f766e"/>
+<rect x="4.8" y="42.7" width="16.0" height="16.0" fill="#111827"/>
+</svg>
