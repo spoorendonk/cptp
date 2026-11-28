@@ -265,7 +265,7 @@ gap that no other solver confirmed; counted as unsolved, it gives 8 and
 agrees. The solvers fail mostly on different instances: the branch-and-cut
 fails only on M-n151-k12_a, at every m (labeling solves it in about 1 s at
 m = 1), and both PathWyse algorithms fail on B-n57-k7-20 at every m except
-`PWBucket` at m = 2, where the branch-and-cut takes 1 to 27 s.
+`PWBucket` at m = 2, which the branch-and-cut solves in 1 to 27 s at every m.
 
 Read it as a smoke test, not a benchmark. It covers 10 base instances: six from
 SPPRCLIB (B-n45-k6-54, A-n54-k7-149, B-n57-k7-20, P-n76-k4-41, E-n101-k8-291,

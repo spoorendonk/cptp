@@ -4,6 +4,7 @@
 # slot, the runs going when it started and the 1-min load average then.
 # Bases: the issue's ten with M-n151-k12_a in place of M-n151-k12_b, whose row 1 is slack.
 # PathWyse 1.1.0 PWDefault: compare_pathwyse.py per instance, with the arguments run_pathwyse_reference.sh passes.
+# timestamp is each run's end (compare_pathwyse.py stamps its rows after solving).
 instance,set,algo,obj,time_s,status,timestamp,machine,pathwyse,note
 E-n101-k14_b,roberti,PWDefault,-0.002,1.098,Optimal,2026-11-28T09:17:27+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 0; 8 running at start; load 2.3
 E-n76-k10_a,roberti,PWDefault,-3.81,0.039,Optimal,2026-11-28T09:17:26+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 2.3

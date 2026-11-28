@@ -4,6 +4,7 @@
 # slot, the runs going when it started and the 1-min load average then.
 # Bases: the issue's ten with M-n151-k12_a in place of M-n151-k12_b, whose row 1 is slack.
 # B&C: cptp-solve --parallel off --threads 1 --capacity_cut_rows all, current main.
+# timestamp is each run's start. status "Interrupted by user" is cptp stopping HiGHS once the bounds meet.
 instance,set,obj,bound,gap_pct,time_s,time_limit,bb_nodes,status,timestamp,machine,cptp,options,note
 E-n101-k14_b,roberti,-0.002,-0.002,0,162.075,600,5441,Interrupted by user,2026-11-28T09:01:20+0100,AMD Ryzen 9 3950X 16-Core Processor 32T,v0.2.0-183-gd263f9b,--parallel off --threads 1 --capacity_cut_rows all,slot 2; 8 running at start; load 3.0
 E-n76-k10_a,roberti,-3.81,-3.81,0,44.081,600,2724,Optimal,2026-11-28T09:01:19+0100,AMD Ryzen 9 3950X 16-Core Processor 32T,v0.2.0-183-gd263f9b,--parallel off --threads 1 --capacity_cut_rows all,slot 6; 7 running at start; load 2.4
