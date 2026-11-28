@@ -10,6 +10,7 @@
 #include "parallel/parallel.h"
 #include "preprocess/edge_elimination.h"
 #include "preprocess/reachability.h"
+#include "sep/cut_cleanup.h"
 #include "sep/largest_side_cache.h"
 #include "sep/sec_separator.h"
 #include "sep/separation_context.h"
@@ -21,6 +22,8 @@
 #include <chrono>
 #include <cmath>
 #include <mutex>
+#include <span>
+#include <type_traits>
 
 namespace cptp {
 
@@ -432,6 +435,16 @@ void HiGHSBridge::install_separators() {
             .threads = budget - sep_threads + 1,
         };
 
+        // Bounds for moving a dropped near-zero coefficient to the rhs
+        // (#191): the model the MIP solver started from (for a sub-MIP, its
+        // presolved one), in the LP's columns. They hold in the whole tree,
+        // and nothing changes them during the search, so a tree worker reads
+        // them without racing updates to the global domain.
+        static_assert(std::is_same_v<HighsInt, int32_t>);
+        const std::span<const double> col_lower(mipsolver.model_->col_lower_);
+        const std::span<const double> col_upper(mipsolver.model_->col_upper_);
+        const std::span<const double> lp_point(sol.col_value);
+
         if (mipsolver.submip) {
             if (!sec_enabled_for_callbacks) {
                 return;
@@ -467,18 +480,22 @@ void HiGHSBridge::install_separators() {
                 if (!HighsUserSeparator::toSolveSpace(column_images, red_idx, red_val, rhs)) {
                     continue;
                 }
-
-                if (!red_idx.empty()) {
-                    // As on the main MIP: no propagation, since a
-                    // translated cut may carry fractional coefficients
-                    // (a doubleton equation's ratio).
-                    cutpool.addCut(mipsolver, red_idx.data(), red_val.data(),
-                                   static_cast<HighsInt>(red_idx.size()), rhs,
-                                   /*integral=*/false,
-                                   /*propagate=*/false);
-                    total_cuts_++;
-                    added++;
+                // toSolveSpace drops exact zeros only; summing a doubleton
+                // pair's terms can leave ~1e-17 instead (#191).
+                if (!sep::drop_near_zero_coefficients(red_idx, red_val, rhs, col_lower, col_upper,
+                                                      lp_point, frac_tol_)) {
+                    continue;
                 }
+
+                // As on the main MIP: no propagation, since a translated cut
+                // may carry fractional coefficients (a doubleton equation's
+                // ratio).
+                cutpool.addCut(mipsolver, red_idx.data(), red_val.data(),
+                               static_cast<HighsInt>(red_idx.size()), rhs,
+                               /*integral=*/false,
+                               /*propagate=*/false);
+                total_cuts_++;
+                added++;
             }
         } else {
             // Main MIP: run the separators on `sep_threads` threads, timing
@@ -544,23 +561,17 @@ void HiGHSBridge::install_separators() {
                 }
                 auto& cut = results[pc.sep_idx][pc.cut_idx];
                 auto& stats = round_stats[pc.sep_idx];
-                // Drop zero coefficients (a GLM's 1 - 2*q/Q is 0 for a
-                // neighbour of demand Q/2): HiGHS's clique extraction
-                // divides by each one, a zero gives a column a NaN bound,
-                // and HighsRedcostFixing::addRootRedcost then walks ~2^31
-                // lurking bounds without checking the time limit (#188).
-                // The sub-MIP path drops them in toSolveSpace.
-                std::vector<HighsInt> hi;
-                std::vector<double> hv;
-                hi.reserve(cut.indices.size());
-                hv.reserve(cut.values.size());
-                for (size_t k = 0; k < cut.indices.size(); ++k) {
-                    if (cut.values[k] != 0.0) {
-                        hi.push_back(cut.indices[k]);
-                        hv.push_back(cut.values[k]);
-                    }
-                }
-                if (hi.empty()) {
+                // Drop zero and near-zero coefficients (a GLM's 1 - 2*q/Q
+                // is 0, or ~1e-17, for a neighbour of demand Q/2): HiGHS's
+                // clique extraction divides by each one, a zero gives a
+                // column a NaN bound, and HighsRedcostFixing::addRootRedcost
+                // then walks ~2^31 lurking bounds without checking the time
+                // limit (#188); a tiny one gives a huge implied bound (#191).
+                std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
+                std::vector<double> hv(cut.values.begin(), cut.values.end());
+                double rhs = cut.rhs;
+                if (!sep::drop_near_zero_coefficients(hi, hv, rhs, col_lower, col_upper, lp_point,
+                                                      frac_tol_)) {
                     continue;
                 }
                 // Disable domain propagation for user cuts: fractional
@@ -568,7 +579,7 @@ void HiGHSBridge::install_separators() {
                 // propagation to over-tighten bounds and prune the
                 // optimal solution.
                 cutpool.addCut(mipsolver, hi.data(), hv.data(), static_cast<HighsInt>(hi.size()),
-                               cut.rhs,
+                               rhs,
                                /*integral=*/false,
                                /*propagate=*/false);
                 stats.cuts_added++;

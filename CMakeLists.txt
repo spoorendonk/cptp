@@ -26,6 +26,7 @@ add_library(cptp
     src/sep/spi_separator.cpp
     src/sep/xcover_separator.cpp
     src/sep/separation_oracle.cpp
+    src/sep/cut_cleanup.cpp
     src/preprocess/bound_propagator.cpp
     src/heuristic/primal_heuristic.cpp
     src/model/model.cpp
@@ -177,6 +178,7 @@ if(CPTP_BUILD_TESTS)
 
     # Extended unit tests (kept separate to control runtime impact).
     add_executable(cptp_tests_extra
+        tests/test_cut_cleanup.cpp
         tests/test_max_flow.cpp
         tests/test_oracle.cpp
         tests/test_separators.cpp
