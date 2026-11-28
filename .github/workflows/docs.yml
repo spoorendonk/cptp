@@ -1,13 +1,31 @@
 # Builds the Sphinx site (docs/) and deploys it to GitHub Pages, served at
-# https://spoorendonk.dk/cptp/. It runs by hand or on a release tag, never on
-# a push to a branch or a pull request: the local gate is the CI.
+# https://spoorendonk.dk/cptp/. It runs by hand, on a release tag, or on a
+# push to main that changes what the site is built from. It only builds and
+# deploys the site, never runs tests, and never runs on another branch or a
+# pull request: the local gate is the CI (shared rule 18's Pages exception).
 name: docs
 
 on:
   workflow_dispatch:
   push:
-    # Release tags, the ones docs/conf.py names the version from.
+    branches: [main]
+    # Release tags, the ones docs/conf.py names the version from. GitHub
+    # does not apply the path filter below to tag pushes.
     tags: ["v[0-9]*"]
+    # What the site is built from: the pages, the README they include,
+    # CMakeLists.txt (conf.py's fallback version), the C++ headers in
+    # conf.py's CPP_HEADERS, the Python package autoapi reads, and this file.
+    paths:
+      - "docs/**"
+      - "README.md"
+      - "CMakeLists.txt"
+      - "src/model/model.h"
+      - "src/model/resource.h"
+      - "src/core/problem.h"
+      - "src/core/solution.h"
+      - "src/core/io.h"
+      - "python/cptp/**"
+      - ".github/workflows/docs.yml"
 
 permissions:
   contents: read

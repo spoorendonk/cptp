@@ -59,7 +59,8 @@ if not os.path.isfile(DOXYGEN):
     DOXYGEN = shutil.which("doxygen") or ""
 DOXYGEN_OUT = Path(os.environ.get("CPTP_DOXYGEN_OUT") or ROOT / "build" / "docs" / "doxygen")
 
-# The user-facing C++ headers; the rest of src/ is internal.
+# The user-facing C++ headers; the rest of src/ is internal. The push paths in
+# .github/workflows/docs.yml list them too, so a change to one redeploys.
 CPP_HEADERS = [
     "src/model/model.h",
     "src/model/resource.h",
