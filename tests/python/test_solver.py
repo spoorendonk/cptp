@@ -1,6 +1,7 @@
 """Test the Python CPTP solver bindings."""
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -423,6 +424,54 @@ def test_binary_output_propagator_summary_format() -> None:
     assert "Propagator:" in result.stdout
     assert "sweep=" in result.stdout
     assert "UB improvements" not in result.stdout
+
+
+GAP_INSTANCE = (
+    Path(__file__).resolve().parents[2] / "benchmarks/instances/spprclib/B-n52-k7-15.sppcc"
+)
+# A root-only solve with one separation round stops far from optimal (a gap
+# of about 960%, in about a second).
+GAP_OPTS = [
+    ("output_flag", "false"),
+    ("time_limit", "60"),
+    ("threads", "1"),
+    ("random_seed", "0"),
+    ("mip_max_nodes", "1"),
+    ("root_sepa_rounds", "1"),
+    ("root_sepa_stall", "unlimited"),
+]
+
+
+def test_gap_is_fraction() -> None:
+    """result.gap is |objective - bound| / |objective|, a fraction (#187)."""
+    model = Model()
+    model.set_problem(load(str(GAP_INSTANCE)))
+    result = model.solve(GAP_OPTS)
+    assert result.status != Status.Optimal
+    expected = abs(result.objective - result.bound) / abs(result.objective)
+    assert expected > 0.01
+    assert result.gap == pytest.approx(expected, rel=1e-6)
+
+
+def test_binary_prints_gap_as_percent() -> None:
+    """cptp-solve's Gap: is 100 times the relative gap (#187)."""
+    if not BIN_PATH.exists():
+        pytest.skip("cptp-solve binary not built")
+
+    args = [a for key, value in GAP_OPTS for a in (f"--{key}", value)]
+    result = subprocess.run(
+        [str(BIN_PATH), str(GAP_INSTANCE), *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    match = re.search(r"Objective: (\S+)  Bound: (\S+)  Gap: (\S+)%", result.stdout)
+    assert match, result.stdout
+    obj, bound, gap_pct = (float(g) for g in match.groups())
+    expected = abs(obj - bound) / abs(obj)
+    assert expected > 0.01
+    assert gap_pct == pytest.approx(100.0 * expected, rel=1e-6)
 
 
 def test_binary_legacy_aliases_rejected() -> None:

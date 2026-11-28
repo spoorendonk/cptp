@@ -14,7 +14,8 @@
 #
 # Verdict:
 #   PASS   abs(obj - optimal) < 0.001
-#   FAIL   wrong obj, or hit time limit (gap_pct > 0)
+#   FAIL   wrong obj, or hit time limit (gap_pct > 0.01, i.e. above HiGHS's
+#          default relative gap of 0.01%)
 #   SKIP   no reference optimal available
 #
 # Output:
@@ -90,8 +91,9 @@ while IFS=, read -r inst _ _ obj _ gap_pct _; do
 
   TOTAL=$((TOTAL + 1))
 
-  # Time-limit check: gap_pct > 0 means not proven optimal
-  is_tlim="$(awk -v g="$gap_pct" 'BEGIN{print (g+0 > 0) ? 1 : 0}')"
+  # Time-limit check: gap_pct (a percent) above HiGHS's default relative gap,
+  # 1e-4, means not proven optimal
+  is_tlim="$(awk -v g="$gap_pct" 'BEGIN{print (g+0 > 0.01) ? 1 : 0}')"
   if [[ "$is_tlim" -eq 1 ]]; then
     opt="${OPTIMAL[$inst]:-}"
     printf "%-30s  %10s  %10s  FAIL (TLIM)\n" "$inst" "$obj" "${opt:--}"

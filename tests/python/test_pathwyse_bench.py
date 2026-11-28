@@ -278,6 +278,18 @@ def test_unproven_rows_are_not_compared(tmp_path: Path) -> None:
     assert "Geometric mean" not in proc.stdout
 
 
+def test_cptp_gap_within_highs_default_is_proven(tmp_path: Path) -> None:
+    """gap_pct is a percent (#187): 0.005% is within HiGHS's 0.01%, 0.02% is not."""
+    proc = aggregate(
+        tmp_path,
+        "a,s,PWDefault,-42,0.5,Optimal,t,m,c,\nb,s,PWDefault,-7,1.0,Optimal,t,m,c,\n",
+        "a,-42,0.005,2.0\nb,-7,0.02,3600\n",
+    )
+    assert proc.returncode == 0, proc.stdout
+    assert re.search(r"^a .* OK$", proc.stdout, re.M)
+    assert re.search(r"^b .* TLIM$", proc.stdout, re.M)
+
+
 def test_rows_without_an_objective_are_errors(tmp_path: Path) -> None:
     proc = aggregate(
         tmp_path,

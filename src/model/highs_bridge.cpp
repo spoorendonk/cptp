@@ -1426,9 +1426,11 @@ SolveResult HiGHSBridge::extract_result() const {
             }
         }
     }
+    // HiGHS's mip_gap is already a fraction, |primal - dual| / |primal|; only
+    // its log prints it as a percent.
     double mip_gap = 0.0;
     highs_.getInfoValue("mip_gap", mip_gap);
-    result.gap = mip_gap / 100.0;
+    result.gap = mip_gap;
 
     if (result.status == SolveResult::Status::Feasible && std::isfinite(result.objective) &&
         std::isfinite(result.bound) && result.objective <= result.bound + 1e-6) {

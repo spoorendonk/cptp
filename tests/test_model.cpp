@@ -1,3 +1,4 @@
+#include "core/io.h"
 #include "core/problem.h"
 #include "heuristic/primal_heuristic.h"
 #include "model/model.h"
@@ -1167,4 +1168,29 @@ TEST_CASE("Model: mip_max_nodes limit is surfaced as non-error status", "[model]
             "assertion");
         return;
     }
+}
+
+// A root-only solve with one separation round stops far from optimal
+// (simon-workstation: objective -20665, bound -219062, so a gap of 9.6, i.e.
+// 960%, in about a second). The gap is HiGHS's fraction, not a hundredth of it.
+TEST_CASE("Model: gap is the relative gap as a fraction (#187)", "[model][limits]") {
+    cptp::Model model;
+    model.set_problem(cptp::io::load("benchmarks/instances/spprclib/B-n52-k7-15.sppcc"));
+    const cptp::SolverOptions opts = {
+        {"output_flag", "false"},
+        {"time_limit", "60"},
+        {"threads", "1"},
+        {"random_seed", "0"},
+        {"mip_max_nodes", "1"},
+        {"root_sepa_rounds", "1"},
+        {"root_sepa_stall", "unlimited"},
+    };
+    const auto r = model.solve(opts);
+    REQUIRE(r.has_solution());
+    REQUIRE(!r.is_optimal());
+    REQUIRE(std::isfinite(r.bound));
+    const double expected = std::abs(r.objective - r.bound) / std::abs(r.objective);
+    INFO("objective " << r.objective << ", bound " << r.bound << ", gap " << r.gap);
+    CHECK(expected > 0.01);
+    CHECK_THAT(r.gap, WithinAbs(expected, 1e-6 * expected));
 }
