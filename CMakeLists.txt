@@ -155,8 +155,16 @@ if(CPTP_BUILD_TESTS)
     target_link_libraries(cptp_tests PRIVATE cptp Catch2::Catch2WithMain)
     cptp_set_compiler_flags(cptp_tests)
     catch_discover_tests(cptp_tests
-        TEST_SPEC "~[optimal]~[procs4]"
+        TEST_SPEC "~[optimal]~[procs4]~[bounded]"
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    )
+    # [bounded] tests are regressions for solves that once ran past their
+    # time limit (#188): stop them at 120 s, not ctest's default 1500 s.
+    # A [bounded] test must not also be [optimal] or [procs4].
+    catch_discover_tests(cptp_tests
+        TEST_SPEC "[bounded]"
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        PROPERTIES TIMEOUT 120
     )
     # The [optimal] and [procs4] tests solve non-trivial instances with
     # threads <= 4 (kTestThreads in tests/test_threads.h): reserve 4 so

@@ -544,13 +544,31 @@ void HiGHSBridge::install_separators() {
                 }
                 auto& cut = results[pc.sep_idx][pc.cut_idx];
                 auto& stats = round_stats[pc.sep_idx];
-                std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
+                // Drop zero coefficients (a GLM's 1 - 2*q/Q is 0 for a
+                // neighbour of demand Q/2): HiGHS's clique extraction
+                // divides by each one, a zero gives a column a NaN bound,
+                // and HighsRedcostFixing::addRootRedcost then walks ~2^31
+                // lurking bounds without checking the time limit (#188).
+                // The sub-MIP path drops them in toSolveSpace.
+                std::vector<HighsInt> hi;
+                std::vector<double> hv;
+                hi.reserve(cut.indices.size());
+                hv.reserve(cut.values.size());
+                for (size_t k = 0; k < cut.indices.size(); ++k) {
+                    if (cut.values[k] != 0.0) {
+                        hi.push_back(cut.indices[k]);
+                        hv.push_back(cut.values[k]);
+                    }
+                }
+                if (hi.empty()) {
+                    continue;
+                }
                 // Disable domain propagation for user cuts: fractional
                 // coefficients (e.g. RCI's 2*q_i/Q_r) can cause HiGHS
                 // propagation to over-tighten bounds and prune the
                 // optimal solution.
-                cutpool.addCut(mipsolver, hi.data(), cut.values.data(),
-                               static_cast<HighsInt>(hi.size()), cut.rhs,
+                cutpool.addCut(mipsolver, hi.data(), hv.data(), static_cast<HighsInt>(hi.size()),
+                               cut.rhs,
                                /*integral=*/false,
                                /*propagate=*/false);
                 stats.cuts_added++;

@@ -1989,34 +1989,45 @@ TEST_CASE("Multicap: labeling_join = load and labeling_2cycle keep the optimum (
     REQUIRE_THROWS_AS(model.solve(opts), std::invalid_argument);
 }
 
-TEST_CASE("Labeling join: s-t path solves agree across labeling_join and 2cycle (#144)",
-          "[multicap][labeling]") {
-    // Random s-t path instances (s = 0, t = 7) with a binding capacity: the
-    // load join and 2-cycle elimination must not cut off the optimum that the
-    // plain join (labeling_join = min) finds.
-    std::mt19937 rng(1440);
+namespace {
+
+// The next random s-t path instance (s = 0, t = 7, complete graph on 8 nodes)
+// with a binding capacity of 10, drawn from `rng`.
+cptp::Problem random_st_path_instance(std::mt19937& rng) {
     std::uniform_int_distribution<int> cost(1, 20);
     std::uniform_int_distribution<int> profit(0, 30);
     std::uniform_int_distribution<int> dem(1, 4);
     constexpr int32_t kNodes = 8;
+    std::vector<cptp::Edge> edges;
+    std::vector<double> costs;
+    for (int32_t u = 0; u < kNodes; ++u) {
+        for (int32_t v = u + 1; v < kNodes; ++v) {
+            edges.push_back({u, v});
+            costs.push_back(cost(rng));
+        }
+    }
+    std::vector<double> profits(kNodes);
+    std::vector<double> demands(kNodes);
+    for (int32_t v = 0; v < kNodes; ++v) {
+        profits[static_cast<size_t>(v)] = profit(rng);
+        demands[static_cast<size_t>(v)] = dem(rng);
+    }
+    cptp::Problem prob;
+    prob.build(kNodes, edges, costs, profits, std::vector<std::vector<double>>{demands},
+               std::vector<double>{10.0}, 0, kNodes - 1);
+    return prob;
+}
+
+}  // namespace
+
+TEST_CASE("Labeling join: s-t path solves agree across labeling_join and 2cycle (#144)",
+          "[multicap][labeling]") {
+    // Random s-t path instances with a binding capacity: the load join and
+    // 2-cycle elimination must not cut off the optimum that the plain join
+    // (labeling_join = min) finds.
+    std::mt19937 rng(1440);
     for (int trial = 0; trial < 20; ++trial) {
-        std::vector<cptp::Edge> edges;
-        std::vector<double> costs;
-        for (int32_t u = 0; u < kNodes; ++u) {
-            for (int32_t v = u + 1; v < kNodes; ++v) {
-                edges.push_back({u, v});
-                costs.push_back(cost(rng));
-            }
-        }
-        std::vector<double> profits(kNodes);
-        std::vector<double> demands(kNodes);
-        for (int32_t v = 0; v < kNodes; ++v) {
-            profits[static_cast<size_t>(v)] = profit(rng);
-            demands[static_cast<size_t>(v)] = dem(rng);
-        }
-        cptp::Problem prob;
-        prob.build(kNodes, edges, costs, profits, std::vector<std::vector<double>>{demands},
-                   std::vector<double>{10.0}, 0, kNodes - 1);
+        const cptp::Problem prob = random_st_path_instance(rng);
         auto solve = [&](const char* join, const char* two_cycle) {
             cptp::Model model;
             model.set_problem(prob);
@@ -2033,4 +2044,31 @@ TEST_CASE("Labeling join: s-t path solves agree across labeling_join and 2cycle 
         REQUIRE_THAT(solve("min", "true"), WithinAbs(want, 1e-6));
         REQUIRE_THAT(solve("load", "true"), WithinAbs(want, 1e-6));
     }
+}
+
+TEST_CASE("Multistar: a zero GLM coefficient leaves the solve within its time limit (#188)",
+          "[multicap][labeling][bounded]") {
+    // Trial 16 of the #144 test above: the capacity less the terminals'
+    // demand is Q = 6, so a GLM edge to a node of demand 3 has the
+    // coefficient 1 - 2*3/6 = 0. Passed to HiGHS, that zero gave
+    // an edge a NaN lower bound, and the labeling_join = load solve then never
+    // returned, its time limit unchecked. ctest stops this test at 120 s
+    // ([bounded] in CMakeLists.txt), well short of its default 1500 s.
+    std::mt19937 rng(1440);
+    for (int trial = 0; trial < 16; ++trial) {
+        random_st_path_instance(rng);
+    }
+    const cptp::Problem prob = random_st_path_instance(rng);
+    auto solve = [&](const char* join) {
+        cptp::Model model;
+        model.set_problem(prob);
+        auto opts = kQuiet;
+        opts.emplace_back("labeling_join", join);
+        opts.emplace_back("labeling_2cycle", "false");
+        const auto result = model.solve(opts);
+        REQUIRE(result.is_optimal());
+        return result.objective;
+    };
+    const double want = solve("min");
+    REQUIRE_THAT(solve("load"), WithinAbs(want, 1e-6));
 }
