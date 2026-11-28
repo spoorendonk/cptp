@@ -17,8 +17,8 @@
 #   Comparison table with columns:
 #     instance, pw_obj, pw_time, cptp_obj, cptp_time, speedup, obj_match
 #   A pair is compared only when both rows prove optimality (PathWyse status
-#   Optimal; cptp gap_pct <= 0.01, HiGHS's default relative gap as a percent):
-#   OK or FAIL. Otherwise obj_match says why not:
+#   Optimal; cptp gap_pct <= 0.01, HiGHS's default relative gap as a percent,
+#   or obj equal to bound): OK or FAIL. Otherwise obj_match says why not:
 #   TLIM (time limit), ERR (failed run), UNPR (ended unproven), ? (no row).
 #   Summary: match/mismatch counts, proven-optimal counts per solver, and the
 #   geometric mean speedup over the OK pairs only. Exits 1 on a FAIL.
@@ -123,11 +123,14 @@ def cptp_verdict(row):
     """'' if the cptp row proves optimality, else why not.
 
     Proven is an objective at a gap_pct (a percent, #187) within HiGHS's
-    default relative gap, 1e-4: the run stopped Optimal there."""
+    default relative gap, 1e-4, or one equal to its bound as recorded:
+    HiGHS also stops at its absolute gap (1e-6), which on an objective near
+    0 is a relative gap above 0.01%."""
     gap = number(row, 'gap_pct')
-    if number(row, 'obj') is None or gap is None:
+    obj = number(row, 'obj')
+    if obj is None or gap is None:
         return 'ERR'
-    return '' if gap <= 0.01 else 'TLIM'
+    return '' if gap <= 0.01 or obj == number(row, 'bound') else 'TLIM'
 
 matches = mismatches = unproven = missing = 0
 pw_solved = cptp_solved = 0

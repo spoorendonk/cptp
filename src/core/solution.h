@@ -20,7 +20,7 @@ struct SolveResult {
     Status status = Status::Error;
     double objective = 0.0;
     double bound = 0.0;
-    double gap = 1.0;  // relative gap |objective - bound| / |objective|, a fraction
+    double gap = 1.0;  // HiGHS's mip_gap, a fraction: |primal - dual| / |primal|
     double time_seconds = 0.0;
     int64_t nodes = 0;
     int64_t simplex_iterations = -1;

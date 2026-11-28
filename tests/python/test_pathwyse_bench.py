@@ -290,6 +290,23 @@ def test_cptp_gap_within_highs_default_is_proven(tmp_path: Path) -> None:
     assert re.search(r"^b .* TLIM$", proc.stdout, re.M)
 
 
+def test_cptp_obj_at_bound_is_proven_above_the_relative_gap(tmp_path: Path) -> None:
+    """HiGHS's absolute gap stops a near-zero objective above 0.01% relative."""
+    pw, cptp = tmp_path / "pw.csv", tmp_path / "cptp.csv"
+    pw.write_text(
+        HEADER + "\na,s,PWDefault,-0.002,0.5,Optimal,t,m,c,\nb,s,PWDefault,-7,1.0,Optimal,t,m,c,\n"
+    )
+    cptp.write_text(
+        "instance,obj,bound,gap_pct,time_s\na,-0.002,-0.002,0.045,2.0\nb,-7,-8,0.045,9\n"
+    )
+    proc = run(
+        ["bash", str(AGGREGATE), "--pathwyse", str(pw), "--cptp", str(cptp)], dict(os.environ)
+    )
+    assert proc.returncode == 0, proc.stdout
+    assert re.search(r"^a .* OK$", proc.stdout, re.M)
+    assert re.search(r"^b .* TLIM$", proc.stdout, re.M)
+
+
 def test_rows_without_an_objective_are_errors(tmp_path: Path) -> None:
     proc = aggregate(
         tmp_path,
