@@ -246,8 +246,9 @@ The branch-and-cut (`capacity_cut_rows=all`, one thread, `parallel off`)
 against PathWyse 1.1.0's two algorithms, two threads each: `PWDefault` with
 its shipped settings, and `PWBucket` with the release's suggested settings for
 cyclic networks ([#147](https://github.com/spoorendonk/cptp/issues/147)). Each
-cell gives the instances solved to optimality within 600 s, out of 10, and the
-shifted geometric mean time (shift 1 s; an unsolved run counts as 600 s):
+cell gives the instances solved within 600 s, out of 10 (the branch-and-cut
+stops at HiGHS's default relative gap of 0.01%), and the shifted geometric
+mean time (shift 1 s; an unsolved run counts as 600 s):
 
 | m | Branch-and-cut | PathWyse `PWDefault` | PathWyse `PWBucket` |
 |---|---|---|---|
@@ -257,8 +258,10 @@ shifted geometric mean time (shift 1 s; an unsolved run counts as 600 s):
 | 10 | 9, 33.0 s | 7, 42.4 s | 5, 63.3 s |
 
 The branch-and-cut's time hardly moves with m, while labeling slows down as
-each row adds a resource: at m = 10 the branch-and-cut is the fastest and
-solves the most. Every objective that two or more solvers proved optimal
+each row adds a resource: at m = 10 the branch-and-cut solves the most. It is
+the fastest there only by counting B-n57-k7-20, which it closed to a 0.005%
+gap that no other solver confirmed; counted as unsolved, it gives 8 and
+47.8 s against `PWDefault`'s 42.4 s. Every objective that two or more solvers proved optimal
 agrees. The solvers fail mostly on different instances: the branch-and-cut
 fails only on M-n151-k12_a, at every m (labeling solves it in about 1 s at
 m = 1), and both PathWyse algorithms fail on B-n57-k7-20 at every m except
@@ -268,8 +271,9 @@ Read it as a smoke test, not a benchmark. It covers 10 base instances: six from
 SPPRCLIB (B-n45-k6-54, A-n54-k7-149, B-n57-k7-20, P-n76-k4-41, E-n101-k8-291,
 M-n151-k12-15) and four from Roberti (E-n76-k10_a, P-n101-k4_a, E-n101-k14_b,
 M-n151-k12_a), each with its `multicap/` versions. The limit is 600 s, and up
-to eight runs were made at once on one AMD Ryzen 9 3950X, each on two physical
-cores of its own. The rows are in
+to eight runs were made at once on one AMD Ryzen 9 3950X, each with two
+physical cores of its own, of which the single-threaded branch-and-cut used
+one. The rows are in
 [`benchmarks/multicap-smoke-bc.csv`](https://github.com/spoorendonk/cptp/blob/main/benchmarks/multicap-smoke-bc.csv),
 [`multicap-smoke-PWDefault.csv`](https://github.com/spoorendonk/cptp/blob/main/benchmarks/multicap-smoke-PWDefault.csv)
 and
