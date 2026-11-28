@@ -15,7 +15,8 @@
 # Verdict:
 #   PASS   abs(obj - optimal) < 0.001
 #   FAIL   wrong obj, or hit time limit (gap_pct > 0.01, i.e. above HiGHS's
-#          default relative gap of 0.01%, with obj and bound not equal)
+#          default relative gap of 0.01%, unless the run ended before
+#          time_limit with obj equal to bound)
 #   SKIP   no reference optimal available
 #
 # Output:
@@ -79,7 +80,7 @@ printf "%-30s  %10s  %10s  %s\n" "Instance" "Obj" "Optimal" "Result"
 printf '%.0s-' {1..65}; echo
 
 # Read CSV, skip header
-while IFS=, read -r inst _ _ obj bound gap_pct _; do
+while IFS=, read -r inst _ _ obj bound gap_pct time_s time_limit _; do
   # Apply instance filter
   if [[ ${#FILTER_STEMS[@]} -gt 0 ]]; then
     match=0
@@ -92,11 +93,14 @@ while IFS=, read -r inst _ _ obj bound gap_pct _; do
   TOTAL=$((TOTAL + 1))
 
   # Time-limit check: gap_pct (a percent) above HiGHS's default relative gap,
-  # 1e-4, means not proven optimal, unless obj and bound are equal as
-  # recorded: HiGHS also stops at its absolute gap (1e-6), which on an
-  # objective near 0 is a relative gap above 0.01%
-  is_tlim="$(awk -v g="$gap_pct" -v o="$obj" -v b="$bound" \
-    'BEGIN{print (g+0 > 0.01 && !(o != "" && b != "" && o+0 == b+0)) ? 1 : 0}')"
+  # 1e-4, means not proven optimal, unless the run ended before its time
+  # limit with obj and bound equal as recorded: HiGHS also stops at its
+  # absolute gap (1e-6), which on an objective near 0 is a relative gap
+  # above 0.01%. (obj and bound are rounded to 3 decimals, so equal alone
+  # proves nothing.)
+  is_tlim="$(awk -v g="$gap_pct" -v o="$obj" -v b="$bound" -v t="$time_s" -v l="$time_limit" \
+    'BEGIN{at_bound = o != "" && b != "" && o+0 == b+0 && t != "" && l != "" && t+0 < l+0
+           print (g+0 > 0.01 && !at_bound) ? 1 : 0}')"
   if [[ "$is_tlim" -eq 1 ]]; then
     opt="${OPTIMAL[$inst]:-}"
     printf "%-30s  %10s  %10s  FAIL (TLIM)\n" "$inst" "$obj" "${opt:--}"

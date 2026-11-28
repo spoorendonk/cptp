@@ -291,13 +291,22 @@ def test_cptp_gap_within_highs_default_is_proven(tmp_path: Path) -> None:
 
 
 def test_cptp_obj_at_bound_is_proven_above_the_relative_gap(tmp_path: Path) -> None:
-    """HiGHS's absolute gap stops a near-zero objective above 0.01% relative."""
+    """HiGHS's absolute gap stops a near-zero objective above 0.01% relative.
+
+    Only before the time limit: obj and bound are rounded, so a timed-out run
+    at an unproven 15% gap (c) can record them equal too."""
     pw, cptp = tmp_path / "pw.csv", tmp_path / "cptp.csv"
     pw.write_text(
-        HEADER + "\na,s,PWDefault,-0.002,0.5,Optimal,t,m,c,\nb,s,PWDefault,-7,1.0,Optimal,t,m,c,\n"
+        HEADER
+        + "\na,s,PWDefault,-0.002,0.5,Optimal,t,m,c,"
+        + "\nb,s,PWDefault,-7,1.0,Optimal,t,m,c,"
+        + "\nc,s,PWDefault,-0.002,1.0,Optimal,t,m,c,\n"
     )
     cptp.write_text(
-        "instance,obj,bound,gap_pct,time_s\na,-0.002,-0.002,0.045,2.0\nb,-7,-8,0.045,9\n"
+        "instance,obj,bound,gap_pct,time_s,time_limit\n"
+        "a,-0.002,-0.002,0.045,2.0,300\n"
+        "b,-7,-8,0.045,9,300\n"
+        "c,-0.002,-0.002,15,300.004,300\n"
     )
     proc = run(
         ["bash", str(AGGREGATE), "--pathwyse", str(pw), "--cptp", str(cptp)], dict(os.environ)
@@ -305,6 +314,7 @@ def test_cptp_obj_at_bound_is_proven_above_the_relative_gap(tmp_path: Path) -> N
     assert proc.returncode == 0, proc.stdout
     assert re.search(r"^a .* OK$", proc.stdout, re.M)
     assert re.search(r"^b .* TLIM$", proc.stdout, re.M)
+    assert re.search(r"^c .* TLIM$", proc.stdout, re.M)
 
 
 def test_rows_without_an_objective_are_errors(tmp_path: Path) -> None:
