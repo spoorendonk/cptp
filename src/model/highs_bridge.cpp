@@ -437,9 +437,10 @@ void HiGHSBridge::install_separators() {
 
         // Bounds for moving a dropped near-zero coefficient to the rhs
         // (#191): the model the MIP solver started from (for a sub-MIP, its
-        // presolved one), in the LP's columns. They hold in the whole tree,
-        // and nothing changes them during the search, so a tree worker reads
-        // them without racing updates to the global domain.
+        // presolved one), in the LP's columns. They hold in the whole tree.
+        // Only a restart rewrites them (with the global domain's bounds),
+        // and not while tree workers run, so a worker reads them without
+        // racing updates to the global domain. Read afresh every round.
         static_assert(std::is_same_v<HighsInt, int32_t>);
         const std::span<const double> col_lower(mipsolver.model_->col_lower_);
         const std::span<const double> col_upper(mipsolver.model_->col_upper_);
@@ -481,9 +482,12 @@ void HiGHSBridge::install_separators() {
                     continue;
                 }
                 // toSolveSpace drops exact zeros only; summing a doubleton
-                // pair's terms can leave ~1e-17 instead (#191).
-                if (!sep::drop_near_zero_coefficients(red_idx, red_val, rhs, col_lower, col_upper,
-                                                      lp_point, frac_tol_)) {
+                // pair's terms can leave ~1e-17 instead (#191). The
+                // translation keeps the activity at the LP point, so the lost
+                // violation is on the separator's scale too.
+                const auto lost = sep::drop_near_zero_coefficients(red_idx, red_val, rhs, col_lower,
+                                                                   col_upper, lp_point);
+                if (!lost || cut.violation - *lost <= frac_tol_) {
                     continue;
                 }
 
@@ -570,8 +574,17 @@ void HiGHSBridge::install_separators() {
                 std::vector<HighsInt> hi(cut.indices.begin(), cut.indices.end());
                 std::vector<double> hv(cut.values.begin(), cut.values.end());
                 double rhs = cut.rhs;
-                if (!sep::drop_near_zero_coefficients(hi, hv, rhs, col_lower, col_upper, lp_point,
-                                                      frac_tol_)) {
+                // Every separator emits a cut only when cut.violation, on
+                // its own scale, exceeds frac_tol_; skip it if the drop
+                // leaves it no longer so. That scale can be a multiple of
+                // activity - rhs (RCI's inside form is its outside form
+                // halved, so its violation is twice activity - rhs), which
+                // is why the bar is not activity - rhs > frac_tol_. The lost
+                // part is in activity - rhs units, at most a factor 2 off,
+                // and ~1e-9 relative, so that never decides.
+                const auto lost =
+                    sep::drop_near_zero_coefficients(hi, hv, rhs, col_lower, col_upper, lp_point);
+                if (!lost || cut.violation - *lost <= frac_tol_) {
                     continue;
                 }
                 // Disable domain propagation for user cuts: fractional

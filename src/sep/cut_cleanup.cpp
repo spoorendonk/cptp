@@ -6,16 +6,18 @@
 
 namespace cptp::sep {
 
-bool drop_near_zero_coefficients(std::vector<int32_t>& idx, std::vector<double>& val, double& rhs,
-                                 std::span<const double> lower, std::span<const double> upper,
-                                 std::span<const double> lp_point, double min_violation) {
-    double max_abs = 0.0;
+std::optional<double> drop_near_zero_coefficients(std::vector<int32_t>& idx,
+                                                  std::vector<double>& val, double& rhs,
+                                                  std::span<const double> lower,
+                                                  std::span<const double> upper,
+                                                  std::span<const double> lp_point) {
+    double max_abs = 1.0;
     for (const double a : val) {
         max_abs = std::max(max_abs, std::abs(a));
     }
     const double threshold = kNearZeroCoefficient * max_abs;
 
-    bool relaxed = false;
+    double lost = 0.0;
     size_t kept = 0;
     for (size_t k = 0; k < idx.size(); ++k) {
         const double a = val[k];
@@ -31,24 +33,17 @@ bool drop_near_zero_coefficients(std::vector<int32_t>& idx, std::vector<double>&
         const auto col = static_cast<size_t>(idx[k]);
         const double bound = a > 0.0 ? lower[col] : upper[col];
         if (!std::isfinite(bound)) {
-            return false;
+            return std::nullopt;
         }
         rhs -= a * bound;
-        relaxed = true;
+        lost += a * (lp_point[col] - bound);
     }
     idx.resize(kept);
     val.resize(kept);
     if (kept == 0) {
-        return false;
+        return std::nullopt;
     }
-    if (!relaxed) {
-        return true;
-    }
-    double activity = 0.0;
-    for (size_t k = 0; k < kept; ++k) {
-        activity += val[k] * lp_point[static_cast<size_t>(idx[k])];
-    }
-    return activity - rhs > min_violation;
+    return lost;
 }
 
 }  // namespace cptp::sep
