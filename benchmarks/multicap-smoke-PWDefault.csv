@@ -1,0 +1,47 @@
+# cptp#147 multi-capacity smoke (2026-11-28, simon-workstation): 10 bases x m in {1,2,5,10},
+# 600 s limit (+10 s kill), up to 8 concurrent runs, each pinned to its own pair of
+# physical cores (SMT siblings idle). Smoke timings, not a benchmark: note gives each run's
+# slot, the runs going when it started and the 1-min load average then.
+# Bases: the issue's ten with M-n151-k12_a in place of M-n151-k12_b, whose row 1 is slack.
+# PathWyse 1.1.0 PWDefault: compare_pathwyse.py per instance, with the arguments run_pathwyse_reference.sh passes.
+instance,set,algo,obj,time_s,status,timestamp,machine,pathwyse,note
+E-n101-k14_b,roberti,PWDefault,-0.002,1.098,Optimal,2026-11-28T09:17:27+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 0; 8 running at start; load 2.3
+E-n76-k10_a,roberti,PWDefault,-3.81,0.039,Optimal,2026-11-28T09:17:26+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 2.3
+M-n151-k12_a,roberti,PWDefault,-5.799,1.113,Optimal,2026-11-28T09:17:32+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 6; 8 running at start; load 3.2
+P-n101-k4_a,roberti,PWDefault,-7.219,10.707,Optimal,2026-11-28T09:17:36+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 2.3
+A-n54-k7-149,spprclib,PWDefault,-12492,0.083,Optimal,2026-11-28T09:17:25+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 3 running at start; load 1.5
+B-n45-k6-54,spprclib,PWDefault,-74278,1.299,Optimal,2026-11-28T09:17:26+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 0; 1 running at start; load 1.5
+B-n57-k7-20,spprclib,PWDefault,,,TIMEOUT,2026-11-28T09:27:35+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 4; 5 running at start; load 1.5
+E-n101-k8-291,spprclib,PWDefault,-4266,0.353,Optimal,2026-11-28T09:17:25+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 2.3
+M-n151-k12-15,spprclib,PWDefault,-79996,61.007,Optimal,2026-11-28T09:18:27+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 3; 8 running at start; load 2.3
+P-n76-k4-41,spprclib,PWDefault,-88276,5.815,Optimal,2026-11-28T09:17:31+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 6; 7 running at start; load 1.5
+E-n101-k14_b-m2,multicap/roberti/m2,PWDefault,-0.002,0.975,Optimal,2026-11-28T09:21:39+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 1; 8 running at start; load 14.6
+E-n76-k10_a-m2,multicap/roberti/m2,PWDefault,-3.605,0.088,Optimal,2026-11-28T09:20:47+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 13.6
+M-n151-k12_a-m2,multicap/roberti/m2,PWDefault,-5.799,3.433,Optimal,2026-11-28T09:22:27+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 14.2
+P-n101-k4_a-m2,multicap/roberti/m2,PWDefault,-6.169,27.706,Optimal,2026-11-28T09:21:15+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 3; 8 running at start; load 13.6
+A-n54-k7-149-m2,multicap/spprclib/m2,PWDefault,-11137,0.275,Optimal,2026-11-28T09:17:41+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 1; 8 running at start; load 4.8
+B-n45-k6-54-m2,multicap/spprclib/m2,PWDefault,-66127,5.029,Optimal,2026-11-28T09:17:41+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 7; 8 running at start; load 4.1
+B-n57-k7-20-m2,multicap/spprclib/m2,PWDefault,,,TIMEOUT,2026-11-28T09:27:52+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 6; 8 running at start; load 4.8
+E-n101-k8-291-m2,multicap/spprclib/m2,PWDefault,-4266,0.807,Optimal,2026-11-28T09:18:15+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 8.5
+M-n151-k12-15-m2,multicap/spprclib/m2,PWDefault,-77781,376.066,Optimal,2026-11-28T09:24:32+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 7; 8 running at start; load 9.0
+P-n76-k4-41-m2,multicap/spprclib/m2,PWDefault,-88276,25.537,Optimal,2026-11-28T09:18:16+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 7; 8 running at start; load 6.1
+E-n101-k14_b-m5,multicap/roberti/m5,PWDefault,-0.001,0.896,Optimal,2026-11-28T09:32:05+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 7; 8 running at start; load 13.1
+E-n76-k10_a-m5,multicap/roberti/m5,PWDefault,-2.771,0.241,Optimal,2026-11-28T09:29:52+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 5; 8 running at start; load 13.0
+M-n151-k12_a-m5,multicap/roberti/m5,PWDefault,-1.453,16.778,Optimal,2026-11-28T09:33:41+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 0; 8 running at start; load 13.7
+P-n101-k4_a-m5,multicap/roberti/m5,PWDefault,-5.12,33.855,Optimal,2026-11-28T09:30:45+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 5; 8 running at start; load 12.9
+A-n54-k7-149-m5,multicap/spprclib/m5,PWDefault,-5520,0.327,Optimal,2026-11-28T09:23:36+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 13.3
+B-n45-k6-54-m5,multicap/spprclib/m5,PWDefault,-57686,36.554,Optimal,2026-11-28T09:23:12+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 14.0
+B-n57-k7-20-m5,multicap/spprclib/m5,PWDefault,,,TIMEOUT,2026-11-28T09:34:14+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 12.8
+E-n101-k8-291-m5,multicap/spprclib/m5,PWDefault,-1586,2.381,Optimal,2026-11-28T09:27:38+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 5; 8 running at start; load 14.5
+M-n151-k12-15-m5,multicap/spprclib/m5,PWDefault,-65192,354.750,Optimal,2026-11-28T09:33:47+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 6; 8 running at start; load 13.7
+P-n76-k4-41-m5,multicap/spprclib/m5,PWDefault,-84020,447.091,Optimal,2026-11-28T09:32:04+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 7; 8 running at start; load 13.0
+E-n101-k14_b-m10,multicap/roberti/m10,PWDefault,0,0.856,Optimal,2026-11-28T09:44:44+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 15.1
+E-n76-k10_a-m10,multicap/roberti/m10,PWDefault,-2.303,0.291,Optimal,2026-11-28T09:41:21+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 5; 8 running at start; load 14.7
+M-n151-k12_a-m10,multicap/roberti/m10,PWDefault,-0.918,147.502,Optimal,2026-11-28T09:47:25+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 3; 8 running at start; load 15.0
+P-n101-k4_a-m10,multicap/roberti/m10,PWDefault,-4.089,126.598,Optimal,2026-11-28T09:43:50+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 5; 8 running at start; load 14.6
+A-n54-k7-149-m10,multicap/spprclib/m10,PWDefault,-5520,0.332,Optimal,2026-11-28T09:34:32+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 14.1
+B-n45-k6-54-m10,multicap/spprclib/m10,PWDefault,-49093,240.719,Optimal,2026-11-28T09:37:47+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 6; 8 running at start; load 13.5
+B-n57-k7-20-m10,multicap/spprclib/m10,PWDefault,,,TIMEOUT,2026-11-28T09:44:43+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 2; 8 running at start; load 14.1
+E-n101-k8-291-m10,multicap/spprclib/m10,PWDefault,-819,6.542,Optimal,2026-11-28T09:38:18+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 6; 8 running at start; load 14.7
+M-n151-k12-15-m10,multicap/spprclib/m10,PWDefault,,,TIMEOUT,2026-11-28T09:48:51+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 4; 8 running at start; load 14.5
+P-n76-k4-41-m10,multicap/spprclib/m10,PWDefault,,,TIMEOUT,2026-11-28T09:45:54+01:00,AMD Ryzen 9 3950X 16-Core Processor 32T,15a7468fc13891d77bf25bbc9235a07101f271ba,slot 1; 8 running at start; load 14.1
