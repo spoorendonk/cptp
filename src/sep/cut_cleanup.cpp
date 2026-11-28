@@ -1,6 +1,5 @@
 #include "sep/cut_cleanup.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 
@@ -11,17 +10,14 @@ std::optional<double> drop_near_zero_coefficients(std::vector<int32_t>& idx,
                                                   std::span<const double> lower,
                                                   std::span<const double> upper,
                                                   std::span<const double> lp_point) {
-    double max_abs = 1.0;
-    for (const double a : val) {
-        max_abs = std::max(max_abs, std::abs(a));
-    }
-    const double threshold = kNearZeroCoefficient * max_abs;
-
     double lost = 0.0;
     size_t kept = 0;
     for (size_t k = 0; k < idx.size(); ++k) {
         const double a = val[k];
-        if (std::abs(a) > threshold) {
+        if (!std::isfinite(a)) {
+            return std::nullopt;
+        }
+        if (std::abs(a) > kNearZeroCoefficient) {
             idx[kept] = idx[k];
             val[kept] = a;
             ++kept;

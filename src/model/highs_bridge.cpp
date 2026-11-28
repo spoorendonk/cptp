@@ -581,7 +581,8 @@ void HiGHSBridge::install_separators() {
                 // halved, so its violation is twice activity - rhs), which
                 // is why the bar is not activity - rhs > frac_tol_. The lost
                 // part is in activity - rhs units, at most a factor 2 off,
-                // and ~1e-9 relative, so that never decides.
+                // and at most 1e-9 times a column's bound range per dropped
+                // term, so that never decides.
                 const auto lost =
                     sep::drop_near_zero_coefficients(hi, hv, rhs, col_lower, col_upper, lp_point);
                 if (!lost || cut.violation - *lost <= frac_tol_) {

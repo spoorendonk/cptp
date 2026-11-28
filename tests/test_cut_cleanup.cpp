@@ -104,11 +104,32 @@ TEST_CASE("Cut cleanup: a cut left empty is skipped", "[cut_cleanup]") {
 }
 
 TEST_CASE("Cut cleanup: a cut whose coefficients are all noise is skipped", "[cut_cleanup]") {
-    // Relative to max|a| alone nothing would drop; the floor of 1 drops all.
+    // Relative to max|a| nothing would drop; the threshold is absolute.
     std::vector<int32_t> idx{0, 1};
     std::vector<double> val{1e-16, -1e-16};
     double rhs = 0.0;
     const std::vector<double> x{1.0, 0.0, 0.0};
+    CHECK_FALSE(drop_near_zero_coefficients(idx, val, rhs, kLower, kUpper, x));
+}
+
+TEST_CASE("Cut cleanup: a +-1 term stays beside a huge coefficient", "[cut_cleanup]") {
+    // RCI's 2*q_i/Q_r is ~1e10 for Q_r = 2e-10 * q_i; a threshold relative to
+    // max|a| would drop the -1 edge terms and lose violation of order 1.
+    std::vector<int32_t> idx{0, 1};
+    std::vector<double> val{-1.0, 1e10};
+    double rhs = 0.0;
+    const std::vector<double> x{0.5, 0.5};
+    const auto lost = drop_near_zero_coefficients(idx, val, rhs, kLower, kUpper, x);
+    CHECK(lost == 0.0);
+    CHECK(idx == std::vector<int32_t>{0, 1});
+    CHECK(rhs == 0.0);
+}
+
+TEST_CASE("Cut cleanup: a NaN coefficient skips the cut", "[cut_cleanup]") {
+    std::vector<int32_t> idx{0, 1};
+    std::vector<double> val{1.0, std::numeric_limits<double>::quiet_NaN()};
+    double rhs = 1.0;
+    const std::vector<double> x{1.0, 1.0, 0.0};
     CHECK_FALSE(drop_near_zero_coefficients(idx, val, rhs, kLower, kUpper, x));
 }
 
